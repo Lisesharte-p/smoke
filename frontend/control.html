@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设备控制 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="control">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <!-- 提示横幅 -->
+        <div class="alert-banner success">💡 支持远程开启 / 关闭灌溉设备，指令通过 MQTT 下发到硬件执行。</div>
+
+        <!-- 灌溉设备 -->
+        <div class="section-title">灌溉设备</div>
+        <div class="plot-grid" id="deviceGrid"></div>
+
+        <!-- 预留跳转到同伴页面 -->
+        <div class="flex gap-8 mt-16">
+          <a class="btn btn-outline btn-sm" href="monitoring.html">📡 查看实时数据</a>
+          <a class="btn btn-outline btn-sm" href="alarm.html">🔔 查看告警记录</a>
+        </div>
+
+        <!-- 控制日志 -->
+        <div class="card mt-20">
+          <div class="card-header">
+            <div>
+              <div class="card-title">控制日志</div>
+              <div class="card-sub">最近的操作记录</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>设备</th>
+                  <th>所属地块</th>
+                  <th>操作</th>
+                  <th>结果</th>
+                  <th>操作人</th>
+                </tr>
+              </thead>
+              <tbody id="logBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script>
+    Layout.init();
+
+    var devices = [];   // 灌溉设备列表
+    var logs = [];      // 控制日志
+
+    /* ---------- 渲染灌溉设备卡片 ---------- */
+    function renderDevices() {
+      var grid = document.getElementById('deviceGrid');
+      grid.innerHTML = '';
+
+      devices.forEach(function (dev) {
+        var card = document.createElement('div');
+        card.className = 'plot-card';
+        card.innerHTML =
+          '<div class="head">' +
+            '<div>' +
+              '<div class="name">' + dev.name + '</div>' +
+              '<div class="crop">所属地块：' + dev.plotName + '</div>' +
+            '</div>' +
+            (dev.online
+              ? '<span class="badge badge-online"><span class="dot"></span>在线</span>'
+              : '<span class="badge badge-offline"><span class="dot"></span>离线</span>') +
+          '</div>' +
+          '<div class="flex-between items-center">' +
+            '<div>' +
+              '<div class="text-muted" style="font-size:12px">当前状态</div>' +
+              '<div style="font-weight:600;color:' + (dev.running ? 'var(--primary)' : 'var(--text-secondary)') + '">' +
+                (dev.running ? '🌊 灌溉中' : '⏸ 已停止') + '</div>' +
+            '</div>' +
+            '<label class="switch">' +
+              '<input type="checkbox" data-id="' + dev.id + '" ' + (dev.running ? 'checked' : '') + (dev.online ? '' : ' disabled') + '>' +
+              '<span class="slider"></span>' +
+            '</label>' +
+          '</div>' +
+          '<div class="mt-12"><a class="btn btn-outline btn-sm" href="monitoring.html">📡 查看实时数据</a></div>';
+        grid.appendChild(card);
+      });
+
+      // 绑定开关事件
+      grid.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
+        input.addEventListener('change', function () {
+          var id = input.getAttribute('data-id');
+          var action = input.checked ? 'on' : 'off';
+          handleControl(id, action, input);
+        });
+      });
+    }
+
+    /* ---------- 渲染控制日志 ---------- */
+    function renderLogs() {
+      var body = document.getElementById('logBody');
+      body.innerHTML = '';
+      logs.forEach(function (log) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + log.time + '</td>' +
+          '<td>' + log.deviceName + '</td>' +
+          '<td>' + log.plotName + '</td>' +
+          '<td>' + (log.action === '开启' ? '<span class="badge badge-normal">开启</span>' : '<span class="badge badge-warning">关闭</span>') + '</td>' +
+          '<td>' + (log.result === '成功' ? '<span class="text-success">成功</span>' : '<span class="text-danger">失败</span>') + '</td>' +
+          '<td>' + log.operator + '</td>';
+        body.appendChild(tr);
+      });
+    }
+
+    /* ---------- 处理开关控制 ---------- */
+    function handleControl(id, action, input) {
+      input.disabled = true; // 下发中，防重复点击
+      var dev = devices.filter(function (d) { return d.id === id; })[0];
+
+      API.controlIrrigation(id, action).then(function (res) {
+        var success = res.code === 0;
+        if (dev) dev.running = (action === 'on');
+
+        // 插入一条控制日志
+        var user = Layout.getUser();
+        logs.unshift({
+          time: MOCK.nowDate(),
+          deviceName: dev ? dev.name : id,
+          plotName: dev ? dev.plotName : '-',
+          action: action === 'on' ? '开启' : '关闭',
+          result: success ? '成功' : '失败',
+          operator: user.roleName + '·' + user.name
+        });
+
+        renderLogs();
+        renderDevices(); // 刷新卡片状态
+        Toast.success('灌溉设备「' + (dev ? dev.name : id) + '」已' + (action === 'on' ? '开启' : '关闭'));
+      }).finally(function () {
+        input.disabled = false;
+      });
+    }
+
+    /* ---------- 初始化 ---------- */
+    API.getDevices().then(function (res) {
+      devices = res.data.filter(function (d) { return d.controllable; });
+      renderDevices();
+    });
+
+    // 日志初始用 mock 里的控制日志
+    logs = MOCK.controlLogs.slice();
+    renderLogs();
+  </script>
+</body>
+</html>
