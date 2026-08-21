@@ -57,7 +57,7 @@ window.Layout = (function () {
 
   /* ---------- 角色权限配置：每个角色可访问的导航项 key ---------- */
   var ROLE_NAV = {
-    farmer:   ['dashboard', 'monitoring', 'history', 'control', 'assistant'],
+    farmer:   ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant'],
     admin:    ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices'],
     sysadmin: ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices']
   };
