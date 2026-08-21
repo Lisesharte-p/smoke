@@ -80,7 +80,7 @@ window.Layout = (function () {
   }
 
   function setUser(u) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); } catch (e) { /* 存储不可用时静默降级 */ }
   }
 
   /* 是否已登录（localStorage 里存在用户信息） */
