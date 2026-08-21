@@ -1,3 +1,9 @@
+### Java ###
+*.class
+
+### 本地 JDK（免安装，不进版本库）###
+.jdk/
+
 ### IntelliJ IDEA ###
 out/
 !**/src/main/**/out/
