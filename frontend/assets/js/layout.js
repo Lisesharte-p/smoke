@@ -55,14 +55,27 @@ window.Layout = (function () {
     devices:    '设备管理'
   };
 
+  /* ---------- 角色权限配置：每个角色可访问的导航项 key ---------- */
+  var ROLE_NAV = {
+    farmer:   ['dashboard', 'monitoring', 'history', 'control', 'assistant'],
+    admin:    ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices'],
+    sysadmin: ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices']
+  };
+
+  /* 文件名 → 页面 key，用于隐藏当前角色无权限访问的页内跳转链接 */
+  var KEY_BY_HREF = {};
+  NAV.forEach(function (g) {
+    g.items.forEach(function (it) { KEY_BY_HREF[it.href] = it.key; });
+  });
+
   /* ---------- 用户信息（登录页写入，其余页面读取） ---------- */
   var STORAGE_KEY = 'agri_user';
 
   function getUser() {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { name: '张老三', roleName: '农户' };
+      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { name: '张老三', roleName: '农户', role: 'farmer' };
     } catch (e) {
-      return { name: '张老三', roleName: '农户' };
+      return { name: '张老三', roleName: '农户', role: 'farmer' };
     }
   }
 
@@ -70,14 +83,37 @@ window.Layout = (function () {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
   }
 
+  /* 是否已登录（localStorage 里存在用户信息） */
+  function isLoggedIn() {
+    try { return !!localStorage.getItem(STORAGE_KEY); } catch (e) { return false; }
+  }
+
+  /* 当前角色：farmer 农户 / admin 农场管理员 / sysadmin 系统管理员 */
+  function getRole() {
+    return getUser().role || 'farmer';
+  }
+
+  /* 当前角色是否有权访问某个页面（key 对应 NAV 里的 item.key） */
+  function canAccess(key) {
+    var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
+    return allowed.indexOf(key) !== -1;
+  }
+
   /* ---------- 渲染侧边栏 ---------- */
   function renderSidebar(activeKey) {
+    var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
     var html = '<div class="sidebar-brand"><span class="logo">🌾</span>智慧农业平台</div>';
     html += '<nav class="sidebar-nav">';
 
     NAV.forEach(function (group) {
+      // 按当前角色过滤导航项，整组被过滤掉时不渲染该分组标题
+      var items = group.items.filter(function (item) {
+        return allowed.indexOf(item.key) !== -1;
+      });
+      if (!items.length) return;
+
       html += '<div class="nav-group-label">' + group.group + '</div>';
-      group.items.forEach(function (item) {
+      items.forEach(function (item) {
         var active = item.key === activeKey ? ' active' : '';
         html += '<a class="nav-item' + active + '" href="' + item.href + '">' +
                 '<span class="icon">' + item.icon + '</span>' + item.label + '</a>';
@@ -118,11 +154,46 @@ window.Layout = (function () {
     setInterval(tick, 1000);
   }
 
+  /* ---------- 处理当前角色无权限访问的页内跳转链接 ----------
+     · 操作按钮（.btn）：直接隐藏，避免农户看到无法使用的按钮
+     · 数据卡片等（如 KPI 卡片）：保留内容但禁用跳转，农户仍可查看统计数据 */
+  function hideRestrictedLinks() {
+    var links = document.querySelectorAll('a[href]');
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var key = KEY_BY_HREF[a.getAttribute('href')];
+      if (!key || canAccess(key)) continue;
+
+      if (/(^|\s)btn(\s|$)/.test(a.className)) {
+        a.style.display = 'none';
+      } else {
+        a.removeAttribute('href');
+        a.removeAttribute('title');
+        a.style.pointerEvents = 'none';
+        a.style.cursor = 'default';
+      }
+    }
+  }
+
   /* ---------- 入口：页面加载时调用 Layout.init() ---------- */
   function init() {
     var pageKey = document.body.getAttribute('data-page') || '';
+
+    // 1) 未登录 → 回登录页
+    if (!isLoggedIn()) {
+      location.replace('login.html');
+      return;
+    }
+
+    // 2) 无权限访问当前页 → 回数据总览（所有角色均可访问）
+    if (pageKey && !canAccess(pageKey)) {
+      location.replace('index.html');
+      return;
+    }
+
     renderSidebar(pageKey);
     renderTopbar(pageKey);
+    hideRestrictedLinks();
     startClock();
   }
 
@@ -131,7 +202,10 @@ window.Layout = (function () {
     TITLES: TITLES,
     init: init,
     getUser: getUser,
-    setUser: setUser
+    setUser: setUser,
+    getRole: getRole,
+    canAccess: canAccess,
+    isLoggedIn: isLoggedIn
   };
 })();
 
