@@ -104,6 +104,16 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 注册申请审核（管理员） ---------- */
+            if ("GET".equals(method) && path.equals("/api/register-requests")) {
+                ok(ex, registerRequestsJson());
+                return true;
+            }
+            if ("PUT".equals(method) && path.matches("/api/register-requests/[^/]+")) {
+                ok(ex, reviewRegisterJson(path.substring("/api/register-requests/".length()), ex));
+                return true;
+            }
+
             /* ---------- 控制日志 ---------- */
             if ("GET".equals(method) && path.equals("/api/control-logs")) {
                 ok(ex, controlLogsJson());
@@ -827,6 +837,119 @@ public class Api {
                 return rs.next();
             }
         }
+    }
+
+    /* ==================================================================
+       注册申请审核（管理员）
+       ================================================================== */
+
+    /** GET /api/register-requests —— 注册申请列表（待审核的排前面） */
+    private static String registerRequestsJson() throws SQLException {
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        String sql = "SELECT id, username, role, status, reject_reason, created_at, reviewed_at, reviewer"
+                + " FROM register_request ORDER BY (status = '待审核') DESC, created_at DESC";
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            boolean first = true;
+            while (rs.next()) {
+                if (!first) sb.append(',');
+                first = false;
+                Timestamp ts = rs.getTimestamp("created_at");
+                Timestamp rt = rs.getTimestamp("reviewed_at");
+                sb.append('{')
+                  .append("\"id\":").append(rs.getLong("id")).append(',')
+                  .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
+                  .append("\"role\":").append(Json.str(rs.getString("role"))).append(',')
+                  .append("\"roleName\":").append(Json.str(roleName(rs.getString("role")))).append(',')
+                  .append("\"status\":").append(Json.str(rs.getString("status"))).append(',')
+                  .append("\"rejectReason\":").append(Json.str(rs.getString("reject_reason"))).append(',')
+                  .append("\"createdAt\":").append(Json.str(ts == null ? "" : fmt.format(ts))).append(',')
+                  .append("\"reviewedAt\":").append(Json.str(rt == null ? "" : fmt.format(rt))).append(',')
+                  .append("\"reviewer\":").append(Json.str(rs.getString("reviewer")))
+                  .append('}');
+            }
+        }
+        return sb.append("]}").toString();
+    }
+
+    /**
+     * PUT /api/register-requests/{id} —— 审核注册申请。
+     * body: {status:'已通过'|'已拒绝', name?(通过时显示名,默认账号名), rejectReason?(拒绝原因)}。
+     * 通过：写入 user 表（沿用申请时存的密码哈希，登录无需改密）。
+     */
+    private static String reviewRegisterJson(String id, HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String status = body.get("status");
+        if (status == null || (!"已通过".equals(status) && !"已拒绝".equals(status))) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：status 需为 已通过 或 已拒绝") + "}";
+        }
+        long reqId;
+        try { reqId = Long.parseLong(id); } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+        }
+        String reviewer = body.get("reviewer");
+        if (reviewer == null || reviewer.isEmpty()) reviewer = "管理员";
+
+        // 取申请记录
+        String username = null, password = null, role = null;
+        String sel = "SELECT username, password, role FROM register_request WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sel)) {
+            ps.setLong(1, reqId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "{\"code\":1,\"msg\":" + Json.str("申请不存在: " + id) + "}";
+                username = rs.getString("username");
+                password = rs.getString("password");
+                role = rs.getString("role");
+            }
+        }
+        if (username == null || password == null || role == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("申请数据不完整，无法审核") + "}";
+        }
+
+        if ("已通过".equals(status)) {
+            if (exists("SELECT 1 FROM user WHERE username = ?", username)) {
+                return "{\"code\":1,\"msg\":" + Json.str("账号已存在：" + username + "（可能已审核过）") + "}";
+            }
+            String name = body.get("name");
+            if (name == null || name.isEmpty()) name = username;
+            long userId = 0L;
+            String insUser = "INSERT INTO user(username, password, name, role) VALUES (?, ?, ?, ?)";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(insUser, PreparedStatement.RETURN_GENERATED_KEYS)) {
+                ps.setString(1, username);
+                ps.setString(2, password);
+                ps.setString(3, name);
+                ps.setString(4, role);
+                ps.executeUpdate();
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) userId = keys.getLong(1);
+                }
+            }
+            String upd = "UPDATE register_request SET status = '已通过', reviewed_at = NOW(), reviewer = ?, user_id = ? WHERE id = ?";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(upd)) {
+                ps.setString(1, reviewer);
+                ps.setLong(2, userId);
+                ps.setLong(3, reqId);
+                ps.executeUpdate();
+            }
+            return "{\"code\":0,\"msg\":" + Json.str("已通过，「" + username + "」可登录使用") + "}";
+        }
+
+        // 已拒绝
+        String reason = body.get("rejectReason");
+        String upd2 = "UPDATE register_request SET status = '已拒绝', reject_reason = ?, reviewed_at = NOW(), reviewer = ? WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(upd2)) {
+            ps.setString(1, reason);
+            ps.setString(2, reviewer);
+            ps.setLong(3, reqId);
+            ps.executeUpdate();
+        }
+        return "{\"code\":0,\"msg\":" + Json.str("已拒绝「" + username + "」的申请") + "}";
     }
 
     /* ==================================================================

@@ -39,7 +39,8 @@ window.Layout = (function () {
       group: '智能与系统',
       items: [
         { key: 'assistant',  label: '智能问答', icon: '💬', href: 'assistant.html' },
-        { key: 'devices',    label: '设备管理', icon: '🗂️', href: 'devices.html' }
+        { key: 'devices',    label: '设备管理', icon: '🗂️', href: 'devices.html' },
+        { key: 'review',     label: '注册审核', icon: '📝', href: 'review.html' }
       ]
     }
   ];
@@ -52,14 +53,15 @@ window.Layout = (function () {
     control:    '设备控制',
     alarm:      '告警管理',
     assistant:  '智能问答',
-    devices:    '设备管理'
+    devices:    '设备管理',
+    review:     '注册审核'
   };
 
   /* ---------- 角色权限配置：每个角色可访问的导航项 key ---------- */
   var ROLE_NAV = {
     farmer:   ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant'],
-    admin:    ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices'],
-    sysadmin: ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices']
+    admin:    ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices', 'review'],
+    sysadmin: ['dashboard', 'monitoring', 'history', 'control', 'alarm', 'assistant', 'devices', 'review']
   };
 
   /* 文件名 → 页面 key，用于隐藏当前角色无权限访问的页内跳转链接 */

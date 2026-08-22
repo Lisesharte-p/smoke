@@ -25,6 +25,7 @@ window.API = (function () {
       alarms:     '/api/alarms',
       controlLogs:'/api/control-logs',
       boardRefresh:'/api/board/refresh',
+      registerRequests: '/api/register-requests',
       chat:       '/api/assistant/chat'
     }
   };
@@ -199,6 +200,24 @@ window.API = (function () {
   }
 
   /* ==================================================================
+     注册申请审核（管理员）
+     ================================================================== */
+  function getRegisterRequests() {
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.registerRequests || [] });
+    return request(config.endpoints.registerRequests);
+  }
+
+  /* 审核：status='已通过'|'已拒绝'；通过可带 name（显示名），拒绝可带 rejectReason */
+  function reviewRegisterRequest(id, status, extra) {
+    extra = extra || {};
+    if (config.useMock) return mockDelay({ code: 0 }, 300);
+    var data = { status: status };
+    if (extra.name) data.name = extra.name;
+    if (extra.rejectReason) data.rejectReason = extra.rejectReason;
+    return request(config.endpoints.registerRequests + '/' + id, { method: 'PUT', data: data });
+  }
+
+  /* ==================================================================
      控制日志
      ================================================================== */
   function getControlLogs() {
@@ -232,6 +251,8 @@ window.API = (function () {
     saveThresholds: saveThresholds,
     getAlarms: getAlarms,
     updateAlarmStatus: updateAlarmStatus,
+    getRegisterRequests: getRegisterRequests,
+    reviewRegisterRequest: reviewRegisterRequest,
     getControlLogs: getControlLogs,
     refreshBoard: refreshBoard,
     getChatReply: getChatReply
