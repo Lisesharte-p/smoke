@@ -28,3 +28,12 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Hi3861 开发环境（不纳入版本控制）###
+/hi3861_sdk/
+/venv310/
+/gcc_riscv32/
+/*.zip
+.idea/
+burn_tool/
+devtools/

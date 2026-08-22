@@ -1,0 +1,30 @@
+# Copyright (c) 2020 Nanjing Xiaoxiongpai Intelligent Technology Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+static_library("sensor_server") {
+    sources = [
+        "sensor_server_demo.c",
+        "wifi/wifi_connect.c",
+        # 复用 C2 demo 的 E53_IA1 传感器驱动(SHT30 + BH1750)
+        "//applications/sample/wifi-iot/app/C2_e53_ia1_temp_humi_pls/src/E53_IA1.c",
+    ]
+    cflags = [ "-Wno-unused-variable" ]
+    include_dirs = [
+        "//foundation/communication/wifi_lite/interfaces/wifiservice",
+        "wifi",
+        "//applications/sample/wifi-iot/app/C2_e53_ia1_temp_humi_pls/include",
+        "//base/iot_hardware/peripheral/interfaces/kits",
+        "//vendor/bearpi/bearpi_hm_nano/common/iot_hardware_hals/include",
+    ]
+    deps = [ "//vendor/bearpi/bearpi_hm_nano/common/iot_hardware_hals:bearpi_iot_hardware_hals" ]
+}
