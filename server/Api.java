@@ -97,6 +97,12 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 智能问答 ---------- */
+            if ("POST".equals(method) && path.equals("/api/assistant/chat")) {
+                ok(ex, chatJson(ex));
+                return true;
+            }
+
             /* ---------- 未匹配：404 ---------- */
             send(ex, 404, "{\"code\":1,\"msg\":" + Json.str("接口不存在: " + method + " " + path) + "}");
         } catch (SQLException e) {
@@ -442,12 +448,8 @@ public class Api {
        阈值 / 告警
        ================================================================== */
 
-    /**
-     * GET /api/thresholds —— 阈值配置。
-     * 前端只有一个全局编辑器，DB 是每地块一行（plot_threshold）；
-     * 这里取第一个地块的阈值，全部没配置时用默认值 40 / 35。
-     */
-    private static String thresholdsJson() throws SQLException {
+    /** 当前阈值：取第一个地块的配置（每地块一行），全部没配置时用默认 40 / 35 */
+    private static BigDecimal[] currentThresholds() throws SQLException {
         BigDecimal humidityMin = new BigDecimal(40);
         BigDecimal tempMax = new BigDecimal(35);
         String sql = "SELECT humidity_min, temp_max FROM plot_threshold ORDER BY plot_id LIMIT 1";
@@ -459,9 +461,19 @@ public class Api {
                 tempMax = rs.getBigDecimal("temp_max");
             }
         }
+        return new BigDecimal[]{humidityMin, tempMax};
+    }
+
+    /**
+     * GET /api/thresholds —— 阈值配置。
+     * 前端只有一个全局编辑器，DB 是每地块一行（plot_threshold）；
+     * 这里返回当前阈值（首个地块），未配置时用默认值 40 / 35。
+     */
+    private static String thresholdsJson() throws SQLException {
+        BigDecimal[] t = currentThresholds();
         return "{\"code\":0,\"data\":{"
-                + "\"humidityMin\":" + Json.num(humidityMin.stripTrailingZeros().toPlainString())
-                + ",\"tempMax\":" + Json.num(tempMax.stripTrailingZeros().toPlainString())
+                + "\"humidityMin\":" + Json.num(t[0].stripTrailingZeros().toPlainString())
+                + ",\"tempMax\":" + Json.num(t[1].stripTrailingZeros().toPlainString())
                 + "}}";
     }
 
@@ -637,6 +649,69 @@ public class Api {
         if ("admin".equals(role)) return "农场管理员";
         if ("sysadmin".equals(role)) return "系统管理员";
         return role;
+    }
+
+    /* ==================================================================
+       智能问答
+       ================================================================== */
+
+    /**
+     * POST /api/assistant/chat —— 智能问答。
+     * body: {question}。关键词规则匹配（和前端 mock 同一套问答逻辑），
+     * 文案里的阈值实时读库，让回答跟着当前配置走。
+     * 返回：{answer, action:{text,href}|null}。
+     */
+    private static String chatJson(HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String question = body.get("question");
+        if (question == null) question = "";
+        String q = question.replaceAll("[？?。.，,、\\s]", ""); // 去标点空格便于关键词命中
+
+        BigDecimal[] t = currentThresholds();
+        String h = t[0].stripTrailingZeros().toPlainString();
+        String tm = t[1].stripTrailingZeros().toPlainString();
+
+        // 规则表：关键词 → 回答文案 / 推荐操作
+        String[][] rules = {
+                {"浇水,灌溉,什么时候浇,该不该浇",
+                 "根据当前土壤湿度数据，建议在清晨 6:00–8:00 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 " + h + "%（当前阈值），请及时补水。",
+                 "去控制灌溉", "control.html"},
+                {"太干,干旱,缺水,湿度低",
+                 "当前部分地块土壤湿度偏低，存在缺水风险。建议开启灌溉设备补水 20–30 分钟，并关注告警记录，避免作物因缺水萎蔫。",
+                 "查看告警", "alarm.html"},
+                {"阈值,告警条件,设置",
+                 "您可以在「告警管理」页设置土壤湿度下限和温度上限。当实测值越过阈值时，系统会自动触发告警并通知您。",
+                 "去设置阈值", "alarm.html"},
+                {"温度,太热,高温",
+                 "若大棚温度超过 " + tm + "℃（当前阈值），建议及时通风或开启遮阳。温度过高会影响作物生长，请留意实时温度曲线。",
+                 "查看实时数据", "monitoring.html"}
+        };
+
+        String answer = "我是智慧农业助手，可以为您提供灌溉建议和农事指导。您可以试试问我：「现在该浇水吗？」「土壤太干怎么办？」「如何设置告警阈值？」";
+        String actionText = null;
+        String actionHref = null;
+        outer:
+        for (String[] rule : rules) {
+            for (String kw : rule[0].split(",")) {
+                if (q.indexOf(kw) != -1) {
+                    answer = rule[1];
+                    actionText = rule[2];
+                    actionHref = rule[3];
+                    break outer;
+                }
+            }
+        }
+
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":{\"answer\":")
+                .append(Json.str(answer));
+        if (actionText != null) {
+            sb.append(",\"action\":{\"text\":").append(Json.str(actionText))
+              .append(",\"href\":").append(Json.str(actionHref)).append('}');
+        } else {
+            sb.append(",\"action\":null");
+        }
+        sb.append("}}");
+        return sb.toString();
     }
 
     /* ==================================================================
