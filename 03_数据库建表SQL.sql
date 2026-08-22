@@ -3,7 +3,7 @@
 -- 版本：v1.0
 -- 配套：02_数据类型与ER设计.md（概念层）、04_数据库设计说明文档.md（说明）
 -- 说明：
---   1) 本脚本建库 + 建 7 张表 + 种子数据。
+--   1) 本脚本建库 + 建 8 张表 + 种子数据。
 --   2) 库名：当前写 `farm`。若与 DBUtil.java 的 DB 常量（现在是 suiyuanhao）
 --      不一致，请二选一统一（改这里，或改 server/DBUtil.java 的 DB）。
 --   3) 不加物理外键，只建索引 + 应用层保证一致性（原因见说明文档）。
@@ -109,27 +109,45 @@ CREATE TABLE IF NOT EXISTS `control_log` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '灌溉控制日志表';
 
 -- =============================================================
--- 8. 种子数据（静态参考数据；sensor_data / alarm / control_log 运行时生成，不预置）
+-- 8. 注册申请审核表
+-- =============================================================
+CREATE TABLE IF NOT EXISTS `register_request` (
+    `id`            BIGINT       AUTO_INCREMENT PRIMARY KEY,
+    `username`      VARCHAR(50)  NOT NULL COMMENT '申请注册的账号',
+    `password`      VARCHAR(100) NOT NULL COMMENT '密码哈希（BCrypt），审核通过后写入 user 表',
+    `role`          VARCHAR(20)  NOT NULL COMMENT '申请角色（用户自选）：farmer农户 / admin农场管理员 / sysadmin系统管理员',
+    `status`        VARCHAR(10)  NOT NULL DEFAULT '待审核' COMMENT '状态：待审核 / 已通过 / 已拒绝',
+    `reject_reason` VARCHAR(200) DEFAULT NULL COMMENT '拒绝原因',
+    `created_at`    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '申请时间',
+    `reviewed_at`   DATETIME     DEFAULT NULL COMMENT '审核时间',
+    `reviewer`      VARCHAR(50)  DEFAULT NULL COMMENT '审核人（用户名/姓名）',
+    `user_id`       BIGINT       DEFAULT NULL COMMENT '审核通过后关联生成的 user.id',
+    KEY `idx_status` (`status`),
+    KEY `idx_username` (`username`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '注册申请审核表';
+
+-- =============================================================
+-- 9. 种子数据（静态参考数据；sensor_data / alarm / control_log 运行时生成，register_request 预置一条演示）
 -- =============================================================
 
--- 8.1 阈值：每个地块一行（P001 湿度下限 40% / 温度上限 35℃；P002 湿度下限 45% / 温度上限 32℃）
+-- 9.1 阈值：每个地块一行（P001 湿度下限 40% / 温度上限 35℃；P002 湿度下限 45% / 温度上限 32℃）
 INSERT INTO `plot_threshold` (`plot_id`, `humidity_min`, `temp_max`) VALUES
 ('P001', 40, 35),
 ('P002', 45, 32)
 ON DUPLICATE KEY UPDATE `humidity_min` = VALUES(`humidity_min`), `temp_max` = VALUES(`temp_max`);
 
--- 8.2 用户：三种角色各一个（密码均为占位哈希，正式用 BCrypt 生成后替换）
+-- 9.2 用户：三种角色各一个（密码均为占位哈希，正式用 BCrypt 生成后替换）
 INSERT INTO `user` (`username`, `password`, `name`, `role`) VALUES
 ('farmer01',  '$2a$10$placeholder', '张老三', 'farmer'),
 ('admin01',   '$2a$10$placeholder', '李场长', 'admin'),
 ('sysadmin01','$2a$10$placeholder', '王运维', 'sysadmin');
 
--- 8.3 地块
+-- 9.3 地块
 INSERT INTO `plot` (`id`, `name`, `crop`, `area`) VALUES
 ('P001', '一号大棚', '番茄', 2.50),
 ('P002', '二号大棚', '黄瓜', 3.00);
 
--- 8.4 设备（P001 一套：湿度+温度+灌溉；P002 一套：湿度+温度）
+-- 9.4 设备（P001 一套：湿度+温度+灌溉；P002 一套：湿度+温度）
 INSERT INTO `device` (`id`, `plot_id`, `name`, `type`) VALUES
 ('D001', 'P001', '土壤湿度传感器-01', '土壤湿度传感器'),
 ('D002', 'P001', '温度传感器-01',     '温度传感器'),
@@ -137,8 +155,12 @@ INSERT INTO `device` (`id`, `plot_id`, `name`, `type`) VALUES
 ('D004', 'P002', '土壤湿度传感器-02', '土壤湿度传感器'),
 ('D005', 'P002', '温度传感器-02',     '温度传感器');
 
+-- 9.5 注册申请：一条待审核示例（演示管理员审核用）
+INSERT INTO `register_request` (`username`, `password`, `role`, `status`) VALUES
+('newfarmer01', '$2a$10$placeholder', 'farmer', '待审核');
+
 -- =============================================================
--- 9. 常用查询（示例，供后端开发参考）
+-- 10. 常用查询（示例，供后端开发参考）
 -- =============================================================
 
 -- 地块列表聚合（设备数 / 在线数）：
