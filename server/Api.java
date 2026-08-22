@@ -64,6 +64,13 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 灌溉控制 ---------- */
+            if ("POST".equals(method) && path.matches("/api/devices/[^/]+/control")) {
+                ok(ex, controlJson(path.substring("/api/devices/".length(),
+                        path.length() - "/control".length()), ex));
+                return true;
+            }
+
             /* ---------- 未匹配：404 ---------- */
             send(ex, 404, "{\"code\":1,\"msg\":" + Json.str("接口不存在: " + method + " " + path) + "}");
         } catch (SQLException e) {
@@ -237,6 +244,29 @@ public class Api {
                 + ",\"running\":false}";
     }
 
+    /** 按设备编号查单个设备 JSON（含 plotName / controllable / running）；不存在返回 null */
+    private static String deviceJson(String id) throws SQLException {
+        String sql =
+                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running" +
+                " FROM device d LEFT JOIN plot p ON p.id = d.plot_id WHERE d.id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "null";
+                return "{\"id\":" + Json.str(rs.getString("id"))
+                        + ",\"name\":" + Json.str(rs.getString("name"))
+                        + ",\"type\":" + Json.str(typeMap(rs.getString("type")))
+                        + ",\"plotId\":" + Json.str(rs.getString("plot_id"))
+                        + ",\"plotName\":" + Json.str(rs.getString("plotName"))
+                        + ",\"online\":" + (rs.getInt("online") == 1)
+                        + ",\"controllable\":" + "灌溉设备".equals(rs.getString("type"))
+                        + ",\"running\":" + (rs.getInt("running") == 1)
+                        + "}";
+            }
+        }
+    }
+
     /** 设备类型映射：数据库类型 → 前端契约类型 */
     private static String typeMap(String type) {
         if ("灌溉设备".equals(type)) return "灌溉设备";
@@ -339,6 +369,47 @@ public class Api {
                 return "";
             }
         }
+    }
+
+    /* ==================================================================
+       灌溉控制
+       ================================================================== */
+
+    /**
+     * POST /api/devices/{deviceId}/control —— 灌溉开关。
+     * 请求体：{action:'on'|'off'}；更新 device.running，并写一条 control_log 留痕。
+     */
+    private static String controlJson(String deviceId, HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String action = body.get("action");
+        if (!"on".equals(action) && !"off".equals(action)) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：action 需为 on 或 off") + "}";
+        }
+        int running = "on".equals(action) ? 1 : 0;
+        String actionText = running == 1 ? "开启" : "关闭";
+        String operator = body.containsKey("operator") && body.get("operator") != null
+                ? body.get("operator") : "演示用户";
+
+        try (Connection conn = DBUtil.getConnection()) {
+            // 1. 更新设备运行状态
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE device SET running = ? WHERE id = ?")) {
+                ps.setInt(1, running);
+                ps.setString(2, deviceId);
+                if (ps.executeUpdate() == 0) {
+                    return "{\"code\":1,\"msg\":" + Json.str("设备不存在: " + deviceId) + "}";
+                }
+            }
+            // 2. 写入控制日志（留痕）
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO control_log(device_id, action, result, operator) VALUES (?, ?, ?, ?)")) {
+                ps.setString(1, deviceId);
+                ps.setString(2, actionText);
+                ps.setString(3, "成功");
+                ps.setString(4, operator);
+                ps.executeUpdate();
+            }
+        }
+        return "{\"code\":0,\"data\":" + deviceJson(deviceId) + "}";
     }
 
     /* ==================================================================
