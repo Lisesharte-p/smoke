@@ -43,6 +43,7 @@ public class WebServer {
         PAGES.put("/", "index.html");              // 数据总览（默认首页）
         PAGES.put("/index.html", "index.html");
         PAGES.put("/login.html", "login.html");    // 登录
+        PAGES.put("/monitoring.html", "monitoring.html"); // 数据监测
     }
 
     public static void main(String[] args) throws IOException {
