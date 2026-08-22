@@ -43,6 +43,13 @@
 
       <!-- 注册视图（仅预留接口，后端接入后开放） -->
       <div id="registerView" style="display:none">
+        <!-- 身份选择 -->
+        <div class="login-role" id="regRoleTabs">
+          <div class="role-tab active" data-role="farmer">农户</div>
+          <div class="role-tab" data-role="admin">农场管理员</div>
+          <div class="role-tab" data-role="sysadmin">系统管理员</div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">账号</label>
           <input type="text" class="form-control" id="regUsername" placeholder="请输入账号">
@@ -69,6 +76,7 @@
   <script src="assets/js/layout.js"></script>
   <script>
     var role = 'farmer';
+    var regRole = 'farmer';
 
     /* ---------- 登录 / 注册视图切换 ---------- */
     function showLogin() {
@@ -90,6 +98,17 @@
         });
         tab.classList.add('active');
         role = tab.getAttribute('data-role');
+      });
+    });
+
+    /* ---------- 注册身份切换 ---------- */
+    document.getElementById('regRoleTabs').querySelectorAll('.role-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        document.getElementById('regRoleTabs').querySelectorAll('.role-tab').forEach(function (t) {
+          t.classList.remove('active');
+        });
+        tab.classList.add('active');
+        regRole = tab.getAttribute('data-role');
       });
     });
 
@@ -145,7 +164,7 @@
       btn.disabled = true;
       btn.textContent = '注册中...';
 
-      API.register({ username: username, password: password }).then(function (res) {
+      API.register({ username: username, password: password, role: regRole }).then(function (res) {
         btn.disabled = false;
         btn.textContent = '注 册';
         if (res.code === 0) {
