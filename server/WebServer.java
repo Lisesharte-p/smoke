@@ -44,6 +44,7 @@ public class WebServer {
         PAGES.put("/index.html", "index.html");
         PAGES.put("/login.html", "login.html");    // 登录
         PAGES.put("/monitoring.html", "monitoring.html"); // 数据监测
+        PAGES.put("/history.html", "history.html"); // 历史趋势
     }
 
     public static void main(String[] args) throws IOException {
