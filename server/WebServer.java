@@ -24,10 +24,10 @@ import java.util.concurrent.Executors;
  * 零依赖：只用 JDK 自带类（JDK 8+ 即可），不需要 Maven / Gradle。
  *
  * 运行（在项目根目录 D:\smoke 下）：
- *   编译  javac -encoding UTF-8 -d out/production/smoke server/WebServer.java
- *   运行  java -cp out/production/smoke server.WebServer        # 默认 8080 端口
- *         java -cp out/production/smoke server.WebServer 9090   # 或指定端口
- *   访问  http://localhost:8080/                                 # 数据总览页
+ *   编译  javac -encoding UTF-8 -d out/production/smoke server/WebServer.java server/Api.java server/Json.java
+ *   运行  java -cp "out/production/smoke;lib/mysql-connector-j-8.0.33.jar" server.WebServer          # 默认 8080 端口
+ *         java -cp "out/production/smoke;lib/mysql-connector-j-8.0.33.jar" server.WebServer 9090     # 或指定端口
+ *   访问  http://localhost:8080/                                 # 数据总览页（/api/* 需要 mysql 驱动在 classpath）
  */
 public class WebServer {
 
@@ -70,8 +70,11 @@ public class WebServer {
         System.out.println("=============================================");
     }
 
-    /** 处理所有请求：先匹配页面路由，再匹配静态资源，否则 404 */
+    /** 处理所有请求：业务 API 优先，再匹配页面路由 / 静态资源，否则 404 */
     private static void handle(HttpExchange exchange) throws IOException {
+        // 0. 业务 API（/api/*），返回 JSON
+        if (Api.handle(exchange)) return;
+
         if (!"GET".equals(exchange.getRequestMethod())) {
             // 静态页面只支持 GET，其它方法一律 405
             sendText(exchange, 405, "Method Not Allowed");
