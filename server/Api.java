@@ -116,6 +116,12 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 板子手动刷新（立即读一次板子并入库） ---------- */
+            if ("POST".equals(method) && path.equals("/api/board/refresh")) {
+                ok(ex, refreshBoardJson());
+                return true;
+            }
+
             /* ---------- 智能问答 ---------- */
             if ("POST".equals(method) && path.equals("/api/assistant/chat")) {
                 ok(ex, chatJson(ex));
@@ -823,6 +829,28 @@ public class Api {
     /* ==================================================================
        传感器数据上报（模拟硬件 / MQTT 接收端）
        ================================================================== */
+
+    /* ==================================================================
+       板子手动刷新
+       ================================================================== */
+
+    /**
+     * POST /api/board/refresh —— 手动刷新：立即读一次板子并写库，返回最新读数。
+     * 前端刷新按钮调用，让板子日志能立刻看到一次请求（不用等采集器 30 秒周期）。
+     */
+    private static String refreshBoardJson() {
+        Map<String, String> r = BoardCollector.refreshNow();
+        if (r == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("板子读取失败：" + BoardCollector.getLastError()) + "}";
+        }
+        return "{\"code\":0,\"data\":{"
+                + "\"temp\":" + Json.num(r.get("temp"))
+                + ",\"humidity\":" + Json.num(r.get("humidity"))
+                + ",\"lux\":" + Json.num(r.get("lux"))
+                + ",\"updatedAt\":" + Json.str(java.time.LocalDateTime.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
+                + "}}";
+    }
 
     /**
      * POST /api/sensor-data —— 接收一条传感器读数。

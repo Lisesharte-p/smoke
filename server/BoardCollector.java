@@ -48,6 +48,9 @@ public class BoardCollector {
     private static volatile String  lastError = "";
     private static volatile String  lastReading = "";
 
+    /** 周期采集与手动刷新共用一把锁，避免并发连板子（板子可能单线程处理） */
+    private static final Object LOCK = new Object();
+
     public static boolean isLastOk()    { return lastOk; }
     public static String  getLastError()  { return lastError; }
     public static String  getLastReading() { return lastReading; }
@@ -58,23 +61,7 @@ public class BoardCollector {
     public static void start() {
         Thread t = new Thread(() -> {
             while (true) {
-                try {
-                    Map<String, String> reading = fetchOnce();
-                    if (reading != null) {
-                        writeToDb(reading);
-                        lastOk = true;
-                        lastError = "";
-                        lastReading = "TEMP:" + reading.get("temp")
-                                + " HUMI:" + reading.get("humidity")
-                                + " LUX:" + reading.get("lux");
-                    } else {
-                        lastOk = false;
-                        lastError = "未读到有效读数（板子无响应？）";
-                    }
-                } catch (Exception e) {
-                    lastOk = false;
-                    lastError = String.valueOf(e);
-                }
+                collect();
                 try {
                     Thread.sleep(COLLECT_INTERVAL_MS);
                 } catch (InterruptedException e) {
@@ -87,6 +74,36 @@ public class BoardCollector {
         t.start();
         System.out.println("[BoardCollector] 已启动：每 " + COLLECT_INTERVAL_MS / 1000
                 + " 秒读取 " + BOARD_HOST + ":" + BOARD_PORT + "，写入设备 " + DEVICE_ID);
+    }
+
+    /** 供 API 手动刷新调用：立即读一次板子并写库 */
+    public static Map<String, String> refreshNow() {
+        return collect();
+    }
+
+    /** 读一次板子并写库；成功返回读数，失败返回 null（并记录 lastError） */
+    private static Map<String, String> collect() {
+        synchronized (LOCK) {
+            try {
+                Map<String, String> reading = fetchOnce();
+                if (reading != null) {
+                    writeToDb(reading);
+                    lastOk = true;
+                    lastError = "";
+                    lastReading = "TEMP:" + reading.get("temp")
+                            + " HUMI:" + reading.get("humidity")
+                            + " LUX:" + reading.get("lux");
+                } else {
+                    lastOk = false;
+                    lastError = "未读到有效读数（板子无响应？）";
+                }
+                return reading;
+            } catch (Exception e) {
+                lastOk = false;
+                lastError = String.valueOf(e);
+                return null;
+            }
+        }
     }
 
     /**
