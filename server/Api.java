@@ -349,46 +349,91 @@ public class Api {
                 + "}}";
     }
 
-    /** GET /api/plots/{plotId}/history?days=N —— 近 N 天按日聚合的温湿度趋势 */
+    /**
+     * GET /api/plots/{plotId}/history —— 温湿度趋势。
+     * 支持两种查询方式：
+     *   ?days=N     近 N 天按日聚合（默认 7）
+     *   ?window=1m|30m|24h   短时窗口实时趋势（1分钟按秒、30分钟按分钟、24小时按5分钟聚合）
+     * 返回 {dates:[], temp:[], humidity:[]}，三个数组一一对齐。
+     */
     private static String historyJson(String plotId, String query) throws SQLException {
         int days = 7;
+        String window = null;
         if (query != null) {
             for (String kv : query.split("&")) {
                 String[] p = kv.split("=");
-                if (p.length == 2 && "days".equals(p[0])) {
-                    try { days = Integer.parseInt(p[1]); } catch (NumberFormatException ignore) { }
+                if (p.length == 2) {
+                    if ("days".equals(p[0])) {
+                        try { days = Integer.parseInt(p[1]); } catch (NumberFormatException ignore) { }
+                    } else if ("window".equals(p[0])) {
+                        window = p[1];
+                    }
                 }
             }
         }
-        String sql =
-                "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS day, s.metric, AVG(s.value) AS avgv" +
-                " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
-                " GROUP BY day, s.metric ORDER BY day";
+
+        // 短时窗口：按各自粒度聚合；1m/30m/24h 都 GROUP BY 时间标签，保证每桶 temp/humidity 齐全
+        String intervalSql = null; // DATE_SUB(NOW(), INTERVAL xxx)
+        String selectExpr  = null; // SELECT 的时间标签表达式 + 值表达式
+        String groupSql    = null; // GROUP BY 的时间标签
+        if ("1m".equals(window)) {
+            intervalSql = "1 MINUTE";
+            selectExpr  = "DATE_FORMAT(s.collected_at, '%H:%i:%s') AS x, s.metric, AVG(s.value) AS v";
+            groupSql    = "x, s.metric";
+        } else if ("30m".equals(window)) {
+            intervalSql = "30 MINUTE";
+            selectExpr  = "DATE_FORMAT(s.collected_at, '%H:%i') AS x, s.metric, AVG(s.value) AS v";
+            groupSql    = "x, s.metric";
+        } else if ("24h".equals(window)) {
+            intervalSql = "24 HOUR";
+            selectExpr  = "CONCAT(DATE_FORMAT(s.collected_at, '%Y-%m-%d %H:'), "
+                        + "LPAD(FLOOR(MINUTE(s.collected_at)/5)*5, 2, '0')) AS x, s.metric, AVG(s.value) AS v";
+            groupSql    = "x, s.metric";
+        }
+
+        String sql;
+        if (window != null && intervalSql != null) {
+            sql = "SELECT " + selectExpr +
+                  " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                  " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL " + intervalSql + ")" +
+                  " GROUP BY " + groupSql + " ORDER BY x";
+        } else {
+            sql = "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS x, s.metric, AVG(s.value) AS v" +
+                  " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                  " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
+                  " GROUP BY x, s.metric ORDER BY x";
+        }
+
         StringBuilder dates = new StringBuilder();
         StringBuilder temp = new StringBuilder();
         StringBuilder hum = new StringBuilder();
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, plotId);
-            ps.setInt(2, days);
+            if (window == null || intervalSql == null) {
+                ps.setInt(2, days);
+            }
+            // 同一时间标签只记一次日期，保证 dates 与 temp/humidity 一一对齐
+            String lastX = null;
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    String day = rs.getString("day");
-                    double v = rs.getDouble("avgv");
+                    String x = rs.getString("x");
+                    double v = rs.getDouble("v");
                     String metric = rs.getString("metric");
-                    // 只有 temp/humidity 进温湿度趋势；其它指标（如 lux）不进，
-                    // 避免混入 humidity 数组导致与 dates 错位
-                    if ("temp".equals(metric)) {
-                        if (dates.length() > 0) dates.append(',');
-                        dates.append(Json.str(day));
-                        if (temp.length() > 0) temp.append(',');
-                        temp.append(v);
-                    } else if ("humidity".equals(metric)) {
-                        if (dates.length() > 0) dates.append(',');
-                        dates.append(Json.str(day));
-                        if (hum.length() > 0) hum.append(',');
-                        hum.append(v);
+                    // 只有 temp/humidity 进温湿度趋势；lux 等其它指标不进
+                    if ("temp".equals(metric) || "humidity".equals(metric)) {
+                        if (!x.equals(lastX)) {
+                            if (dates.length() > 0) dates.append(',');
+                            dates.append(Json.str(x));
+                            lastX = x;
+                        }
+                        if ("temp".equals(metric)) {
+                            if (temp.length() > 0) temp.append(',');
+                            temp.append(v);
+                        } else {
+                            if (hum.length() > 0) hum.append(',');
+                            hum.append(v);
+                        }
                     }
                 }
             }
