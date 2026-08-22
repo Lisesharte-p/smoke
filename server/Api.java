@@ -370,12 +370,17 @@ public class Api {
                 while (rs.next()) {
                     String day = rs.getString("day");
                     double v = rs.getDouble("avgv");
-                    if (dates.length() > 0) dates.append(',');
-                    dates.append(Json.str(day));
-                    if ("temp".equals(rs.getString("metric"))) {
+                    String metric = rs.getString("metric");
+                    // 只有 temp/humidity 进温湿度趋势；其它指标（如 lux）不进，
+                    // 避免混入 humidity 数组导致与 dates 错位
+                    if ("temp".equals(metric)) {
+                        if (dates.length() > 0) dates.append(',');
+                        dates.append(Json.str(day));
                         if (temp.length() > 0) temp.append(',');
                         temp.append(v);
-                    } else {
+                    } else if ("humidity".equals(metric)) {
+                        if (dates.length() > 0) dates.append(',');
+                        dates.append(Json.str(day));
                         if (hum.length() > 0) hum.append(',');
                         hum.append(v);
                     }
