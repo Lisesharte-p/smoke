@@ -14,6 +14,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -68,6 +70,24 @@ public class Api {
             if ("POST".equals(method) && path.matches("/api/devices/[^/]+/control")) {
                 ok(ex, controlJson(path.substring("/api/devices/".length(),
                         path.length() - "/control".length()), ex));
+                return true;
+            }
+
+            /* ---------- 阈值 / 告警 ---------- */
+            if ("GET".equals(method) && path.equals("/api/thresholds")) {
+                ok(ex, thresholdsJson());
+                return true;
+            }
+            if ("PUT".equals(method) && path.equals("/api/thresholds")) {
+                ok(ex, saveThresholdsJson(ex));
+                return true;
+            }
+            if ("GET".equals(method) && path.equals("/api/alarms")) {
+                ok(ex, alarmsJson());
+                return true;
+            }
+            if ("PUT".equals(method) && path.matches("/api/alarms/[^/]+")) {
+                ok(ex, updateAlarmJson(path.substring("/api/alarms/".length()), ex));
                 return true;
             }
 
@@ -410,6 +430,140 @@ public class Api {
             }
         }
         return "{\"code\":0,\"data\":" + deviceJson(deviceId) + "}";
+    }
+
+    /* ==================================================================
+       阈值 / 告警
+       ================================================================== */
+
+    /**
+     * GET /api/thresholds —— 阈值配置。
+     * 前端只有一个全局编辑器，DB 是每地块一行（plot_threshold）；
+     * 这里取第一个地块的阈值，全部没配置时用默认值 40 / 35。
+     */
+    private static String thresholdsJson() throws SQLException {
+        BigDecimal humidityMin = new BigDecimal(40);
+        BigDecimal tempMax = new BigDecimal(35);
+        String sql = "SELECT humidity_min, temp_max FROM plot_threshold ORDER BY plot_id LIMIT 1";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                humidityMin = rs.getBigDecimal("humidity_min");
+                tempMax = rs.getBigDecimal("temp_max");
+            }
+        }
+        return "{\"code\":0,\"data\":{"
+                + "\"humidityMin\":" + Json.num(humidityMin.stripTrailingZeros().toPlainString())
+                + ",\"tempMax\":" + Json.num(tempMax.stripTrailingZeros().toPlainString())
+                + "}}";
+    }
+
+    /**
+     * PUT /api/thresholds —— 保存阈值。
+     * body: {humidityMin, tempMax}；对每个地块 upsert 一份，保证前端全局编辑后各地块一致。
+     */
+    private static String saveThresholdsJson(HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String h = body.get("humidityMin");
+        String t = body.get("tempMax");
+        if (h == null || t == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：humidityMin/tempMax 必填") + "}";
+        }
+        BigDecimal humidityMin;
+        BigDecimal tempMax;
+        try {
+            humidityMin = new BigDecimal(h);
+            tempMax = new BigDecimal(t);
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：阈值必须是数字") + "}";
+        }
+        String sql =
+                "INSERT INTO plot_threshold(plot_id, humidity_min, temp_max) VALUES (?, ?, ?)" +
+                " ON DUPLICATE KEY UPDATE humidity_min = VALUES(humidity_min), temp_max = VALUES(temp_max)";
+        try (Connection conn = DBUtil.getConnection()) {
+            // 1. 收集全部地块编号
+            List<String> plotIds = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) plotIds.add(rs.getString(1));
+            }
+            // 2. 每个地块 upsert 一份同样的阈值
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (String plotId : plotIds) {
+                    ps.setString(1, plotId);
+                    ps.setBigDecimal(2, humidityMin);
+                    ps.setBigDecimal(3, tempMax);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+        }
+        return "{\"code\":0}";
+    }
+
+    /**
+     * GET /api/alarms —— 告警列表。
+     * 返回：id,time,plotId,plotName,type,value,level,status。
+     * time 格式与 mock 一致（yyyy-MM-dd HH:mm）；type 直接用库里的中文 alarm_type。
+     */
+    private static String alarmsJson() throws SQLException {
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        String sql =
+                "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at," +
+                " p.name AS plotName FROM alarm a LEFT JOIN plot p ON p.id = a.plot_id" +
+                " ORDER BY a.created_at DESC, a.id DESC";
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            boolean first = true;
+            while (rs.next()) {
+                if (!first) sb.append(',');
+                first = false;
+                Timestamp ts = rs.getTimestamp("created_at");
+                String time = ts == null ? "" : fmt.format(ts);
+                sb.append('{')
+                  .append("\"id\":").append(rs.getLong("id")).append(',')
+                  .append("\"time\":").append(Json.str(time)).append(',')
+                  .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
+                  .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
+                  .append("\"type\":").append(Json.str(rs.getString("alarm_type"))).append(',')
+                  .append("\"value\":").append(Json.str(rs.getString("value"))).append(',')
+                  .append("\"level\":").append(Json.str(rs.getString("level"))).append(',')
+                  .append("\"status\":").append(Json.str(rs.getString("status")))
+                  .append('}');
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    /**
+     * PUT /api/alarms/{id} —— 标记处理。
+     * body: {status:'已处理'}；顺手记录处理人和处理时间。
+     */
+    private static String updateAlarmJson(String id, HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String status = body.get("status");
+        if (status == null || status.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：status 必填") + "}";
+        }
+        String handler = body.containsKey("handler") && body.get("handler") != null
+                ? body.get("handler") : "演示用户";
+        String sql = "UPDATE alarm SET status = ?, handled_at = NOW(), handler = ? WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, status);
+            ps.setString(2, handler);
+            ps.setLong(3, Long.parseLong(id));
+            if (ps.executeUpdate() == 0) {
+                return "{\"code\":1,\"msg\":" + Json.str("告警不存在: " + id) + "}";
+            }
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+        }
+        return "{\"code\":0}";
     }
 
     /* ==================================================================
