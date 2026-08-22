@@ -11,10 +11,10 @@ import java.sql.SQLException;
 public class DBUtil {
 
     // ================== 连接配置（按实际改） ==================
-    public static final String HOST = "192.168.20.63";
+    public static final String HOST = "192.168.12.235";
     public static final int PORT = 3306;
-    public static final String DB = "suiyuanhao"; // 应用库名（同学建的，目前是空库）
-    public static final String USER = "newuser";
+    public static final String DB = "farm"; // 应用库名（数据表已建好）
+    public static final String USER = "root";
     public static final String PASS = "123456";
     // =======================================================
 
