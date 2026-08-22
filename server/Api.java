@@ -12,6 +12,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 import java.util.Map;
 
 /**
@@ -47,6 +49,18 @@ public class Api {
             }
             if ("DELETE".equals(method) && path.matches("/api/devices/[^/]+")) {
                 ok(ex, deleteDeviceJson(path.substring("/api/devices/".length())));
+                return true;
+            }
+
+            /* ---------- 实时 / 历史数据 ---------- */
+            if ("GET".equals(method) && path.matches("/api/plots/[^/]+/realtime")) {
+                ok(ex, realtimeJson(path.substring("/api/plots/".length(),
+                        path.length() - "/realtime".length())));
+                return true;
+            }
+            if ("GET".equals(method) && path.matches("/api/plots/[^/]+/history")) {
+                ok(ex, historyJson(path.substring("/api/plots/".length(),
+                        path.length() - "/history".length()), ex.getRequestURI().getQuery()));
                 return true;
             }
 
@@ -228,6 +242,103 @@ public class Api {
         if ("灌溉设备".equals(type)) return "灌溉设备";
         if ("温度传感器".equals(type)) return "温度";
         return "土壤湿度"; // 土壤湿度传感器等统一归为土壤湿度
+    }
+
+    /* ==================================================================
+       实时 / 历史数据
+       ================================================================== */
+
+    /** GET /api/plots/{plotId}/realtime —— 某地块最新温湿度 */
+    private static String realtimeJson(String plotId) throws SQLException {
+        BigDecimal temp = latestValue(plotId, "temp");
+        BigDecimal humidity = latestValue(plotId, "humidity");
+        String updatedAt = latestTime(plotId);
+        return "{\"code\":0,\"data\":{"
+                + "\"plotId\":" + Json.str(plotId)
+                + ",\"plotName\":" + Json.str(plotName(plotId))
+                + ",\"temp\":" + Json.num(temp)
+                + ",\"humidity\":" + Json.num(humidity)
+                + ",\"updatedAt\":" + Json.str(updatedAt)
+                + "}}";
+    }
+
+    /** GET /api/plots/{plotId}/history?days=N —— 近 N 天按日聚合的温湿度趋势 */
+    private static String historyJson(String plotId, String query) throws SQLException {
+        int days = 7;
+        if (query != null) {
+            for (String kv : query.split("&")) {
+                String[] p = kv.split("=");
+                if (p.length == 2 && "days".equals(p[0])) {
+                    try { days = Integer.parseInt(p[1]); } catch (NumberFormatException ignore) { }
+                }
+            }
+        }
+        String sql =
+                "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS day, s.metric, AVG(s.value) AS avgv" +
+                " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
+                " GROUP BY day, s.metric ORDER BY day";
+        StringBuilder dates = new StringBuilder();
+        StringBuilder temp = new StringBuilder();
+        StringBuilder hum = new StringBuilder();
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            ps.setInt(2, days);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String day = rs.getString("day");
+                    double v = rs.getDouble("avgv");
+                    if (dates.length() > 0) dates.append(',');
+                    dates.append(Json.str(day));
+                    if ("temp".equals(rs.getString("metric"))) {
+                        if (temp.length() > 0) temp.append(',');
+                        temp.append(v);
+                    } else {
+                        if (hum.length() > 0) hum.append(',');
+                        hum.append(v);
+                    }
+                }
+            }
+        }
+        return "{\"code\":0,\"data\":{"
+                + "\"dates\":[" + dates + "]"
+                + ",\"temp\":[" + temp + "]"
+                + ",\"humidity\":[" + hum + "]}"
+                + "}";
+    }
+
+    /** 某地块某指标的最新一条读数；没有数据返回 null */
+    private static BigDecimal latestValue(String plotId, String metric) throws SQLException {
+        String sql =
+                "SELECT s.value FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                " WHERE d.plot_id = ? AND s.metric = ? ORDER BY s.collected_at DESC LIMIT 1";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            ps.setString(2, metric);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getBigDecimal(1) : null;
+            }
+        }
+    }
+
+    /** 某地块最新采集时间；没有数据返回空串 */
+    private static String latestTime(String plotId) throws SQLException {
+        String sql =
+                "SELECT MAX(s.collected_at) FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                " WHERE d.plot_id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    Timestamp ts = rs.getTimestamp(1);
+                    return ts == null ? "" : new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(ts);
+                }
+                return "";
+            }
+        }
     }
 
     /* ==================================================================
