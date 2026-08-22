@@ -196,6 +196,22 @@ ul { list-style: none; }
   color: var(--text);
 }
 
+.topbar-logout {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+
+.topbar-logout:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
 .avatar {
   width: 32px; height: 32px;
   border-radius: 50%;

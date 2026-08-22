@@ -11,8 +11,8 @@
 window.API = (function () {
 
   var config = {
-    baseUrl: '',            // 后端地址，例：'http://localhost:8080'
-    useMock: true,          // true=用本地 mock；后端就绪后改为 false
+    baseUrl: '',            // 后端地址；由 WebServer 同源托管时留空，分开部署时填 'http://localhost:8080'
+    useMock: false,         // false=走真实后端接口（数据存 MySQL）
     endpoints: {
       login:      '/api/auth/login',
       register:   '/api/auth/register',
@@ -23,6 +23,7 @@ window.API = (function () {
       control:    '/api/devices/{deviceId}/control',
       thresholds: '/api/thresholds',
       alarms:     '/api/alarms',
+      controlLogs:'/api/control-logs',
       chat:       '/api/assistant/chat'
     }
   };
@@ -187,6 +188,14 @@ window.API = (function () {
   }
 
   /* ==================================================================
+     控制日志
+     ================================================================== */
+  function getControlLogs() {
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.controlLogs }, 400);
+    return request(config.endpoints.controlLogs);
+  }
+
+  /* ==================================================================
      智能问答
      ================================================================== */
   function getChatReply(question) {
@@ -212,6 +221,7 @@ window.API = (function () {
     saveThresholds: saveThresholds,
     getAlarms: getAlarms,
     updateAlarmStatus: updateAlarmStatus,
+    getControlLogs: getControlLogs,
     getChatReply: getChatReply
   };
 })();

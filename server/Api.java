@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -94,6 +95,24 @@ public class Api {
             /* ---------- 登录 ---------- */
             if ("POST".equals(method) && path.equals("/api/auth/login")) {
                 ok(ex, loginJson(ex));
+                return true;
+            }
+
+            /* ---------- 注册 ---------- */
+            if ("POST".equals(method) && path.equals("/api/auth/register")) {
+                ok(ex, registerJson(ex));
+                return true;
+            }
+
+            /* ---------- 控制日志 ---------- */
+            if ("GET".equals(method) && path.equals("/api/control-logs")) {
+                ok(ex, controlLogsJson());
+                return true;
+            }
+
+            /* ---------- 传感器数据上报（模拟硬件 / MQTT 接收端） ---------- */
+            if ("POST".equals(method) && path.equals("/api/sensor-data")) {
+                ok(ex, sensorDataJson(ex));
                 return true;
             }
 
@@ -597,15 +616,15 @@ public class Api {
     private static String loginJson(HttpExchange ex) throws IOException, SQLException {
         Map<String, String> body = Json.parseObject(readBody(ex));
         String username = body.get("username");
-        String role = body.get("role");
-        if (username == null || username.isEmpty() || role == null || role.isEmpty()) {
-            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：username/password/role 必填") + "}";
+        String password = body.get("password");
+        if (username == null || username.isEmpty() || password == null || password.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("请输入账号和密码") + "}";
         }
 
         String foundName = null;
         String foundRole = null;
-        // 1. 按用户名查
-        String sql = "SELECT name, role FROM user WHERE username = ?";
+        String foundHash = null;
+        String sql = "SELECT name, role, password FROM user WHERE username = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, username);
@@ -613,25 +632,16 @@ public class Api {
                 if (rs.next()) {
                     foundName = rs.getString("name");
                     foundRole = rs.getString("role");
+                    foundHash = rs.getString("password");
                 }
             }
         }
-        // 2. 找不到按角色兜底（对应前端角色切换）
-        if (foundRole == null) {
-            sql = "SELECT name, role FROM user WHERE role = ? LIMIT 1";
-            try (Connection conn = DBUtil.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, role);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        foundName = rs.getString("name");
-                        foundRole = rs.getString("role");
-                    }
-                }
-            }
+        if (foundRole == null || foundHash == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("账号或密码错误") + "}";
         }
-        if (foundRole == null) {
-            return "{\"code\":1,\"msg\":" + Json.str("用户不存在，请检查账号或角色") + "}";
+        // 密码校验：SHA-256（种子账号密码均为 123456）
+        if (!sha256(password).equals(foundHash)) {
+            return "{\"code\":1,\"msg\":" + Json.str("账号或密码错误") + "}";
         }
 
         String token = "token-" + foundRole + "-" + java.util.UUID.randomUUID().toString().substring(0, 8);
@@ -712,6 +722,219 @@ public class Api {
         }
         sb.append("}}");
         return sb.toString();
+    }
+
+    /* ==================================================================
+       注册
+       ================================================================== */
+
+    /**
+     * POST /api/auth/register —— 注册申请。
+     * 写入 register_request（待审核），管理员审核通过后才写入 user 表。
+     * role 默认 farmer（前端注册表单暂不选角色）。
+     */
+    private static String registerJson(HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String username = body.get("username");
+        String password = body.get("password");
+        String role = body.get("role");
+        if (username == null || username.isEmpty() || password == null || password.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("请填写账号和密码") + "}";
+        }
+        if (role == null || role.isEmpty()) role = "farmer";
+        if (!"farmer".equals(role) && !"admin".equals(role) && !"sysadmin".equals(role)) role = "farmer";
+
+        // 用户名已存在（user 或待审核的 register_request）则拒绝
+        if (exists("SELECT 1 FROM user WHERE username = ?", username)
+                || exists("SELECT 1 FROM register_request WHERE username = ? AND status = '待审核'", username)) {
+            return "{\"code\":1,\"msg\":" + Json.str("账号已存在或已在审核中") + "}";
+        }
+
+        String hash = sha256(password);
+        String sql = "INSERT INTO register_request(username, password, role, status) VALUES (?, ?, ?, '待审核')";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, username);
+            ps.setString(2, hash);
+            ps.setString(3, role);
+            ps.executeUpdate();
+        }
+        return "{\"code\":0,\"msg\":" + Json.str("注册申请已提交，请等待管理员审核") + "}";
+    }
+
+    /** 是否存在某条记录（注册去重用） */
+    private static boolean exists(String sql, String param) throws SQLException {
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, param);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /* ==================================================================
+       控制日志
+       ================================================================== */
+
+    /**
+     * GET /api/control-logs —— 灌溉控制日志列表。
+     * deviceName / plotName 由 join 得出，operator 存库。
+     */
+    private static String controlLogsJson() throws SQLException {
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        String sql =
+                "SELECT c.id, c.action, c.result, c.operator, c.created_at," +
+                " d.name AS deviceName, p.name AS plotName" +
+                " FROM control_log c" +
+                " LEFT JOIN device d ON d.id = c.device_id" +
+                " LEFT JOIN plot p ON p.id = d.plot_id" +
+                " ORDER BY c.created_at DESC, c.id DESC";
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            boolean first = true;
+            while (rs.next()) {
+                if (!first) sb.append(',');
+                first = false;
+                Timestamp ts = rs.getTimestamp("created_at");
+                String time = ts == null ? "" : fmt.format(ts);
+                sb.append('{')
+                  .append("\"id\":").append(rs.getLong("id")).append(',')
+                  .append("\"time\":").append(Json.str(time)).append(',')
+                  .append("\"deviceName\":").append(Json.str(rs.getString("deviceName"))).append(',')
+                  .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
+                  .append("\"action\":").append(Json.str(rs.getString("action"))).append(',')
+                  .append("\"result\":").append(Json.str(rs.getString("result"))).append(',')
+                  .append("\"operator\":").append(Json.str(rs.getString("operator")))
+                  .append('}');
+            }
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    /* ==================================================================
+       传感器数据上报（模拟硬件 / MQTT 接收端）
+       ================================================================== */
+
+    /**
+     * POST /api/sensor-data —— 接收一条传感器读数。
+     * body: {deviceId, metric:'temp'|'humidity', value}。
+     * 写入 sensor_data，并检查是否越过阈值触发告警。
+     */
+    private static String sensorDataJson(HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String deviceId = body.get("deviceId");
+        String metric = body.get("metric");
+        String value = body.get("value");
+        if (deviceId == null || metric == null || value == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：deviceId/metric/value 必填") + "}";
+        }
+        if (!"temp".equals(metric) && !"humidity".equals(metric)) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：metric 需为 temp 或 humidity") + "}";
+        }
+        BigDecimal v;
+        try { v = new BigDecimal(value); } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：value 必须是数字") + "}";
+        }
+
+        // 1. 写入读数
+        String sql = "INSERT INTO sensor_data(device_id, metric, value, collected_at) VALUES (?, ?, ?, NOW(3))";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            ps.setString(2, metric);
+            ps.setBigDecimal(3, v);
+            ps.executeUpdate();
+        }
+
+        // 2. 阈值告警检查
+        String plotId = plotOfDevice(deviceId);
+        if (plotId != null) {
+            checkThresholdAlarm(plotId, metric, v);
+        }
+        return "{\"code\":0}";
+    }
+
+    /** 设备所属地块；不存在返回 null */
+    private static String plotOfDevice(String deviceId) throws SQLException {
+        String sql = "SELECT plot_id FROM device WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        }
+    }
+
+    /** 越过阈值时插入一条告警（同一地块同类型未处理告警不重复插） */
+    private static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
+        BigDecimal humidityMin = new BigDecimal(40);
+        BigDecimal tempMax = new BigDecimal(35);
+        String sql = "SELECT humidity_min, temp_max FROM plot_threshold WHERE plot_id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    humidityMin = rs.getBigDecimal("humidity_min");
+                    tempMax = rs.getBigDecimal("temp_max");
+                }
+            }
+        }
+
+        String alarmType = null;
+        String alarmValue = null;
+        String level = null;
+        if ("humidity".equals(metric) && value.compareTo(humidityMin) < 0) {
+            alarmType = "土壤湿度过低";
+            alarmValue = value.stripTrailingZeros().toPlainString() + "%";
+            level = "警告";
+        } else if ("temp".equals(metric) && value.compareTo(tempMax) > 0) {
+            alarmType = "温度过高";
+            alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
+            level = "严重";
+        }
+        if (alarmType == null) return;
+
+        // 去重：同一地块同类型且未处理的告警不重复插入
+        String dup = "SELECT 1 FROM alarm WHERE plot_id = ? AND alarm_type = ? AND status = '未处理'";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(dup)) {
+            ps.setString(1, plotId);
+            ps.setString(2, alarmType);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return;
+            }
+        }
+        String ins = "INSERT INTO alarm(plot_id, alarm_type, value, level, status) VALUES (?, ?, ?, ?, '未处理')";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(ins)) {
+            ps.setString(1, plotId);
+            ps.setString(2, alarmType);
+            ps.setString(3, alarmValue);
+            ps.setString(4, level);
+            ps.executeUpdate();
+        }
+    }
+
+    /* ==================================================================
+       SHA-256 哈希（登录 / 注册密码）
+       ================================================================== */
+
+    private static String sha256(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] b = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte x : b) sb.append(String.format("%02x", x));
+            return sb.toString();
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     /* ==================================================================

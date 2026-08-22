@@ -6,17 +6,23 @@ import java.sql.SQLException;
 
 /**
  * 数据库连接工具：所有数据库访问统一从这里拿 Connection。
- * 改配置只需要改下面这几个常量。
+ * 连接信息支持环境变量覆盖（不同人/不同机器连不同库时不用改代码、不会互相冲突）：
+ *   DB_HOST 数据库地址（默认 127.0.0.1 本地）
+ *   DB_PORT 端口（默认 3306）
+ *   DB_NAME 库名（默认 farm）
+ *   DB_USER 用户名（默认 root）
+ *   DB_PASS 密码（默认 123456）
+ * 例：连队友远程库 -> set DB_HOST=192.168.12.235 && set DB_USER=newuser
  */
 public class DBUtil {
 
-    // ================== 连接配置（按实际改） ==================
-    public static final String HOST = "192.168.12.235";
-    public static final int PORT = 3306;
-    public static final String DB = "farm"; // 应用库名（数据表已建好）
-    public static final String USER = "newuser";
-    public static final String PASS = "123456";
-    // =======================================================
+    // ================== 连接配置（默认连本地，可用环境变量覆盖） ==================
+    public static final String HOST = env("DB_HOST", "127.0.0.1");
+    public static final int    PORT = Integer.parseInt(env("DB_PORT", "3306"));
+    public static final String DB   = env("DB_NAME", "farm");
+    public static final String USER = env("DB_USER", "root");
+    public static final String PASS = env("DB_PASS", "123456");
+    // =========================================================================
 
     private static final String URL_TEMPLATE =
             "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8"
@@ -29,6 +35,12 @@ public class DBUtil {
         } catch (ClassNotFoundException e) {
             throw new RuntimeException("找不到 MySQL 驱动，请确认 lib/mysql-connector-j-8.0.33.jar 已在 classpath", e);
         }
+    }
+
+    /** 读取环境变量，为空时用默认值 */
+    private static String env(String key, String def) {
+        String v = System.getenv(key);
+        return (v == null || v.isEmpty()) ? def : v;
     }
 
     /** 连到应用库 DB */

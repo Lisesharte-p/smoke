@@ -161,9 +161,11 @@
       renderDevices();
     });
 
-    // 日志初始用 mock 里的控制日志
-    logs = MOCK.controlLogs.slice();
-    renderLogs();
+    // 控制日志走真实接口
+    API.getControlLogs().then(function (res) {
+      logs = res.data || [];
+      renderLogs();
+    });
   </script>
 </body>
 </html>

@@ -99,6 +99,12 @@ window.Layout = (function () {
     return allowed.indexOf(key) !== -1;
   }
 
+  /* 退出登录：清除本地登录态并回到登录页（切换账户） */
+  function logout() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    location.href = 'login.html';
+  }
+
   /* ---------- 渲染侧边栏 ---------- */
   function renderSidebar(activeKey) {
     var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
@@ -137,6 +143,7 @@ window.Layout = (function () {
             '<span class="topbar-clock" id="topbarClock">--:--:--</span>' +
             '<span class="topbar-user"><span class="avatar">' + (u.name || '农').charAt(0) + '</span>' +
             u.roleName + ' · ' + u.name + '</span>' +
+            '<a class="topbar-logout" id="logoutBtn" href="javascript:;" title="退出并切换账户">切换账户</a>' +
             '</div>';
     document.getElementById('topbar').innerHTML = html;
   }
@@ -195,6 +202,10 @@ window.Layout = (function () {
     renderTopbar(pageKey);
     hideRestrictedLinks();
     startClock();
+
+    // 绑定「切换账户」按钮
+    var logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) logoutBtn.addEventListener('click', logout);
   }
 
   return {
