@@ -15,6 +15,7 @@ window.API = (function () {
     useMock: true,          // true=用本地 mock；后端就绪后改为 false
     endpoints: {
       login:      '/api/auth/login',
+      register:   '/api/auth/register',
       plots:      '/api/plots',
       devices:    '/api/devices',
       realtime:   '/api/plots/{plotId}/realtime',
@@ -64,6 +65,12 @@ window.API = (function () {
       return mockDelay({ code: 0, msg: 'ok', data: { token: 'mock-token-' + role, name: u.name, roleName: u.roleName, role: u.role } }, 600);
     }
     return request(config.endpoints.login, { method: 'POST', data: { username: username, password: password, role: role } });
+  }
+
+  /* 注册：前端仅预留接口，后端接入前 mock 返回占位提示 */
+  function register(data) {
+    if (config.useMock) return mockDelay({ code: 0, msg: '注册接口已预留，待后端接入', data: null }, 400);
+    return request(config.endpoints.register, { method: 'POST', data: data });
   }
 
   /* ==================================================================
@@ -193,6 +200,7 @@ window.API = (function () {
   return {
     config: config,
     login: login,
+    register: register,
     getPlots: getPlots,
     getDevices: getDevices,
     addDevice: addDevice,
