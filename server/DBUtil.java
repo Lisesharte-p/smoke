@@ -14,7 +14,7 @@ public class DBUtil {
     public static final String HOST = "192.168.12.235";
     public static final int PORT = 3306;
     public static final String DB = "farm"; // 应用库名（数据表已建好）
-    public static final String USER = "root";
+    public static final String USER = "newuser";
     public static final String PASS = "123456";
     // =======================================================
 
