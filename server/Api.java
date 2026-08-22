@@ -91,6 +91,12 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 登录 ---------- */
+            if ("POST".equals(method) && path.equals("/api/auth/login")) {
+                ok(ex, loginJson(ex));
+                return true;
+            }
+
             /* ---------- 未匹配：404 ---------- */
             send(ex, 404, "{\"code\":1,\"msg\":" + Json.str("接口不存在: " + method + " " + path) + "}");
         } catch (SQLException e) {
@@ -564,6 +570,73 @@ public class Api {
             return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
         }
         return "{\"code\":0}";
+    }
+
+    /* ==================================================================
+       登录
+       ================================================================== */
+
+    /**
+     * POST /api/auth/login —— 登录。
+     * body: {username, password, role}。
+     * 演示环境：user 表密码是占位哈希（$2a$10$placeholder），不校验密码，任意账号密码可登录。
+     * 用户优先按 username 查，查不到再按 role 兜底；返回 token/name/roleName/role。
+     */
+    private static String loginJson(HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String username = body.get("username");
+        String role = body.get("role");
+        if (username == null || username.isEmpty() || role == null || role.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：username/password/role 必填") + "}";
+        }
+
+        String foundName = null;
+        String foundRole = null;
+        // 1. 按用户名查
+        String sql = "SELECT name, role FROM user WHERE username = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    foundName = rs.getString("name");
+                    foundRole = rs.getString("role");
+                }
+            }
+        }
+        // 2. 找不到按角色兜底（对应前端角色切换）
+        if (foundRole == null) {
+            sql = "SELECT name, role FROM user WHERE role = ? LIMIT 1";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, role);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        foundName = rs.getString("name");
+                        foundRole = rs.getString("role");
+                    }
+                }
+            }
+        }
+        if (foundRole == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("用户不存在，请检查账号或角色") + "}";
+        }
+
+        String token = "token-" + foundRole + "-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        return "{\"code\":0,\"msg\":\"ok\",\"data\":{"
+                + "\"token\":" + Json.str(token) + ","
+                + "\"name\":" + Json.str(foundName) + ","
+                + "\"roleName\":" + Json.str(roleName(foundRole)) + ","
+                + "\"role\":" + Json.str(foundRole)
+                + "}}";
+    }
+
+    /** role 枚举 → 前端展示的中文角色名 */
+    private static String roleName(String role) {
+        if ("farmer".equals(role)) return "农户";
+        if ("admin".equals(role)) return "农场管理员";
+        if ("sysadmin".equals(role)) return "系统管理员";
+        return role;
     }
 
     /* ==================================================================
