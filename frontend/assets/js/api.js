@@ -128,9 +128,13 @@ window.API = (function () {
     return request(config.endpoints.realtime.replace('{plotId}', plotId));
   }
 
-  function getHistory(plotId, days) {
+  function getHistory(plotId, days, win) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getHistory(plotId, days) }, 500);
-    return request(config.endpoints.history.replace('{plotId}', plotId) + '?days=' + (days || 7));
+    // win 为短时窗口（1m/30m/24h）时走 ?window=，否则走 ?days=
+    var url = win
+      ? config.endpoints.history.replace('{plotId}', plotId) + '?window=' + win
+      : config.endpoints.history.replace('{plotId}', plotId) + '?days=' + (days || 7);
+    return request(url);
   }
 
   /* 板子手动刷新：立即读一次板子并写库，返回最新读数 */

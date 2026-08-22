@@ -25,8 +25,12 @@
               <span class="text-secondary" style="font-weight:600">监测地块</span>
               <select class="form-control" id="plotSelect" style="width:220px"></select>
             </div>
-            <div class="flex gap-8" id="daysGroup">
-              <button class="btn btn-sm btn-primary" data-days="7">近 7 天</button>
+            <div class="flex gap-8" id="windowGroup">
+              <button class="btn btn-sm btn-outline" data-win="1m">1 分钟</button>
+              <button class="btn btn-sm btn-primary" data-win="30m">30 分钟</button>
+              <button class="btn btn-sm btn-outline" data-win="24h">24 小时</button>
+              <span class="text-muted" style="border-left:1px solid #e5e9e5;margin:0 6px;"></span>
+              <button class="btn btn-sm btn-outline" data-days="7">近 7 天</button>
               <button class="btn btn-sm btn-outline" data-days="14">近 14 天</button>
               <button class="btn btn-sm btn-outline" data-days="30">近 30 天</button>
             </div>
@@ -65,8 +69,10 @@
     Layout.init();
 
     var selectedPlotId = null;
-    var days = 7;
     var charts = {};
+    // 当前视图：{ key:'window'|'days', val:'1m'|'30m'|'24h' 或天数 }
+    var view = { key: 'window', val: '30m' };
+    var refreshTimer = null;
 
     var COLOR_TEMP = '#f59e0b';  // 温度：暖橙
     var COLOR_HUM  = '#3b82f6';  // 湿度：水蓝
@@ -132,11 +138,26 @@
     /* ---------- 加载历史曲线 ---------- */
     function loadHistory() {
       if (!selectedPlotId) return;
-      API.getHistory(selectedPlotId, days).then(function (res) {
+      var days = (view.key === 'days') ? view.val : null;
+      var win  = (view.key === 'window') ? view.val : null;
+      API.getHistory(selectedPlotId, days, win).then(function (res) {
+        if (!res || res.code !== 0 || !res.data) return;
         var d = res.data;
         renderChart('chartTemp', lineOption('温度（℃）', '℃', COLOR_TEMP, d.dates, d.temp));
         renderChart('chartHum', lineOption('土壤湿度（%）', '%', COLOR_HUM, d.dates, d.humidity));
       });
+    }
+
+    /* ---------- 短时窗口实时刷新：1/30 分钟每 5 秒、24 小时每 15 秒 ---------- */
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      if (view.key === 'window') {
+        var ms = (view.val === '24h') ? 15000 : 5000;
+        refreshTimer = setInterval(loadHistory, ms);
+      }
+    }
+    function stopAutoRefresh() {
+      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
     }
 
     /* ---------- 事件 ---------- */
@@ -145,12 +166,16 @@
       loadHistory();
     });
 
-    document.getElementById('daysGroup').querySelectorAll('button').forEach(function (btn) {
+    document.getElementById('windowGroup').querySelectorAll('button').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        days = parseInt(btn.getAttribute('data-days'), 10);
-        document.getElementById('daysGroup').querySelectorAll('button').forEach(function (b) {
+        var win = btn.getAttribute('data-win');
+        view = win
+          ? { key: 'window', val: win }
+          : { key: 'days', val: parseInt(btn.getAttribute('data-days'), 10) };
+        document.getElementById('windowGroup').querySelectorAll('button').forEach(function (b) {
           b.className = 'btn btn-sm ' + (b === btn ? 'btn-primary' : 'btn-outline');
         });
+        startAutoRefresh();
         loadHistory();
       });
     });
@@ -165,6 +190,7 @@
         sel.appendChild(opt);
       });
       selectedPlotId = res.data[0].id;
+      startAutoRefresh();
       loadHistory();
     });
   </script>
