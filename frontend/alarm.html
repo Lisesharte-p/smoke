@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>告警管理 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="alarm">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <!-- 未处理告警提示 -->
+        <div class="alert-banner danger" id="alertBanner"></div>
+
+        <!-- 阈值设置 -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">告警阈值设置</div>
+              <div class="card-sub">当实测值越过阈值时，系统自动触发告警并通知</div>
+            </div>
+          </div>
+          <div class="form-row" style="max-width: 560px;">
+            <div class="form-group mb-0">
+              <label class="form-label">土壤湿度下限（%）</label>
+              <input type="number" class="form-control" id="humidityMin" min="0" max="100">
+              <div class="form-hint">低于该值时触发「土壤湿度过低」告警</div>
+            </div>
+            <div class="form-group mb-0">
+              <label class="form-label">温度上限（℃）</label>
+              <input type="number" class="form-control" id="tempMax" min="-20" max="80">
+              <div class="form-hint">高于该值时触发「温度过高」告警</div>
+            </div>
+          </div>
+          <div class="mt-16">
+            <button class="btn btn-primary" id="saveThreshold">💾 保存阈值</button>
+          </div>
+        </div>
+
+        <!-- 告警记录 -->
+        <div class="card mt-20">
+          <div class="card-header">
+            <div>
+              <div class="card-title">告警记录</div>
+              <div class="card-sub">历史告警列表，可标记处理</div>
+            </div>
+            <div class="flex gap-8">
+              <a class="btn btn-outline btn-sm" href="monitoring.html">📡 查看实时数据</a>
+              <a class="btn btn-outline btn-sm" href="devices.html">🗂️ 设备管理</a>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>地块</th>
+                  <th>类型</th>
+                  <th>当前值</th>
+                  <th>等级</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="alarmBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script>
+    Layout.init();
+
+    var alarms = [];
+
+    /* ---------- 渲染告警列表 ---------- */
+    function renderAlarms() {
+      var body = document.getElementById('alarmBody');
+      body.innerHTML = '';
+
+      alarms.forEach(function (a) {
+        var levelBadge = a.level === '严重'
+          ? '<span class="badge badge-alarm"><span class="dot"></span>严重</span>'
+          : '<span class="badge badge-warning"><span class="dot"></span>警告</span>';
+        var statusBadge = a.status === '已处理'
+          ? '<span class="badge badge-normal"><span class="dot"></span>已处理</span>'
+          : '<span class="badge badge-alarm"><span class="dot"></span>未处理</span>';
+        var action = a.status === '未处理'
+          ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
+          : '<span class="text-muted">—</span>';
+
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + a.time + '</td>' +
+          '<td>' + a.plotName + '</td>' +
+          '<td>' + a.type + '</td>' +
+          '<td>' + a.value + '</td>' +
+          '<td>' + levelBadge + '</td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + action + '</td>';
+        body.appendChild(tr);
+      });
+
+      // 绑定「标记处理」
+      body.querySelectorAll('button[data-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          handleAlarm(btn.getAttribute('data-id'));
+        });
+      });
+
+      updateBanner();
+    }
+
+    /* ---------- 更新未处理告警横幅 ---------- */
+    function updateBanner() {
+      var count = alarms.filter(function (a) { return a.status === '未处理'; }).length;
+      var banner = document.getElementById('alertBanner');
+      if (count > 0) {
+        banner.style.display = 'flex';
+        banner.innerHTML = '⚠️ 当前有 <b>' + count + '</b> 条告警未处理，请及时关注。';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    /* ---------- 标记处理 ---------- */
+    function handleAlarm(id) {
+      API.updateAlarmStatus(id, '已处理').then(function () {
+        var a = alarms.filter(function (x) { return x.id === id; })[0];
+        Toast.success('告警「' + (a ? a.type : id) + '」已标记为已处理');
+        renderAlarms();
+      });
+    }
+
+    /* ---------- 加载阈值 ---------- */
+    function loadThresholds() {
+      API.getThresholds().then(function (res) {
+        document.getElementById('humidityMin').value = res.data.humidityMin;
+        document.getElementById('tempMax').value = res.data.tempMax;
+      });
+    }
+
+    /* ---------- 保存阈值 ---------- */
+    document.getElementById('saveThreshold').addEventListener('click', function () {
+      var humidityMin = parseInt(document.getElementById('humidityMin').value, 10);
+      var tempMax = parseInt(document.getElementById('tempMax').value, 10);
+
+      if (isNaN(humidityMin) || isNaN(tempMax)) {
+        Toast.error('请填写完整的阈值数值');
+        return;
+      }
+
+      API.saveThresholds({ humidityMin: humidityMin, tempMax: tempMax }).then(function () {
+        Toast.success('阈值已保存：湿度下限 ' + humidityMin + '%，温度上限 ' + tempMax + '℃');
+      });
+    });
+
+    /* ---------- 初始化 ---------- */
+    API.getAlarms().then(function (res) {
+      alarms = res.data;
+      renderAlarms();
+    });
+    loadThresholds();
+  </script>
+</body>
+</html>

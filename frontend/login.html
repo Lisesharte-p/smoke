@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+  <div class="login-page">
+    <div class="login-panel">
+      <div class="login-brand">
+        <div class="logo-big">🌾</div>
+        <h1>智慧农业平台</h1>
+        <p>物联网监测 · 设备控制 · 告警 · 智能问答</p>
+      </div>
+
+      <!-- 角色选择 -->
+      <div class="login-role" id="roleTabs">
+        <div class="role-tab active" data-role="farmer">农户</div>
+        <div class="role-tab" data-role="admin">农场管理员</div>
+        <div class="role-tab" data-role="sysadmin">系统管理员</div>
+      </div>
+
+      <!-- 账号密码 -->
+      <div class="form-group">
+        <label class="form-label">账号</label>
+        <input type="text" class="form-control" id="username" placeholder="请输入账号">
+      </div>
+      <div class="form-group">
+        <label class="form-label">密码</label>
+        <input type="password" class="form-control" id="password" placeholder="请输入密码">
+      </div>
+
+      <button class="btn btn-primary btn-block" id="loginBtn">登 录</button>
+
+      <div class="login-hint">演示环境：任意账号密码即可登录 · 选择角色后进入对应身份</div>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script>
+    var role = 'farmer';
+
+    /* ---------- 角色切换 ---------- */
+    document.getElementById('roleTabs').querySelectorAll('.role-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        document.getElementById('roleTabs').querySelectorAll('.role-tab').forEach(function (t) {
+          t.classList.remove('active');
+        });
+        tab.classList.add('active');
+        role = tab.getAttribute('data-role');
+      });
+    });
+
+    /* ---------- 登录 ---------- */
+    function doLogin() {
+      var username = document.getElementById('username').value.trim();
+      var password = document.getElementById('password').value.trim();
+      if (!username || !password) {
+        Toast.error('请输入账号和密码');
+        return;
+      }
+
+      var btn = document.getElementById('loginBtn');
+      btn.disabled = true;
+      btn.textContent = '登录中...';
+
+      API.login(username, password, role).then(function (res) {
+        if (res.code === 0) {
+          Layout.setUser({ name: res.data.name, roleName: res.data.roleName, role: res.data.role });
+          Toast.success('欢迎，' + res.data.name);
+          setTimeout(function () { location.href = 'index.html'; }, 400);
+        } else {
+          Toast.error(res.msg || '登录失败');
+          btn.disabled = false;
+          btn.textContent = '登 录';
+        }
+      });
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', doLogin);
+    document.getElementById('password').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doLogin();
+    });
+    document.getElementById('username').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doLogin();
+    });
+  </script>
+</body>
+</html>
