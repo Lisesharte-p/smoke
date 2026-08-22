@@ -47,6 +47,7 @@ public class WebServer {
         PAGES.put("/history.html", "history.html"); // 历史趋势
         PAGES.put("/control.html", "control.html"); // 设备控制
         PAGES.put("/alarm.html", "alarm.html");     // 告警管理
+        PAGES.put("/assistant.html", "assistant.html"); // 智能问答
     }
 
     public static void main(String[] args) throws IOException {
