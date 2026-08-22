@@ -59,6 +59,9 @@ public class WebServer {
         server.setExecutor(Executors.newFixedThreadPool(10));
         server.start();
 
+        // 启动板子数据采集器（后台守护线程，周期读板子数据写入 sensor_data）
+        BoardCollector.start();
+
         System.out.println("=============================================");
         System.out.println("  WebServer 已启动");
         System.out.println("  监听地址: http://localhost:" + port);
