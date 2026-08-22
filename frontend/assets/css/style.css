@@ -678,6 +678,21 @@ select.form-control { cursor: pointer; }
   color: var(--text-muted);
 }
 
+.login-switch {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.login-switch a {
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.login-switch a:hover { text-decoration: underline; }
+
 /* ==========================================================================
    弹窗（设备管理添加设备用）
    ========================================================================== */
