@@ -48,6 +48,7 @@ public class WebServer {
         PAGES.put("/control.html", "control.html"); // 设备控制
         PAGES.put("/alarm.html", "alarm.html");     // 告警管理
         PAGES.put("/assistant.html", "assistant.html"); // 智能问答
+        PAGES.put("/devices.html", "devices.html"); // 设备管理
     }
 
     public static void main(String[] args) throws IOException {
