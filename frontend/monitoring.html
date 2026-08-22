@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据监测 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="monitoring">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <!-- 地块选择工具条 -->
+        <div class="card" style="padding:14px 20px;">
+          <div class="flex-between items-center" style="flex-wrap:wrap;gap:12px;">
+            <div class="flex items-center gap-8">
+              <span class="text-secondary" style="font-weight:600">监测地块</span>
+              <select class="form-control" id="plotSelect" style="width:220px"></select>
+            </div>
+            <div class="flex items-center gap-8">
+              <span class="text-muted" id="updatedAt" style="font-size:12px">--</span>
+              <button class="btn btn-outline btn-sm" id="refreshBtn">🔄 手动刷新</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 实时数值 -->
+        <div class="grid grid-2 mt-16">
+          <div class="metric-big">
+            <div class="value" id="metricTempBox"><span id="metricTemp">--</span><span class="unit">℃</span></div>
+            <div class="label">🌡️ 实时温度</div>
+          </div>
+          <div class="metric-big">
+            <div class="value" id="metricHumBox"><span id="metricHum">--</span><span class="unit">%</span></div>
+            <div class="label">💧 土壤湿度</div>
+          </div>
+        </div>
+
+        <!-- 设备状态 -->
+        <div class="card mt-20">
+          <div class="card-header">
+            <div>
+              <div class="card-title">设备状态</div>
+              <div class="card-sub">当前地块绑定的监测设备</div>
+            </div>
+            <a class="btn btn-outline btn-sm" href="devices.html">🗂️ 设备管理</a>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>设备名称</th>
+                  <th>类型</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="deviceBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script>
+    Layout.init();
+
+    var selectedPlotId = null;
+    var devices = [];
+    var thresholds = { humidityMin: 40, tempMax: 35 };
+
+    /* ---------- 类型徽章 ---------- */
+    function typeBadge(type) {
+      if (type === '灌溉设备') return '<span class="badge badge-normal">灌溉设备</span>';
+      if (type === '温度')     return '<span class="badge badge-warning">温度</span>';
+      return '<span class="badge badge-online">土壤湿度</span>';
+    }
+
+    /* ---------- 渲染当前地块设备状态 ---------- */
+    function renderDeviceTable() {
+      var body = document.getElementById('deviceBody');
+      body.innerHTML = '';
+
+      var list = devices.filter(function (d) { return d.plotId === selectedPlotId; });
+      if (!list.length) {
+        body.innerHTML = '<tr><td colspan="4" class="empty">该地块暂无设备</td></tr>';
+        return;
+      }
+
+      list.forEach(function (d) {
+        var status = d.online
+          ? '<span class="badge badge-online"><span class="dot"></span>在线</span>'
+          : '<span class="badge badge-offline"><span class="dot"></span>离线</span>';
+        var control = d.controllable
+          ? '<a class="btn btn-sm btn-outline" href="control.html">🎛️ 去控制</a>'
+          : '<span class="text-muted">—</span>';
+
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + d.name + '</td>' +
+          '<td>' + typeBadge(d.type) + '</td>' +
+          '<td>' + status + '</td>' +
+          '<td>' + control + '</td>';
+        body.appendChild(tr);
+      });
+    }
+
+    /* ---------- 刷新实时温湿度 ---------- */
+    function refreshRealtime() {
+      if (!selectedPlotId) return;
+      API.getRealtime(selectedPlotId).then(function (res) {
+        var d = res.data;
+
+        document.getElementById('metricTemp').textContent = d.temp;
+        document.getElementById('metricTempBox').className =
+          'value' + (d.temp >= thresholds.tempMax ? ' danger' : '');
+
+        document.getElementById('metricHum').textContent = d.humidity;
+        document.getElementById('metricHumBox').className =
+          'value' + (d.humidity < thresholds.humidityMin ? ' warn' : '');
+
+        document.getElementById('updatedAt').textContent = '更新于 ' + d.updatedAt;
+      });
+    }
+
+    /* ---------- 事件 ---------- */
+    document.getElementById('plotSelect').addEventListener('change', function () {
+      selectedPlotId = this.value;
+      refreshRealtime();
+      renderDeviceTable();
+    });
+    document.getElementById('refreshBtn').addEventListener('click', refreshRealtime);
+
+    /* ---------- 初始化 ---------- */
+    API.getThresholds().then(function (res) { thresholds = res.data; });
+
+    API.getPlots().then(function (res) {
+      var sel = document.getElementById('plotSelect');
+      res.data.forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name + '（' + p.crop + '）';
+        sel.appendChild(opt);
+      });
+      selectedPlotId = res.data[0].id;
+      refreshRealtime();
+    });
+
+    API.getDevices().then(function (res) {
+      devices = res.data;
+      renderDeviceTable();
+    });
+
+    // 每 5 秒自动刷新实时数据
+    setInterval(refreshRealtime, 5000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据总览 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body data-page="dashboard">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <!-- KPI 指标卡片 -->
+        <div class="kpi-grid">
+          <a class="kpi-card" href="monitoring.html" title="查看数据监测">
+            <div class="kpi-icon green">🌾</div>
+            <div class="kpi-body">
+              <div class="kpi-label">地块总数</div>
+              <div class="kpi-value"><span id="kpiPlots">--</span><span class="unit">个</span></div>
+              <div class="kpi-trend up">全部接入监测</div>
+            </div>
+          </a>
+          <a class="kpi-card" href="devices.html" title="查看设备管理">
+            <div class="kpi-icon blue">📡</div>
+            <div class="kpi-body">
+              <div class="kpi-label">在线设备</div>
+              <div class="kpi-value"><span id="kpiOnline">--</span><span class="unit">台</span></div>
+              <div class="kpi-trend up" id="kpiOnlineTrend">在线率 --</div>
+            </div>
+          </a>
+          <a class="kpi-card" href="alarm.html" title="查看告警管理">
+            <div class="kpi-icon red">🔔</div>
+            <div class="kpi-body">
+              <div class="kpi-label">未处理告警</div>
+              <div class="kpi-value"><span id="kpiAlarm">--</span><span class="unit">条</span></div>
+              <div class="kpi-trend down">请及时处理</div>
+            </div>
+          </a>
+          <a class="kpi-card" href="monitoring.html" title="查看数据监测">
+            <div class="kpi-icon orange">🌡️</div>
+            <div class="kpi-body">
+              <div class="kpi-label">平均温度</div>
+              <div class="kpi-value"><span id="kpiTemp">--</span><span class="unit">℃</span></div>
+              <div class="kpi-trend up">各地块均值</div>
+            </div>
+          </a>
+        </div>
+
+        <!-- 多地块总览 -->
+        <div class="section-title">多地块总览</div>
+        <div class="plot-grid" id="plotGrid"></div>
+
+        <!-- 实时趋势 -->
+        <div class="card mt-20">
+          <div class="card-header">
+            <div>
+              <div class="card-title">实时趋势</div>
+              <div class="card-sub">近 7 天温湿度变化（温度 / 湿度分图显示）</div>
+            </div>
+            <div class="flex gap-8">
+              <select class="form-control" id="trendPlot" style="width:180px"></select>
+              <a class="btn btn-outline btn-sm" href="history.html">📈 完整历史</a>
+            </div>
+          </div>
+          <div id="chartTemp" style="height:230px"></div>
+          <div id="chartHum" style="height:230px;margin-top:8px"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script>
+    Layout.init();
+
+    var plots = [];
+    var devices = [];
+    var alarms = [];
+    var charts = {};
+
+    var COLOR_TEMP = '#f59e0b';  // 温度：暖橙
+    var COLOR_HUM  = '#3b82f6';  // 湿度：水蓝
+
+    /* ---------- ECharts 通用折线图配置（单指标，一轴一图） ---------- */
+    function lineOption(title, unit, color, dates, values) {
+      return {
+        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: '#1f2937' } },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#fff',
+          borderColor: '#e5e9e5',
+          borderWidth: 1,
+          padding: [8, 12],
+          textStyle: { color: '#1f2937', fontSize: 12 },
+          formatter: function (ps) {
+            var p = ps[0];
+            return p.axisValue + '<br/>' + p.marker + ' ' + p.seriesName + '　' + p.value + unit;
+          }
+        },
+        grid: { left: 8, right: 16, top: 34, bottom: 20, containLabel: true },
+        xAxis: {
+          type: 'category',
+          data: dates,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: '#e5e9e5' } },
+          axisTick: { show: false },
+          axisLabel: { color: '#9ca3af', fontSize: 10, hideOverlap: true }
+        },
+        yAxis: {
+          type: 'value',
+          scale: true,
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: { color: '#9ca3af', fontSize: 11 },
+          splitLine: { lineStyle: { color: '#eef2ee' } }
+        },
+        series: [{
+          name: title,
+          type: 'line',
+          data: values,
+          smooth: true,
+          showSymbol: false,
+          symbol: 'circle',
+          symbolSize: 6,
+          lineStyle: { width: 2, color: color },
+          itemStyle: { color: color }
+        }]
+      };
+    }
+
+    function renderChart(id, option) {
+      var dom = document.getElementById(id);
+      if (!window.echarts || !dom) return;
+      if (!charts[id]) charts[id] = echarts.init(dom);
+      charts[id].setOption(option, true);
+    }
+
+    window.addEventListener('resize', function () {
+      Object.keys(charts).forEach(function (k) { charts[k].resize(); });
+    });
+
+    /* ---------- 渲染 KPI ---------- */
+    function renderKpi() {
+      var online = devices.filter(function (d) { return d.online; }).length;
+      var unresolved = alarms.filter(function (a) { return a.status === '未处理'; }).length;
+      var avgTemp = plots.length
+        ? plots.reduce(function (s, p) { return s + p.temp; }, 0) / plots.length
+        : 0;
+      var onlineRate = devices.length ? Math.round(online / devices.length * 100) : 0;
+
+      document.getElementById('kpiPlots').textContent = plots.length;
+      document.getElementById('kpiOnline').textContent = online + '/' + devices.length;
+      document.getElementById('kpiOnlineTrend').textContent = '在线率 ' + onlineRate + '%';
+      document.getElementById('kpiAlarm').textContent = unresolved;
+      document.getElementById('kpiTemp').textContent = avgTemp.toFixed(1);
+    }
+
+    /* ---------- 渲染多地块卡片 ---------- */
+    function renderPlotCards() {
+      var grid = document.getElementById('plotGrid');
+      grid.innerHTML = '';
+
+      plots.forEach(function (p) {
+        var devs = devices.filter(function (d) { return d.plotId === p.id; });
+        var online = devs.filter(function (d) { return d.online; }).length;
+        var tempHot = p.temp >= 35;
+        var humDry = p.humidity < 40;
+
+        var card = document.createElement('div');
+        card.className = 'plot-card';
+        card.innerHTML =
+          '<div class="head">' +
+            '<div>' +
+              '<div class="name">' + p.name + '</div>' +
+              '<div class="crop">' + p.crop + ' · ' + p.area + '</div>' +
+            '</div>' +
+            '<span class="badge badge-online"><span class="dot"></span>' + online + '/' + devs.length + ' 在线</span>' +
+          '</div>' +
+          '<div class="plot-metrics">' +
+            '<div class="plot-metric"><div class="v' + (tempHot ? ' hot' : '') + '">' + p.temp + '℃</div><div class="l">温度</div></div>' +
+            '<div class="plot-metric"><div class="v' + (humDry ? ' dry' : '') + '">' + p.humidity + '%</div><div class="l">湿度</div></div>' +
+            '<div class="plot-metric"><div class="v">' + devs.length + '</div><div class="l">设备</div></div>' +
+          '</div>';
+        grid.appendChild(card);
+      });
+    }
+
+    /* ---------- 填充趋势图地块下拉 ---------- */
+    function fillPlotSelect() {
+      var sel = document.getElementById('trendPlot');
+      sel.innerHTML = '';
+      plots.forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name + '（' + p.crop + '）';
+        sel.appendChild(opt);
+      });
+    }
+
+    /* ---------- 加载趋势图 ---------- */
+    function loadTrend(plotId) {
+      API.getHistory(plotId, 7).then(function (res) {
+        var d = res.data;
+        renderChart('chartTemp', lineOption('温度（℃）', '℃', COLOR_TEMP, d.dates, d.temp));
+        renderChart('chartHum', lineOption('土壤湿度（%）', '%', COLOR_HUM, d.dates, d.humidity));
+      });
+    }
+
+    document.getElementById('trendPlot').addEventListener('change', function () {
+      loadTrend(this.value);
+    });
+
+    /* ---------- 初始化 ---------- */
+    API.getPlots().then(function (res) {
+      plots = res.data;
+      fillPlotSelect();
+      return API.getDevices();
+    }).then(function (res) {
+      devices = res.data;
+      return API.getAlarms();
+    }).then(function (res) {
+      alarms = res.data;
+      renderKpi();
+      renderPlotCards();
+      if (plots.length) loadTrend(plots[0].id);
+    });
+  </script>
+</body>
+</html>
