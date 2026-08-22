@@ -110,6 +110,8 @@ public class WebServer {
         }
         byte[] bytes = Files.readAllBytes(file);
         exchange.getResponseHeaders().set("Content-Type", contentType);
+        // 开发环境：禁止浏览器缓存页面/脚本，改完刷新即可生效（避免一直用旧 api.js）
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
         exchange.sendResponseHeaders(200, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
