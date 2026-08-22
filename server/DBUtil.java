@@ -25,8 +25,8 @@ public class DBUtil {
     // =========================================================================
 
     private static final String URL_TEMPLATE =
-            "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8"
-            + "&connectTimeout=5000&socketTimeout=10000"; // 连不上/读不到时不至于让 HTTP 请求无限挂起
+            "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8"
+            + "&connectTimeout=5000&socketTimeout=10000"; // MySQL 存的是中国本地时间，别按 UTC 读（否则显示会 +8 小时）
 
     // 注册驱动（JDBC 4+ 会自动发现，这里显式加载更稳）
     static {
