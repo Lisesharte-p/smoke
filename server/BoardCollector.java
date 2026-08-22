@@ -192,6 +192,18 @@ public class BoardCollector {
             }
             c.commit();
         }
+
+        // 阈值告警：按设备所属地块检查 temp/humidity 是否越过阈值（未处理告警自动去重）
+        String plotId = Api.plotOfDevice(DEVICE_ID);
+        if (plotId != null) {
+            try {
+                Api.checkThresholdAlarm(plotId, "temp", new BigDecimal(reading.get("temp")));
+                Api.checkThresholdAlarm(plotId, "humidity", new BigDecimal(reading.get("humidity")));
+            } catch (SQLException e) {
+                // 告警检查失败不影响本次采集结果（数据已入库），下个周期会重试
+                System.out.println("[BoardCollector] 告警检查失败（数据已入库）：" + e);
+            }
+        }
     }
 
     private static void addReading(PreparedStatement ps, String metric, String value) throws SQLException {

@@ -937,7 +937,7 @@ public class Api {
     }
 
     /** 设备所属地块；不存在返回 null */
-    private static String plotOfDevice(String deviceId) throws SQLException {
+    static String plotOfDevice(String deviceId) throws SQLException {
         String sql = "SELECT plot_id FROM device WHERE id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -949,7 +949,7 @@ public class Api {
     }
 
     /** 越过阈值时插入一条告警（同一地块同类型未处理告警不重复插） */
-    private static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
+    static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
         BigDecimal humidityMin = new BigDecimal(40);
         BigDecimal tempMax = new BigDecimal(35);
         String sql = "SELECT humidity_min, temp_max FROM plot_threshold WHERE plot_id = ?";
