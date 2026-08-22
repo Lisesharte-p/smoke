@@ -24,6 +24,7 @@ window.API = (function () {
       thresholds: '/api/thresholds',
       alarms:     '/api/alarms',
       controlLogs:'/api/control-logs',
+      boardRefresh:'/api/board/refresh',
       chat:       '/api/assistant/chat'
     }
   };
@@ -132,6 +133,12 @@ window.API = (function () {
     return request(config.endpoints.history.replace('{plotId}', plotId) + '?days=' + (days || 7));
   }
 
+  /* 板子手动刷新：立即读一次板子并写库，返回最新读数 */
+  function refreshBoard() {
+    if (config.useMock) return mockDelay({ code: 0, data: { temp: 30.5, humidity: 55, lux: 520, updatedAt: '模拟数据' } }, 300);
+    return request(config.endpoints.boardRefresh, { method: 'POST' });
+  }
+
   /* ==================================================================
      设备控制（灌溉开关）
      action: 'on' | 'off'
@@ -222,6 +229,7 @@ window.API = (function () {
     getAlarms: getAlarms,
     updateAlarmStatus: updateAlarmStatus,
     getControlLogs: getControlLogs,
+    refreshBoard: refreshBoard,
     getChatReply: getChatReply
   };
 })();
