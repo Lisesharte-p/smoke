@@ -191,6 +191,7 @@
       if (isNaN(port) || port < 1 || port > 65535) { Toast.error('请输入 1-65535 之间的端口'); return; }
 
       API.addDevice({ name: name, type: type, plotId: plotId, plotName: plot ? plot.name : '-', ip: ip, port: port }).then(function (res) {
+        if (res.code !== 0) { Toast.error(res.msg || '添加失败'); return; }
         devices.push(res.data);
         renderDevices();
         modal.classList.remove('show');

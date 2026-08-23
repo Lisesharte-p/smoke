@@ -313,6 +313,8 @@ public class Api {
                     ps.executeUpdate();
                 }
                 // 2. 绑定设备（校验后逐个插入；编号在事务内递增，避免重复）
+                java.util.Set<String> reqNames = new java.util.HashSet<>();
+                java.util.Set<String> reqAddrKeys = new java.util.HashSet<>();
                 for (Map<String, String> d : devices) {
                     String devName = d.get("name");
                     String type = d.get("type");
@@ -346,6 +348,18 @@ public class Api {
                     if ("土壤湿度".equals(type)) devType = "土壤湿度传感器";
                     else if ("温度".equals(type)) devType = "温度传感器";
                     else if ("亮度".equals(type)) devType = "亮度传感器";
+                    // 名称查重（库内 + 本次请求内）
+                    String trimmedName = devName.trim();
+                    if (deviceNameExists(trimmedName) || !reqNames.add(trimmedName)) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("设备名称已存在：" + trimmedName) + "}";
+                    }
+                    // 同类型同地址查重（库内 + 本次请求内）：不同类型可共享板子地址
+                    String addrKey = devType + "|" + ip.trim() + "|" + port;
+                    if (sameTypeAddrExists(devType, ip.trim(), port) || !reqAddrKeys.add(addrKey)) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备：设备「" + trimmedName + "」") + "}";
+                    }
                     try (PreparedStatement ps = conn.prepareStatement(
                             "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)")) {
                         ps.setString(1, nextDeviceId(conn));
@@ -511,13 +525,21 @@ public class Api {
         if ("土壤湿度".equals(type)) type = "土壤湿度传感器";
         else if ("温度".equals(type)) type = "温度传感器";
         else if ("亮度".equals(type)) type = "亮度传感器";
+        // 名称查重：全局唯一
+        if (deviceNameExists(name.trim())) {
+            return "{\"code\":1,\"msg\":" + Json.str("设备名称已存在：" + name.trim()) + "}";
+        }
+        // 同类型 + 同 IP/端口 查重：不同类型可共享板子地址，同类型不允许
+        if (sameTypeAddrExists(type, ip.trim(), port)) {
+            return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换类型或地址") + "}";
+        }
         String id = nextDeviceId();
         String sql = "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, plotId);
-            ps.setString(3, name);
+            ps.setString(3, name.trim());
             ps.setString(4, type);
             ps.setString(5, ip.trim());
             ps.setInt(6, port);
@@ -1559,6 +1581,25 @@ public class Api {
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, param);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /** 设备名称是否已被占用（全局唯一） */
+    private static boolean deviceNameExists(String name) throws SQLException {
+        return exists("SELECT 1 FROM device WHERE name = ?", name);
+    }
+
+    /** 是否存在同类型且同 IP/端口的设备（同类型设备不能共享同一个板子地址） */
+    private static boolean sameTypeAddrExists(String type, String ip, int port) throws SQLException {
+        String sql = "SELECT 1 FROM device WHERE type = ? AND ip = ? AND port = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, type);
+            ps.setString(2, ip);
+            ps.setInt(3, port);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }

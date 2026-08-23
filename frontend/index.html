@@ -367,6 +367,7 @@
       }
 
       API.addPlot({ name: name, crop: crop, area: area, devices: newDevices }).then(function (res) {
+        if (res.code !== 0) { Toast.error(res.msg || '添加失败'); return; }
         var np = res.data;
         plots.push(np);
         return API.getDevices().then(function (r2) {
