@@ -658,16 +658,31 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 .plot-metrics { display: flex; gap: 10px; }
 .plot-metric {
   flex: 1;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 12px 6px;
   border-radius: var(--radius-sm);
   background: rgba(148, 163, 184, .06);
 }
 
 .plot-metric .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
-.plot-metric .l { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.plot-metric .l { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 .plot-metric .v.hot { color: var(--danger); }
 .plot-metric .v.dry { color: var(--warning); }
+
+/* 湿度环形图（多地块总览地块卡片内） */
+.plot-metric .hum-ring-wrap { position: relative; width: 54px; height: 54px; }
+.plot-metric .hum-ring-chart { width: 100%; height: 100%; }
+.plot-metric .hum-ring-center {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.plot-metric .hum-ring-center.dry { color: var(--warning); }
 
 /* ==========================================================================
    聊天界面（智能问答用）

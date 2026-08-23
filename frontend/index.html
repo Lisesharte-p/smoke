@@ -160,6 +160,7 @@
     var devices = [];
     var alarms = [];
     var charts = {};
+    var humCharts = [];
 
     var COLOR_TEMP = '#fbbf24';  // 温度：暖橙（暗底提亮）
     var COLOR_HUM  = '#38bdf8';  // 湿度：水蓝（暗底提亮）
@@ -235,8 +236,43 @@
       charts[id].setOption(option, true);
     }
 
+    /* ---------- 湿度环形图配置（多地块总览） ---------- */
+    function humRingOption(hum) {
+      var pct = Math.max(0, Math.min(100, Number(hum) || 0));
+      return {
+        series: [{
+          type: 'pie',
+          radius: ['72%', '92%'],
+          center: ['50%', '50%'],
+          silent: true,
+          hoverAnimation: false,
+          label: { show: false },
+          labelLine: { show: false },
+          data: [
+            { value: pct, itemStyle: { color: COLOR_HUM } },
+            { value: 100 - pct, itemStyle: { color: 'rgba(148, 163, 184, .14)' } }
+          ],
+          animationDuration: 1200,
+          animationEasing: 'cubicOut'
+        }]
+      };
+    }
+
+    function renderHumRings(grid) {
+      humCharts.forEach(function (c) { try { c.dispose(); } catch (e) {} });
+      humCharts = [];
+      if (!window.echarts) return;
+      grid.querySelectorAll('.hum-ring-chart').forEach(function (dom) {
+        var hum = parseFloat(dom.getAttribute('data-hum'));
+        var chart = echarts.init(dom);
+        chart.setOption(humRingOption(hum));
+        humCharts.push(chart);
+      });
+    }
+
     window.addEventListener('resize', function () {
       Object.keys(charts).forEach(function (k) { charts[k].resize(); });
+      humCharts.forEach(function (c) { c.resize(); });
     });
 
     /* ---------- 渲染 KPI ---------- */
@@ -278,12 +314,19 @@
           '</div>' +
           '<div class="plot-metrics">' +
             '<div class="plot-metric"><div class="v' + (tempHot ? ' hot' : '') + '">' + p.temp + '℃</div><div class="l">温度</div></div>' +
-            '<div class="plot-metric"><div class="v' + (humDry ? ' dry' : '') + '">' + p.humidity + '%</div><div class="l">湿度</div></div>' +
+            '<div class="plot-metric">' +
+              '<div class="hum-ring-wrap">' +
+                '<div class="hum-ring-chart" data-hum="' + p.humidity + '"></div>' +
+                '<div class="hum-ring-center' + (humDry ? ' dry' : '') + '">' + p.humidity + '%</div>' +
+              '</div>' +
+              '<div class="l">湿度</div>' +
+            '</div>' +
             '<div class="plot-metric"><div class="v">' + devs.length + '</div><div class="l">设备</div></div>' +
           '</div>';
         grid.appendChild(card);
       });
       Animate.staggerIn(grid, { selector: '.plot-card' });
+      renderHumRings(grid);
     }
 
     /* ---------- 填充趋势图地块下拉 ---------- */
