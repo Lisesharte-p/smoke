@@ -110,7 +110,7 @@ window.Layout = (function () {
   /* ---------- 渲染侧边栏 ---------- */
   function renderSidebar(activeKey) {
     var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
-    var html = '<div class="sidebar-brand"><span class="logo">🌾</span>智慧农业平台</div>';
+    var html = '<div class="sidebar-brand">智慧农业平台</div>';
     html += '<nav class="sidebar-nav">';
 
     NAV.forEach(function (group) {
@@ -123,8 +123,7 @@ window.Layout = (function () {
       html += '<div class="nav-group-label">' + group.group + '</div>';
       items.forEach(function (item) {
         var active = item.key === activeKey ? ' active' : '';
-        html += '<a class="nav-item' + active + '" href="' + item.href + '">' +
-                '<span class="icon">' + item.icon + '</span>' + item.label + '</a>';
+        html += '<a class="nav-item' + active + '" href="' + item.href + '">' + item.label + '</a>';
       });
     });
 
