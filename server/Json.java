@@ -87,6 +87,81 @@ public class Json {
         return map;
     }
 
+    /**
+     * 从 JSON 里按 key 提取数组文本（含方括号），如取 "devices":[{...}] 里的 [{...}]。
+     * 引号感知扫描，避免值里的 [ ] 被误判；key 不存在返回 null。
+     */
+    public static String arrayText(String json, String key) {
+        if (json == null) return null;
+        String marker = "\"" + key + "\"";
+        int idx = json.indexOf(marker);
+        if (idx < 0) return null;
+        int colon = json.indexOf(':', idx + marker.length());
+        if (colon < 0) return null;
+        int start = json.indexOf('[', colon);
+        if (start < 0) return null;
+        int depth = 0;
+        boolean inStr = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inStr) {
+                if (c == '\\') i++;
+                else if (c == '"') inStr = false;
+            } else if (c == '"') {
+                inStr = true;
+            } else if (c == '[') {
+                depth++;
+            } else if (c == ']') {
+                depth--;
+                if (depth == 0) return json.substring(start, i + 1);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 解析 JSON 对象数组 [{...},{...}] → List<Map<String,String>>。
+     * 逐个切出顶层对象，交给 parseObject 解析；空数组返回空列表。
+     */
+    public static List<Map<String, String>> parseObjectArray(String arrayText) {
+        List<Map<String, String>> list = new ArrayList<>();
+        if (arrayText == null) return list;
+        String s = arrayText.trim();
+        if (s.startsWith("[")) s = s.substring(1);
+        if (s.endsWith("]")) s = s.substring(0, s.length() - 1);
+
+        boolean inStr = false;
+        int depth = 0;
+        StringBuilder cur = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inStr) {
+                cur.append(c);
+                if (c == '\\' && i + 1 < s.length()) cur.append(s.charAt(++i));
+                else if (c == '"') inStr = false;
+            } else if (c == '"') {
+                inStr = true;
+                cur.append(c);
+            } else if (c == '{' || c == '[') {
+                depth++;
+                cur.append(c);
+            } else if (c == '}' || c == ']') {
+                depth--;
+                cur.append(c);
+                if (depth == 0) {
+                    String obj = cur.toString().trim();
+                    cur.setLength(0);
+                    if (obj.startsWith("{")) list.add(parseObject(obj));
+                }
+            } else if (c == ',' && depth == 0) {
+                // 对象之间的分隔符，跳过
+            } else {
+                cur.append(c);
+            }
+        }
+        return list;
+    }
+
     /** 去掉首尾引号并反转义（仅处理字符串值） */
     private static String unquote(String s) {
         if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {

@@ -17,6 +17,7 @@ window.API = (function () {
       login:      '/api/auth/login',
       register:   '/api/auth/register',
       plots:      '/api/plots',
+      plot:       '/api/plots/{plotId}',
       devices:    '/api/devices',
       realtime:   '/api/plots/{plotId}/realtime',
       history:    '/api/plots/{plotId}/history',
@@ -82,6 +83,54 @@ window.API = (function () {
   function getPlots() {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.plots });
     return request(config.endpoints.plots);
+  }
+
+  /* 新增地块；data: {name, crop, area, devices?:[{name,type,ip,port},...]}，devices 为可选绑定设备 */
+  function addPlot(data) {
+    if (config.useMock) {
+      var id = 'P' + (100 + window.MOCK.plots.length + 1);
+      var devs = data.devices || [];
+      var plot = {
+        id: id,
+        name: data.name,
+        crop: data.crop,
+        area: data.area + '亩',
+        temp: null,
+        humidity: null,
+        deviceCount: devs.length,
+        onlineCount: devs.length
+      };
+      window.MOCK.plots.push(plot);
+      devs.forEach(function (d) {
+        window.MOCK.devices.push({
+          id: 'D' + (100 + window.MOCK.devices.length + 1),
+          name: d.name,
+          type: d.type,
+          plotId: id,
+          plotName: data.name,
+          ip: d.ip,
+          port: d.port,
+          online: true,
+          controllable: d.type === '灌溉设备',
+          running: false
+        });
+      });
+      return mockDelay({ code: 0, data: plot }, 300);
+    }
+    return request(config.endpoints.plots, { method: 'POST', data: data });
+  }
+
+  /* 删除地块（后端级联删除其设备与关联数据） */
+  function deletePlot(plotId) {
+    if (config.useMock) {
+      var arr = window.MOCK.plots;
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i].id === plotId) { arr.splice(i, 1); break; }
+      }
+      window.MOCK.devices = window.MOCK.devices.filter(function (d) { return d.plotId !== plotId; });
+      return mockDelay({ code: 0 }, 300);
+    }
+    return request(config.endpoints.plot.replace('{plotId}', plotId), { method: 'DELETE' });
   }
 
   /* ==================================================================
@@ -243,6 +292,8 @@ window.API = (function () {
     login: login,
     register: register,
     getPlots: getPlots,
+    addPlot: addPlot,
+    deletePlot: deletePlot,
     getDevices: getDevices,
     addDevice: addDevice,
     unbindDevice: unbindDevice,

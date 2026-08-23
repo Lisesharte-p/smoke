@@ -55,7 +55,10 @@
         </div>
 
         <!-- 多地块总览 -->
-        <div class="section-title">多地块总览</div>
+        <div class="section-title">
+          <span>多地块总览</span>
+          <button class="btn btn-primary btn-sm" id="openAddPlot" style="margin-left:auto">＋ 添加地块</button>
+        </div>
         <div class="plot-grid" id="plotGrid"></div>
 
         <!-- 实时趋势 -->
@@ -74,6 +77,36 @@
           <div id="chartHum" style="height:230px;margin-top:8px"></div>
         </div>
       </main>
+    </div>
+  </div>
+
+  <!-- 添加地块弹窗（可选绑定新设备） -->
+  <div class="modal-mask" id="addPlotModal">
+    <div class="modal">
+      <div class="modal-title">添加地块</div>
+      <div class="form-group">
+        <label class="form-label">地块名称</label>
+        <input type="text" class="form-control" id="plotName" placeholder="如：五号大棚">
+      </div>
+      <div class="form-group">
+        <label class="form-label">种植作物</label>
+        <input type="text" class="form-control" id="plotCrop" placeholder="如：西瓜">
+      </div>
+      <div class="form-group">
+        <label class="form-label">面积（亩）</label>
+        <input type="number" class="form-control" id="plotArea" min="0.1" step="0.1" placeholder="如：2.0">
+      </div>
+      <div class="form-group">
+        <div class="flex-between">
+          <label class="form-label" style="margin-bottom:0">绑定设备（可选）</label>
+          <button class="btn btn-outline btn-sm" id="addDevRow" type="button">＋ 添加设备</button>
+        </div>
+        <div id="devRows"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelAddPlot">取消</button>
+        <button class="btn btn-primary" id="confirmAddPlot">确认添加</button>
+      </div>
     </div>
   </div>
 
@@ -202,7 +235,10 @@
               '<div class="name">' + p.name + '</div>' +
               '<div class="crop">' + p.crop + ' · ' + p.area + '</div>' +
             '</div>' +
-            '<span class="badge badge-online"><span class="dot"></span>' + online + '/' + devs.length + ' 在线</span>' +
+            '<div class="flex gap-8">' +
+              '<span class="badge badge-online"><span class="dot"></span>' + online + '/' + devs.length + ' 在线</span>' +
+              '<button class="btn btn-danger btn-sm plot-del">删除</button>' +
+            '</div>' +
           '</div>' +
           '<div class="plot-metrics">' +
             '<div class="plot-metric"><div class="v' + (tempHot ? ' hot' : '') + '">' + p.temp + '℃</div><div class="l">温度</div></div>' +
@@ -210,6 +246,9 @@
             '<div class="plot-metric"><div class="v">' + devs.length + '</div><div class="l">设备</div></div>' +
           '</div>';
         grid.appendChild(card);
+        card.querySelector('.plot-del').addEventListener('click', function () {
+          handleDeletePlot(p);
+        });
       });
       Animate.staggerIn(grid, { selector: '.plot-card' });
     }
@@ -237,6 +276,107 @@
 
     document.getElementById('trendPlot').addEventListener('change', function () {
       loadTrend(this.value);
+    });
+
+    /* ---------- 删除地块 ---------- */
+    function handleDeletePlot(plot) {
+      var msg = '确定要删除地块「' + plot.name + '」吗？\n\n' +
+                '删除后，该地块下的 ' + plot.deviceCount + ' 台设备及其监测数据、' +
+                '控制日志、告警记录、阈值配置将一并删除，且不可恢复。';
+      if (!confirm(msg)) return;
+
+      API.deletePlot(plot.id).then(function () {
+        plots = plots.filter(function (p) { return p.id !== plot.id; });
+        devices = devices.filter(function (d) { return d.plotId !== plot.id; });
+        renderKpi();
+        renderPlotCards();
+        fillPlotSelect();
+        if (plots.length) loadTrend(plots[0].id);
+        Toast.success('地块「' + plot.name + '」已删除');
+      });
+    }
+
+    /* ---------- 添加地块：动态设备行 ---------- */
+    function addDeviceRow(dev) {
+      dev = dev || {};
+      var row = document.createElement('div');
+      row.className = 'flex gap-8 device-row';
+      row.style.marginTop = '8px';
+      row.innerHTML =
+        '<input type="text" class="form-control dev-name" style="flex:2" placeholder="设备名称" value="' + (dev.name || '') + '">' +
+        '<select class="form-control dev-type" style="flex:1.2">' +
+          '<option>土壤湿度</option>' +
+          '<option>温度</option>' +
+          '<option>灌溉设备</option>' +
+        '</select>' +
+        '<input type="text" class="form-control dev-ip" style="flex:2" placeholder="设备 IP" value="' + (dev.ip || '') + '">' +
+        '<input type="number" class="form-control dev-port" style="flex:1" min="1" max="65535" placeholder="端口" value="' + (dev.port || '') + '">' +
+        '<button class="btn btn-danger btn-sm dev-del" type="button">✕</button>';
+      row.querySelector('.dev-del').addEventListener('click', function () { row.remove(); });
+      document.getElementById('devRows').appendChild(row);
+    }
+    document.getElementById('addDevRow').addEventListener('click', function () { addDeviceRow(); });
+
+    /* ---------- 添加地块弹窗控制 ---------- */
+    var addPlotModal = document.getElementById('addPlotModal');
+    document.getElementById('openAddPlot').addEventListener('click', function () {
+      document.getElementById('plotName').value = '';
+      document.getElementById('plotCrop').value = '';
+      document.getElementById('plotArea').value = '';
+      document.getElementById('devRows').innerHTML = '';
+      addPlotModal.classList.add('show');
+    });
+    document.getElementById('cancelAddPlot').addEventListener('click', function () {
+      addPlotModal.classList.remove('show');
+    });
+    // 点击遮罩空白处关闭
+    addPlotModal.addEventListener('click', function (e) {
+      if (e.target === addPlotModal) addPlotModal.classList.remove('show');
+    });
+
+    /* ---------- 确认添加地块 ---------- */
+    document.getElementById('confirmAddPlot').addEventListener('click', function () {
+      var name = document.getElementById('plotName').value.trim();
+      var crop = document.getElementById('plotCrop').value.trim();
+      var area = parseFloat(document.getElementById('plotArea').value.trim());
+      if (!name) { Toast.error('请输入地块名称'); return; }
+      if (!crop) { Toast.error('请输入种植作物'); return; }
+      if (isNaN(area) || area <= 0) { Toast.error('请输入大于 0 的面积（亩）'); return; }
+
+      // 收集并校验设备行（可为空，即不绑定设备）
+      var newDevices = [];
+      document.querySelectorAll('#devRows .device-row').forEach(function (row) {
+        newDevices.push({
+          name: row.querySelector('.dev-name').value.trim(),
+          type: row.querySelector('.dev-type').value,
+          ip: row.querySelector('.dev-ip').value.trim(),
+          port: parseInt(row.querySelector('.dev-port').value.trim(), 10)
+        });
+      });
+      for (var i = 0; i < newDevices.length; i++) {
+        var d = newDevices[i];
+        if (!d.name) { Toast.error('请填写设备名称'); return; }
+        if (!d.ip) { Toast.error('设备「' + d.name + '」需填写 IP'); return; }
+        if (isNaN(d.port) || d.port < 1 || d.port > 65535) {
+          Toast.error('设备「' + d.name + '」端口需在 1-65535 之间'); return;
+        }
+      }
+
+      API.addPlot({ name: name, crop: crop, area: area, devices: newDevices }).then(function (res) {
+        var np = res.data;
+        plots.push(np);
+        return API.getDevices().then(function (r2) {
+          devices = r2.data;
+          renderKpi();
+          renderPlotCards();
+          fillPlotSelect();
+          document.getElementById('trendPlot').value = np.id;
+          loadTrend(np.id);
+          addPlotModal.classList.remove('show');
+          document.getElementById('devRows').innerHTML = '';
+          Toast.success('地块「' + np.name + '」添加成功');
+        });
+      });
     });
 
     /* ---------- 初始化 ---------- */

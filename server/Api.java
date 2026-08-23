@@ -40,6 +40,14 @@ public class Api {
                 ok(ex, plotsJson());
                 return true;
             }
+            if ("POST".equals(method) && path.equals("/api/plots")) {
+                ok(ex, addPlotJson(ex));
+                return true;
+            }
+            if ("DELETE".equals(method) && path.matches("/api/plots/[^/]+")) {
+                ok(ex, deletePlotJson(path.substring("/api/plots/".length())));
+                return true;
+            }
 
             /* ---------- 设备 ---------- */
             if ("GET".equals(method) && path.equals("/api/devices")) {
@@ -199,6 +207,184 @@ public class Api {
         return area.stripTrailingZeros().toPlainString() + "亩";
     }
 
+    /** 生成新的地块编号：P + (当前最大编号数字 + 1)，如 P005 */
+    private static String nextPlotId() throws SQLException {
+        String sql = "SELECT MAX(CAST(SUBSTRING(id, 2) AS UNSIGNED)) FROM plot";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            int max = 0;
+            if (rs.next()) max = rs.getInt(1);
+            return String.format("P%03d", max + 1);
+        }
+    }
+
+    /** 按地块编号查单个地块 JSON（与列表项形状一致）；不存在返回 null */
+    private static String plotJson(String plotId) throws SQLException {
+        String sql =
+                "SELECT p.id, p.name, p.crop, p.area," +
+                "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id) AS deviceCount," +
+                "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id AND d.online=1) AS onlineCount" +
+                " FROM plot p WHERE p.id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "null";
+                return "{\"id\":" + Json.str(rs.getString("id"))
+                        + ",\"name\":" + Json.str(rs.getString("name"))
+                        + ",\"crop\":" + Json.str(rs.getString("crop"))
+                        + ",\"area\":" + Json.str(areaStr(rs.getBigDecimal("area")))
+                        + ",\"temp\":" + Json.num(latestValue(plotId, "temp"))
+                        + ",\"humidity\":" + Json.num(latestValue(plotId, "humidity"))
+                        + ",\"deviceCount\":" + rs.getInt("deviceCount")
+                        + ",\"onlineCount\":" + rs.getInt("onlineCount")
+                        + "}";
+            }
+        }
+    }
+
+    /**
+     * POST /api/plots —— 新增地块。
+     * 请求体：{name, crop, area, devices?:[{name,type,ip,port},...]}。
+     * devices 为可选：添加地块时同步绑定新设备（每个设备 name/type/ip/port 必填），
+     * 与地块同在一个事务里，任一设备校验不过则整单回滚。
+     */
+    private static String addPlotJson(HttpExchange ex) throws IOException, SQLException {
+        String raw = readBody(ex);
+        Map<String, String> body = Json.parseObject(raw);
+        String name = body.get("name");
+        String crop = body.get("crop");
+        String area = body.get("area");
+        if (name == null || name.trim().isEmpty()
+                || crop == null || crop.trim().isEmpty()
+                || area == null || area.trim().isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：name/crop/area 必填") + "}";
+        }
+        BigDecimal areaVal;
+        try {
+            areaVal = new BigDecimal(area.trim());
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：area 必须是数字") + "}";
+        }
+        if (areaVal.compareTo(BigDecimal.ZERO) <= 0) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：area 需大于 0") + "}";
+        }
+
+        String plotId = nextPlotId();
+        List<Map<String, String>> devices = Json.parseObjectArray(Json.arrayText(raw, "devices"));
+
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // 1. 插入地块
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO plot(id, name, crop, area) VALUES (?, ?, ?, ?)")) {
+                    ps.setString(1, plotId);
+                    ps.setString(2, name.trim());
+                    ps.setString(3, crop.trim());
+                    ps.setBigDecimal(4, areaVal);
+                    ps.executeUpdate();
+                }
+                // 2. 绑定设备（校验后逐个插入；编号在事务内递增，避免重复）
+                for (Map<String, String> d : devices) {
+                    String devName = d.get("name");
+                    String type = d.get("type");
+                    String ip = d.get("ip");
+                    String portStr = d.get("port");
+                    if (devName == null || devName.trim().isEmpty()) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("设备名称不能为空") + "}";
+                    }
+                    if (type == null || type.isEmpty()) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("设备「" + devName + "」需选择类型") + "}";
+                    }
+                    if (ip == null || ip.trim().isEmpty() || portStr == null || portStr.trim().isEmpty()) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("设备「" + devName + "」需填写 IP 和端口") + "}";
+                    }
+                    int port;
+                    try {
+                        port = Integer.parseInt(portStr.trim());
+                    } catch (NumberFormatException e) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("设备「" + devName + "」端口必须是数字") + "}";
+                    }
+                    if (port < 1 || port > 65535) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("设备「" + devName + "」端口需在 1-65535 之间") + "}";
+                    }
+                    // 前端类型契约 → 入库类型（与 addDeviceJson 同一套映射）
+                    String devType = type;
+                    if ("土壤湿度".equals(type)) devType = "土壤湿度传感器";
+                    else if ("温度".equals(type)) devType = "温度传感器";
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)")) {
+                        ps.setString(1, nextDeviceId(conn));
+                        ps.setString(2, plotId);
+                        ps.setString(3, devName.trim());
+                        ps.setString(4, devType);
+                        ps.setString(5, ip.trim());
+                        ps.setInt(6, port);
+                        ps.executeUpdate();
+                    }
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+        return "{\"code\":0,\"data\":" + plotJson(plotId) + "}";
+    }
+
+    /**
+     * DELETE /api/plots/{plotId} —— 删除地块。
+     * 级联删除该地块下的所有关联数据（同一事务，要么全删要么全不删）：
+     *   device（及其 sensor_data / control_log）→ alarm → plot_threshold → plot
+     */
+    private static String deletePlotJson(String plotId) throws SQLException {
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // 0. 地块是否存在
+                try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM plot WHERE id = ?")) {
+                    ps.setString(1, plotId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            conn.rollback();
+                            return "{\"code\":1,\"msg\":" + Json.str("地块不存在: " + plotId) + "}";
+                        }
+                    }
+                }
+                // 1. 先删该地块下设备的传感器数据 / 控制日志，再删设备本身
+                exec(conn, "DELETE FROM sensor_data WHERE device_id IN (SELECT id FROM device WHERE plot_id = ?)", plotId);
+                exec(conn, "DELETE FROM control_log WHERE device_id IN (SELECT id FROM device WHERE plot_id = ?)", plotId);
+                exec(conn, "DELETE FROM device WHERE plot_id = ?", plotId);
+                // 2. 该地块的告警（含设备离线等按地块归类的告警）
+                exec(conn, "DELETE FROM alarm WHERE plot_id = ?", plotId);
+                // 3. 阈值配置
+                exec(conn, "DELETE FROM plot_threshold WHERE plot_id = ?", plotId);
+                // 4. 地块本身
+                exec(conn, "DELETE FROM plot WHERE id = ?", plotId);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+        return "{\"code\":0}";
+    }
+
+    /** 事务内执行一条带单参数的 DELETE/UPDATE，供级联删除复用 */
+    private static void exec(Connection conn, String sql, String param) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, param);
+            ps.executeUpdate();
+        }
+    }
+
     /* ==================================================================
        设备
        ================================================================== */
@@ -294,9 +480,15 @@ public class Api {
 
     /** 生成新的设备编号：D + (当前最大编号数字 + 1)，如 D006 */
     private static String nextDeviceId() throws SQLException {
+        try (Connection conn = DBUtil.getConnection()) {
+            return nextDeviceId(conn);
+        }
+    }
+
+    /** 在指定连接里生成设备编号：事务内连续新增设备时能看到自己的未提交插入，编号不会重复 */
+    private static String nextDeviceId(Connection conn) throws SQLException {
         String sql = "SELECT MAX(CAST(SUBSTRING(id, 2) AS UNSIGNED)) FROM device";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
+        try (PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
             int max = 0;
             if (rs.next()) max = rs.getInt(1);
