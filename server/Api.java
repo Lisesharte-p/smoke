@@ -1226,8 +1226,9 @@ public class Api {
         if (DEEPSEEK_API_KEY == null || DEEPSEEK_API_KEY.isEmpty()) {
             throw new IOException("未配置环境变量 DEEPSEEK_API_KEY");
         }
-        // 系统提示：基础角色 + 当前时间 + 最新一次采集的温湿度/光照数据（让回答结合实时数据）
+        // 系统提示：基础角色 + 当前时间 + 实时数据 + 地块/灌溉历史（让回答结合实时数据）
         String dataCtx = latestReadingsContext();
+        String plotCtx = plotContext();
         String now = java.time.LocalDateTime.now()
                 .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
         String system = "你是「智慧农业平台」的智能助手，负责解答大棚种植、灌溉、温湿度监测、告警阈值、设备控制等农业问题。"
@@ -1236,6 +1237,9 @@ public class Api {
         if (!dataCtx.isEmpty()) {
             system += " 当前系统实时采集的环境数据如下：" + dataCtx
                     + " 回答灌溉、通风等建议时可参考这些数据，但不要编造未提供的数据。";
+        }
+        if (!plotCtx.isEmpty()) {
+            system += " " + plotCtx;
         }
 
         StringBuilder req = new StringBuilder();
@@ -1307,6 +1311,62 @@ public class Api {
         if (temp != null) sb.append("温度 ").append(temp).append("℃，");
         if (humidity != null) sb.append("湿度 ").append(humidity).append("%，");
         if (lux != null) sb.append("光照 ").append(lux).append(" lx");
+        return sb.toString();
+    }
+
+    /**
+     * 汇总当前管理的所有地块的作物/面积信息，以及每个地块最近一次灌溉操作记录。
+     * 返回供大模型参考的地块上下文；某地块无灌溉记录时标注「无历史记录」。
+     */
+    private static String plotContext() throws SQLException {
+        // 1. 地块列表：id, name, crop, area
+        List<String[]> plots = new ArrayList<>();
+        String plotSql = "SELECT id, name, crop, area FROM plot ORDER BY id";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(plotSql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                plots.add(new String[]{ rs.getString("id"), rs.getString("name"), rs.getString("crop"),
+                        rs.getBigDecimal("area").stripTrailingZeros().toPlainString() });
+            }
+        }
+        if (plots.isEmpty()) return "";
+
+        // 2. 每个地块最近一次灌溉操作：plotId -> {action, result, operator, time}
+        Map<String, String[]> lastOp = new HashMap<>();
+        String logSql =
+                "SELECT d.plot_id, c.action, c.result, c.operator," +
+                " DATE_FORMAT(c.created_at, '%Y-%m-%d %H:%i') AS t" +
+                " FROM control_log c JOIN device d ON d.id = c.device_id" +
+                " WHERE c.id IN (" +
+                "  SELECT MAX(c2.id) FROM control_log c2 JOIN device d2 ON d2.id = c2.device_id GROUP BY d2.plot_id)";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(logSql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                lastOp.put(rs.getString("plot_id"), new String[]{
+                        rs.getString("action"), rs.getString("result"),
+                        rs.getString("operator"), rs.getString("t") });
+            }
+        }
+
+        // 3. 拼上下文
+        StringBuilder sb = new StringBuilder("当前管理的地块信息（作物、面积）：");
+        for (String[] p : plots) {
+            sb.append('\n').append("- ").append(p[1]).append("（").append(p[0])
+              .append("）：种植 ").append(p[2]).append("，面积 ").append(p[3]).append(" 亩");
+        }
+        sb.append("。各地块最近一次灌溉操作：");
+        for (String[] p : plots) {
+            sb.append('\n').append("- ").append(p[1]).append("（").append(p[0]).append("）：");
+            String[] op = lastOp.get(p[0]);
+            if (op == null) {
+                sb.append("无历史记录");
+            } else {
+                sb.append("「").append(op[0]).append("」").append(op[1])
+                  .append("，操作人 ").append(op[2]).append("，时间 ").append(op[3]);
+            }
+        }
         return sb.toString();
     }
 
