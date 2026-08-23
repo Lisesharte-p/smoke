@@ -147,7 +147,15 @@ static int HandleClientRequest(int fd)
         } else if (strncmp(recvbuf, "ping", 4) == 0 || strncmp(recvbuf, "PING", 4) == 0) {
             /* 连通性测试 */
             send(fd, "PONG", 5, 0);
-        } else {
+        } else if(strncmp(recvbuf,"on",2)==0) {
+            MotorStatusSet(ON);
+            const char *unknown = "motor started";
+            send(fd, unknown, strlen(unknown) + 1, 0);
+        }else if(strncmp(recvbuf,"off",3)==0){
+            MotorStatusSet(OFF);
+            const char *unknown = "motor stopped";
+            send(fd, unknown, strlen(unknown) + 1, 0);
+        }else{
             const char *unknown = "UNKNOWN CMD, try: query / ping";
             send(fd, unknown, strlen(unknown) + 1, 0);
         }
