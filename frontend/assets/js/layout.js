@@ -110,7 +110,13 @@ window.Layout = (function () {
   /* ---------- 渲染顶部导航（标题 + 选项） ---------- */
   function renderSidebar(activeKey) {
     var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
-    var html = '<div class="sidebar-brand">智慧农业平台</div>';
+    var html = '<div class="sidebar-brand">' +
+               '<span class="brand-logo">🌾</span>' +
+               '<span class="brand-text">' +
+                 '<span class="brand-name">智慧农业平台</span>' +
+                 '<span class="brand-sub">SMART AGRICULTURE</span>' +
+               '</span>' +
+               '</div>';
     html += '<nav class="sidebar-nav">';
 
     NAV.forEach(function (group) {
