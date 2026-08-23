@@ -30,7 +30,7 @@ import java.util.Map;
 public class BoardCollector {
 
     /** 板子地址 */
-    public static final String BOARD_HOST = "192.168.70.190";
+    public static final String BOARD_HOST = "192.168.70.167";
     public static final int    BOARD_PORT = 8888;
 
     /** 写入 sensor_data 的设备 id（见 07_板子环境数据采集.sql） */
