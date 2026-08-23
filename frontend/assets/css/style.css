@@ -959,3 +959,35 @@ select.form-control { cursor: pointer; }
   from { opacity: 0; transform: translateX(8px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+
+/* ==========================================================================
+   智能问答：历史对话栏目
+   ========================================================================== */
+.chat-layout { display: flex; gap: 16px; align-items: flex-start; }
+.conv-panel {
+  width: 250px;
+  flex-shrink: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.conv-panel .btn-block { width: 100%; display: block; }
+.conv-list { margin-top: 10px; max-height: 540px; overflow-y: auto; }
+.conv-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+}
+.conv-item:hover { background: var(--bg); }
+.conv-item.active { background: var(--bg); border-color: var(--primary); }
+.conv-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.conv-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px 0; }
+.chat-main { flex: 1; min-width: 0; }
+@media (max-width: 860px) {
+  .chat-layout { flex-direction: column; }
+  .conv-panel { width: 100%; }
+}

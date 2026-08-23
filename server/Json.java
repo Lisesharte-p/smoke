@@ -162,6 +162,44 @@ public class Json {
         return list;
     }
 
+    /**
+     * 从 JSON 里取某个 key 的字符串值（如 "content":"..." 里的 ...）。
+     * 取最后一个匹配（大模型响应里 content 通常只有一处），自动去引号反转义。
+     * 找不到返回 null。
+     */
+    public static String strValue(String json, String key) {
+        if (json == null) return null;
+        String marker = "\"" + key + "\"";
+        int idx = json.lastIndexOf(marker);
+        if (idx < 0) return null;
+        int colon = json.indexOf(':', idx + marker.length());
+        if (colon < 0) return null;
+        int q = colon + 1;
+        while (q < json.length() && (json.charAt(q) == ' ' || json.charAt(q) == '\t')) q++;
+        if (q >= json.length() || json.charAt(q) != '"') return null;
+        StringBuilder sb = new StringBuilder();
+        boolean closed = false;
+        for (int i = q + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '\\' && i + 1 < json.length()) {
+                char n = json.charAt(++i);
+                if (n == 'n') sb.append('\n');
+                else if (n == 'r') sb.append('\r');
+                else if (n == 't') sb.append('\t');
+                else if (n == '"') sb.append('"');
+                else if (n == '\\') sb.append('\\');
+                else if (n == '/') sb.append('/');
+                else sb.append(n);
+            } else if (c == '"') {
+                closed = true;
+                break;
+            } else {
+                sb.append(c);
+            }
+        }
+        return closed ? sb.toString() : null;
+    }
+
     /** 去掉首尾引号并反转义（仅处理字符串值） */
     private static String unquote(String s) {
         if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {

@@ -17,23 +17,34 @@
       <header class="topbar" id="topbar"></header>
 
       <main class="content">
-        <div class="card" style="padding: 20px;">
-          <div class="chat-wrap">
-            <!-- 快捷提问 -->
-            <div class="quick-asks">
-              <button class="chip" data-q="现在该浇水吗？">现在该浇水吗？</button>
-              <button class="chip" data-q="土壤太干怎么办？">土壤太干怎么办？</button>
-              <button class="chip" data-q="如何设置告警阈值？">如何设置告警阈值？</button>
-              <button class="chip" data-q="温度太高怎么办？">温度太高怎么办？</button>
-            </div>
+        <div class="chat-layout">
+          <!-- 历史对话栏目 -->
+          <div class="conv-panel">
+            <button class="btn btn-primary btn-sm btn-block" id="newChatBtn">＋ 新建对话</button>
+            <div class="conv-list" id="convList"></div>
+          </div>
 
-            <!-- 消息列表 -->
-            <div class="chat-messages" id="chatMessages"></div>
+          <!-- 聊天主区 -->
+          <div class="chat-main">
+            <div class="card" style="padding: 20px;">
+              <div class="chat-wrap">
+                <!-- 快捷提问 -->
+                <div class="quick-asks">
+                  <button class="chip" data-q="现在该浇水吗？">现在该浇水吗？</button>
+                  <button class="chip" data-q="土壤太干怎么办？">土壤太干怎么办？</button>
+                  <button class="chip" data-q="如何设置告警阈值？">如何设置告警阈值？</button>
+                  <button class="chip" data-q="温度太高怎么办？">温度太高怎么办？</button>
+                </div>
 
-            <!-- 输入区 -->
-            <div class="chat-input-bar">
-              <input type="text" class="form-control" id="chatInput" placeholder="输入灌溉相关问题，例如：现在该浇水吗？">
-              <button class="btn btn-primary" id="sendBtn">发送</button>
+                <!-- 消息列表 -->
+                <div class="chat-messages" id="chatMessages"></div>
+
+                <!-- 输入区 -->
+                <div class="chat-input-bar">
+                  <input type="text" class="form-control" id="chatInput" placeholder="输入灌溉相关问题，例如：现在该浇水吗？">
+                  <button class="btn btn-primary" id="sendBtn">发送</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -51,6 +62,14 @@
     var messagesEl = document.getElementById('chatMessages');
     var inputEl = document.getElementById('chatInput');
     var sendBtn = document.getElementById('sendBtn');
+    var chatHistory = [];   // 多轮对话历史 [{role,content},...]，每次整段发给后端（勿用 history，会与浏览器内置对象冲突）
+    var activeConvId = null; // 当前会话 id（null = 新建未落库）
+
+    /* 当前用户名（对话历史按用户隔离）；未登录兜底用 guest */
+    function getUsername() {
+      var u = Layout.getUser();
+      return u.username || u.name || 'guest';
+    }
 
     /* ---------- 添加一条消息 ---------- */
     function addMessage(role, text, action, typew) {
@@ -103,13 +122,70 @@
       if (!question) return;
 
       addMessage('user', question);
+      chatHistory.push({ role: 'user', content: question });
       inputEl.value = '';
       showTyping();
 
-      API.getChatReply(question).then(function (res) {
+      API.getChatReply(getUsername(), chatHistory, activeConvId).then(function (res) {
         hideTyping();
-        addMessage('bot', res.data.answer, res.data.action, true);
+        if (res.code === 0 && res.data) {
+          var answer = res.data.answer;
+          chatHistory.push({ role: 'assistant', content: answer });
+          if (res.data.conversationId) activeConvId = res.data.conversationId;
+          addMessage('bot', answer, res.data.action, true);
+          renderConvs(activeConvId);   // 刷新历史列表并高亮当前会话
+        } else {
+          addMessage('bot', '😅 ' + (res.msg || '大模型暂时不可用，请稍后再试。'));
+        }
       });
+    }
+
+    /* ---------- 历史对话列表 ---------- */
+    function renderConvs(selectId) {
+      var list = document.getElementById('convList');
+      list.innerHTML = '';
+      API.getConversations(getUsername()).then(function (res) {
+        if (res.code !== 0) return;
+        var convs = res.data || [];
+        list.innerHTML = '';
+        if (!convs.length) {
+          list.innerHTML = '<div class="conv-empty">暂无历史对话</div>';
+          return;
+        }
+        convs.forEach(function (c) {
+          var item = document.createElement('div');
+          item.className = 'conv-item' + (c.id === selectId ? ' active' : '');
+          item.innerHTML = '<div class="conv-title">' + c.title + '</div>' +
+                           '<div class="conv-meta">' + (c.messageCount || 0) + ' 条 · ' + (c.updatedAt || '') + '</div>';
+          item.addEventListener('click', function () { openConversation(c.id); });
+          list.appendChild(item);
+        });
+      });
+    }
+
+    /* ---------- 打开某次历史对话 ---------- */
+    function openConversation(convId) {
+      API.getConversationMessages(convId, getUsername()).then(function (res) {
+        if (res.code !== 0) { Toast.error(res.msg || '加载对话失败'); return; }
+        var d = res.data;
+        activeConvId = d.id;
+        chatHistory = d.messages || [];
+        messagesEl.innerHTML = '';
+        chatHistory.forEach(function (m) {
+          addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content, null, false);
+        });
+        scrollBottom();
+        renderConvs(convId);
+      });
+    }
+
+    /* ---------- 新建对话 ---------- */
+    function newConversation() {
+      activeConvId = null;
+      chatHistory = [];
+      messagesEl.innerHTML = '';
+      addMessage('bot', '你好，我是智慧农业助手 🌾 可以为您提供灌溉建议和农事指导。您可以点击下方快捷问题，或直接输入您的问题。');
+      renderConvs();
     }
 
     /* ---------- 事件绑定 ---------- */
@@ -117,13 +193,15 @@
     inputEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') send(inputEl.value);
     });
+    document.getElementById('newChatBtn').addEventListener('click', newConversation);
 
     document.querySelectorAll('.chip').forEach(function (chip) {
       chip.addEventListener('click', function () { send(chip.getAttribute('data-q')); });
     });
 
-    /* ---------- 初始欢迎消息 ---------- */
+    /* ---------- 初始：欢迎消息 + 历史列表 ---------- */
     addMessage('bot', '你好，我是智慧农业助手 🌾 可以为您提供灌溉建议和农事指导。您可以点击下方快捷问题，或直接输入您的问题。');
+    renderConvs();
   </script>
 </body>
 </html>

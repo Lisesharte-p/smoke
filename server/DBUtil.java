@@ -3,6 +3,7 @@ package server;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 
 /**
  * 数据库连接工具：所有数据库访问统一从这里拿 Connection。
@@ -56,5 +57,42 @@ public class DBUtil {
     public static Connection getConnection(String db) throws SQLException {
         String url = String.format(URL_TEMPLATE, HOST, PORT, db);
         return DriverManager.getConnection(url, USER, PASS);
+    }
+
+    /**
+     * 建对话历史相关表（CREATE TABLE IF NOT EXISTS，幂等），服务器启动时调用一次。
+     * conversation 按 username 隔离，chat_message 存每轮 user/assistant 消息。
+     */
+    public static void ensureChatTables() {
+        String[] ddl = {
+            "CREATE TABLE IF NOT EXISTS conversation (" +
+            "  id BIGINT NOT NULL AUTO_INCREMENT," +
+            "  username VARCHAR(50) NOT NULL COMMENT '所属用户（登录账号），按用户隔离'," +
+            "  title VARCHAR(100) NOT NULL COMMENT '会话标题（取首个用户问题）'," +
+            "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP," +
+            "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+            "  PRIMARY KEY (id)," +
+            "  KEY idx_user (username, updated_at)" +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='智能问答对话记录'",
+            "CREATE TABLE IF NOT EXISTS chat_message (" +
+            "  id BIGINT NOT NULL AUTO_INCREMENT," +
+            "  conversation_id BIGINT NOT NULL COMMENT '所属会话'," +
+            "  role VARCHAR(20) NOT NULL COMMENT 'user/assistant'," +
+            "  content TEXT NOT NULL COMMENT '消息内容'," +
+            "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP," +
+            "  PRIMARY KEY (id)," +
+            "  KEY idx_conv (conversation_id)" +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='对话消息'"
+        };
+        try (Connection conn = getConnection()) {
+            for (String sql : ddl) {
+                try (Statement st = conn.createStatement()) {
+                    st.execute(sql);
+                }
+            }
+            System.out.println("[DBUtil] 对话历史表已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 建对话历史表失败: " + e.getMessage());
+        }
     }
 }

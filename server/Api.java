@@ -7,8 +7,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -16,6 +21,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -143,6 +149,22 @@ public class Api {
             /* ---------- 智能问答 ---------- */
             if ("POST".equals(method) && path.equals("/api/assistant/chat")) {
                 ok(ex, chatJson(ex));
+                return true;
+            }
+
+            /* ---------- 对话历史（按用户隔离） ---------- */
+            if ("GET".equals(method) && path.equals("/api/conversations")) {
+                ok(ex, conversationsJson(ex.getRequestURI().getQuery()));
+                return true;
+            }
+            if ("GET".equals(method) && path.matches("/api/conversations/[^/]+")) {
+                ok(ex, conversationMessagesJson(path.substring("/api/conversations/".length()),
+                        ex.getRequestURI().getQuery()));
+                return true;
+            }
+            if ("DELETE".equals(method) && path.matches("/api/conversations/[^/]+")) {
+                ok(ex, deleteConversationJson(path.substring("/api/conversations/".length()),
+                        ex.getRequestURI().getQuery()));
                 return true;
             }
 
@@ -954,6 +976,7 @@ public class Api {
         String token = "token-" + foundRole + "-" + java.util.UUID.randomUUID().toString().substring(0, 8);
         return "{\"code\":0,\"msg\":\"ok\",\"data\":{"
                 + "\"token\":" + Json.str(token) + ","
+                + "\"username\":" + Json.str(username) + ","
                 + "\"name\":" + Json.str(foundName) + ","
                 + "\"roleName\":" + Json.str(roleName(foundRole)) + ","
                 + "\"role\":" + Json.str(foundRole)
@@ -969,66 +992,381 @@ public class Api {
     }
 
     /* ==================================================================
-       智能问答
+       智能问答（DeepSeek 大模型）
        ================================================================== */
 
+    /** DeepSeek API Key：必须从环境变量 DEEPSEEK_API_KEY 读取，勿硬编码（避免随代码提交泄露） */
+    private static final String DEEPSEEK_API_KEY = System.getenv("DEEPSEEK_API_KEY");
+    private static final String DEEPSEEK_URL   = "https://api.deepseek.com/chat/completions";
+    private static final String DEEPSEEK_MODEL = "deepseek-chat";
+    /** 多轮对话最多带上多少条历史（防止上下文过长、超 token 上限） */
+    private static final int MAX_CHAT_HISTORY = 20;
+
     /**
-     * POST /api/assistant/chat —— 智能问答。
-     * body: {question}。关键词规则匹配（和前端 mock 同一套问答逻辑），
-     * 文案里的阈值实时读库，让回答跟着当前配置走。
-     * 返回：{answer, action:{text,href}|null}。
+     * POST /api/assistant/chat —— 智能问答（DeepSeek 大模型，支持多轮对话）。
+     * 请求体：{messages: [{role:'user'|'assistant', content:'...'}, ...]}。
+     * 前端维护对话历史，每次把整段历史（含新问题）传过来；后端加一条系统提示后转发给 DeepSeek。
+     * 返回：{answer, action:null}。
      */
-    private static String chatJson(HttpExchange ex) throws IOException, SQLException {
-        Map<String, String> body = Json.parseObject(readBody(ex));
-        String question = body.get("question");
-        if (question == null) question = "";
-        String q = question.replaceAll("[？?。.，,、\\s]", ""); // 去标点空格便于关键词命中
+    private static String chatJson(HttpExchange ex) throws Exception {
+        String raw = readBody(ex);
+        Map<String, String> body = Json.parseObject(raw);
+        List<Map<String, String>> msgs = Json.parseObjectArray(Json.arrayText(raw, "messages"));
+        if (msgs.isEmpty()) {
+            // 兼容旧前端：只传 {question} 没有 messages 时，当作单轮提问
+            String question = body.get("question");
+            if (question != null && !question.trim().isEmpty()) {
+                Map<String, String> m = new HashMap<>();
+                m.put("role", "user");
+                m.put("content", question.trim());
+                msgs.add(m);
+            }
+        }
+        String user = body.get("user");
+        String conversationIdStr = body.get("conversationId");
 
-        BigDecimal[] t = currentThresholds();
-        String h = t[0].stripTrailingZeros().toPlainString();
-        String tm = t[1].stripTrailingZeros().toPlainString();
+        // 只保留 user/assistant 且内容非空的消息，最多 MAX_CHAT_HISTORY 条（保留最近的）
+        List<Map<String, String>> valid = new ArrayList<>();
+        for (int i = Math.max(0, msgs.size() - MAX_CHAT_HISTORY); i < msgs.size(); i++) {
+            Map<String, String> m = msgs.get(i);
+            String role = m.get("role");
+            String content = m.get("content");
+            if (content == null || content.trim().isEmpty()) continue;
+            if (!"user".equals(role) && !"assistant".equals(role)) continue;
+            valid.add(m);
+        }
+        if (valid.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少对话内容：messages 需含 role/content 的消息") + "}";
+        }
 
-        // 规则表：关键词 → 回答文案 / 推荐操作
-        String[][] rules = {
-                {"浇水,灌溉,什么时候浇,该不该浇",
-                 "根据当前土壤湿度数据，建议在清晨 6:00–8:00 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 " + h + "%（当前阈值），请及时补水。",
-                 "去控制灌溉", "control.html"},
-                {"太干,干旱,缺水,湿度低",
-                 "当前部分地块土壤湿度偏低，存在缺水风险。建议开启灌溉设备补水 20–30 分钟，并关注告警记录，避免作物因缺水萎蔫。",
-                 "查看告警", "alarm.html"},
-                {"阈值,告警条件,设置",
-                 "您可以在「告警管理」页设置土壤湿度下限和温度上限。当实测值越过阈值时，系统会自动触发告警并通知您。",
-                 "去设置阈值", "alarm.html"},
-                {"温度,太热,高温",
-                 "若大棚温度超过 " + tm + "℃（当前阈值），建议及时通风或开启遮阳。温度过高会影响作物生长，请留意实时温度曲线。",
-                 "查看实时数据", "monitoring.html"}
-        };
+        String answer;
+        try {
+            answer = deepseekChat(valid);
+        } catch (Exception e) {
+            return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
+        }
 
-        String answer = "我是智慧农业助手，可以为您提供灌溉建议和农事指导。您可以试试问我：「现在该浇水吗？」「土壤太干怎么办？」「如何设置告警阈值？」";
-        String actionText = null;
-        String actionHref = null;
-        outer:
-        for (String[] rule : rules) {
-            for (String kw : rule[0].split(",")) {
-                if (q.indexOf(kw) != -1) {
-                    answer = rule[1];
-                    actionText = rule[2];
-                    actionHref = rule[3];
-                    break outer;
-                }
+        // 落库（按用户名隔离）；未传 user（未登录）则不保存，仅返回回答
+        Long conversationId = null;
+        if (user != null && !user.trim().isEmpty()) {
+            try {
+                conversationId = persistChat(user.trim(), conversationIdStr, valid, answer);
+            } catch (SQLException e) {
+                return "{\"code\":1,\"msg\":" + Json.str("对话记录保存失败：" + e.getMessage()) + "}";
             }
         }
 
-        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":{\"answer\":")
-                .append(Json.str(answer));
-        if (actionText != null) {
-            sb.append(",\"action\":{\"text\":").append(Json.str(actionText))
-              .append(",\"href\":").append(Json.str(actionHref)).append('}');
-        } else {
-            sb.append(",\"action\":null");
+        return "{\"code\":0,\"data\":{\"answer\":" + Json.str(answer)
+                + ",\"action\":null,\"conversationId\":"
+                + (conversationId == null ? "null" : conversationId) + "}}";
+    }
+
+    /**
+     * 把本轮对话落库：无 conversationId 则新建会话（标题取首个用户问题），
+     * 写入本轮最新的用户问题 + 助手回答，返回会话 id。
+     * 会话不属于该用户 / 会话不存在时返回 null（本次不落库）。
+     */
+    private static Long persistChat(String user, String conversationIdStr,
+                                    List<Map<String, String>> msgs, String answer) throws SQLException {
+        Long conversationId = null;
+        if (conversationIdStr != null && !conversationIdStr.isEmpty()) {
+            try {
+                conversationId = Long.parseLong(conversationIdStr);
+            } catch (NumberFormatException e) {
+                conversationId = null;
+            }
         }
-        sb.append("}}");
+        // 本轮新问题 = 最后一条用户消息（前面的历史已入库）
+        String question = null;
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            Map<String, String> m = msgs.get(i);
+            if ("user".equals(m.get("role"))) { question = m.get("content"); break; }
+        }
+        if (question == null || question.trim().isEmpty()) return conversationId;
+
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (conversationId == null) {
+                    // 新建会话：标题取首个用户问题（截断到 100 字）
+                    String title = question.trim();
+                    if (title.length() > 100) title = title.substring(0, 100);
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "INSERT INTO conversation(username, title) VALUES (?, ?)",
+                            PreparedStatement.RETURN_GENERATED_KEYS)) {
+                        ps.setString(1, user);
+                        ps.setString(2, title);
+                        ps.executeUpdate();
+                        try (ResultSet keys = ps.getGeneratedKeys()) {
+                            if (keys.next()) conversationId = keys.getLong(1);
+                        }
+                    }
+                } else {
+                    // 已有会话：校验归属
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "SELECT 1 FROM conversation WHERE id=? AND username=?")) {
+                        ps.setLong(1, conversationId);
+                        ps.setString(2, user);
+                        try (ResultSet rs = ps.executeQuery()) {
+                            if (!rs.next()) {
+                                conn.rollback();
+                                return null;
+                            }
+                        }
+                    }
+                }
+                if (conversationId != null) {
+                    insertMessage(conn, conversationId, "user", question.trim());
+                    insertMessage(conn, conversationId, "assistant", answer);
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+        return conversationId;
+    }
+
+    private static void insertMessage(Connection conn, long conversationId, String role, String content) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO chat_message(conversation_id, role, content) VALUES (?, ?, ?)")) {
+            ps.setLong(1, conversationId);
+            ps.setString(2, role);
+            ps.setString(3, content);
+            ps.executeUpdate();
+        }
+    }
+
+    /** 调 DeepSeek 的 OpenAI 兼容接口：系统提示（含实时数据）+ 对话历史 → 返回模型回答 */
+    private static String deepseekChat(List<Map<String, String>> msgs) throws Exception {
+        // 未配置 key 时给出明确提示（启动前需 set DEEPSEEK_API_KEY=sk-xxx）
+        if (DEEPSEEK_API_KEY == null || DEEPSEEK_API_KEY.isEmpty()) {
+            throw new IOException("未配置环境变量 DEEPSEEK_API_KEY");
+        }
+        // 系统提示：基础角色 + 最新一次采集的温湿度/光照数据（让回答结合实时数据）
+        String dataCtx = latestReadingsContext();
+        String system = "你是「智慧农业平台」的智能助手，负责解答大棚种植、灌溉、温湿度监测、告警阈值、设备控制等农业问题。"
+                      + "回答要简洁实用、直接给出建议；只回答与农业种植相关的问题，无关问题礼貌说明无法回答。";
+        if (!dataCtx.isEmpty()) {
+            system += " 当前系统实时采集的环境数据如下：" + dataCtx
+                    + " 回答灌溉、通风等建议时可参考这些数据，但不要编造未提供的数据。";
+        }
+
+        StringBuilder req = new StringBuilder();
+        req.append("{\"model\":\"").append(DEEPSEEK_MODEL)
+           .append("\",\"temperature\":0.7,\"messages\":[");
+        req.append("{\"role\":\"system\",\"content\":")
+           .append(Json.str(system))
+           .append('}');
+        for (Map<String, String> m : msgs) {
+            req.append(",{\"role\":").append(Json.str(m.get("role")))
+               .append(",\"content\":").append(Json.str(m.get("content"))).append('}');
+        }
+        req.append("]}");
+
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(DEEPSEEK_URL))
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + DEEPSEEK_API_KEY)
+                .POST(HttpRequest.BodyPublishers.ofString(req.toString(), StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        String body = resp.body();
+        if (resp.statusCode() != 200) {
+            throw new IOException("HTTP " + resp.statusCode() + ": "
+                    + (body != null && body.length() > 200 ? body.substring(0, 200) : body));
+        }
+        String content = Json.strValue(body, "content");
+        if (content == null) {
+            throw new IOException("响应解析失败，未找到 content 字段");
+        }
+        return content;
+    }
+
+    /**
+     * 汇总各指标最新一条传感器读数，拼成给大模型的实时环境数据上下文。
+     * 返回形如「温度 30.75℃，湿度 54.41%，光照 390 lx（更新于 2026-08-23 11:50:30）」；
+     * 完全没有数据时返回空串（系统提示就不加数据段）。
+     */
+    private static String latestReadingsContext() throws SQLException {
+        String sql =
+                "SELECT metric, value, DATE_FORMAT(collected_at, '%Y-%m-%d %H:%i:%s') AS t" +
+                " FROM sensor_data WHERE id IN (" +
+                "  SELECT MAX(id) FROM sensor_data WHERE metric IN ('temp','humidity','lux') GROUP BY metric)";
+        String temp = null, humidity = null, lux = null, time = null;
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String metric = rs.getString("metric");
+                String v = rs.getBigDecimal("value").stripTrailingZeros().toPlainString();
+                if (time == null) time = rs.getString("t");
+                if ("temp".equals(metric)) temp = v;
+                else if ("humidity".equals(metric)) humidity = v;
+                else if ("lux".equals(metric)) lux = v;
+            }
+        }
+        if (temp == null && humidity == null && lux == null) return "";
+
+        StringBuilder sb = new StringBuilder("最近一次采集");
+        if (time != null) sb.append("（").append(time).append('）');
+        sb.append("：");
+        if (temp != null) sb.append("温度 ").append(temp).append("℃，");
+        if (humidity != null) sb.append("湿度 ").append(humidity).append("%，");
+        if (lux != null) sb.append("光照 ").append(lux).append(" lx");
         return sb.toString();
+    }
+
+    /* ==================================================================
+       对话历史（按用户隔离）
+       ================================================================== */
+
+    /** 从 query string 里取参数值；没有返回 null */
+    private static String queryParam(String query, String key) {
+        if (query == null) return null;
+        for (String kv : query.split("&")) {
+            String[] p = kv.split("=");
+            if (p.length == 2 && key.equals(p[0])) return p[1];
+        }
+        return null;
+    }
+
+    /**
+     * GET /api/conversations?user=xxx —— 当前用户的对话列表（按最近更新倒序）。
+     * 返回 [{id,title,updatedAt,messageCount},...]。
+     */
+    private static String conversationsJson(String query) throws SQLException {
+        String user = queryParam(query, "user");
+        if (user == null || user.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少参数：user 必填") + "}";
+        }
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        String sql =
+                "SELECT c.id, c.title, c.updated_at," +
+                " (SELECT COUNT(*) FROM chat_message m WHERE m.conversation_id = c.id) AS msgCount" +
+                " FROM conversation c WHERE c.username = ? ORDER BY c.updated_at DESC, c.id DESC";
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean first = true;
+                while (rs.next()) {
+                    if (!first) sb.append(',');
+                    first = false;
+                    Timestamp ts = rs.getTimestamp("updated_at");
+                    sb.append('{')
+                      .append("\"id\":").append(rs.getLong("id")).append(',')
+                      .append("\"title\":").append(Json.str(rs.getString("title"))).append(',')
+                      .append("\"updatedAt\":").append(Json.str(ts == null ? "" : fmt.format(ts))).append(',')
+                      .append("\"messageCount\":").append(rs.getInt("msgCount"))
+                      .append('}');
+                }
+            }
+        }
+        return sb.append("]}").toString();
+    }
+
+    /**
+     * GET /api/conversations/{id}?user=xxx —— 加载某次对话的完整上下文（含全部消息）。
+     * 校验会话归属该用户；不属于/不存在返回错误。
+     */
+    private static String conversationMessagesJson(String idStr, String query) throws SQLException {
+        String user = queryParam(query, "user");
+        if (user == null || user.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少参数：user 必填") + "}";
+        }
+        long convId;
+        try {
+            convId = Long.parseLong(idStr);
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+        }
+        String title = null;
+        String sqlC = "SELECT title FROM conversation WHERE id = ? AND username = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sqlC)) {
+            ps.setLong(1, convId);
+            ps.setString(2, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "{\"code\":1,\"msg\":" + Json.str("对话不存在") + "}";
+                title = rs.getString("title");
+            }
+        }
+        StringBuilder msgs = new StringBuilder();
+        String sqlM = "SELECT role, content FROM chat_message WHERE conversation_id = ? ORDER BY id";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sqlM)) {
+            ps.setLong(1, convId);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean first = true;
+                while (rs.next()) {
+                    if (!first) msgs.append(',');
+                    first = false;
+                    msgs.append('{')
+                        .append("\"role\":").append(Json.str(rs.getString("role")))
+                        .append(",\"content\":").append(Json.str(rs.getString("content")))
+                        .append('}');
+                }
+            }
+        }
+        return "{\"code\":0,\"data\":{\"id\":" + convId
+                + ",\"title\":" + Json.str(title)
+                + ",\"messages\":[" + msgs + "]}}";
+    }
+
+    /**
+     * DELETE /api/conversations/{id}?user=xxx —— 删除某次对话（连同消息）。
+     * 校验归属；不属于/不存在返回错误。
+     */
+    private static String deleteConversationJson(String idStr, String query) throws SQLException {
+        String user = queryParam(query, "user");
+        if (user == null || user.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少参数：user 必填") + "}";
+        }
+        long convId;
+        try {
+            convId = Long.parseLong(idStr);
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+        }
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT 1 FROM conversation WHERE id=? AND username=?")) {
+                    ps.setLong(1, convId);
+                    ps.setString(2, user);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            conn.rollback();
+                            return "{\"code\":1,\"msg\":" + Json.str("对话不存在") + "}";
+                        }
+                    }
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM chat_message WHERE conversation_id=?")) {
+                    ps.setLong(1, convId);
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM conversation WHERE id=?")) {
+                    ps.setLong(1, convId);
+                    ps.executeUpdate();
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+        return "{\"code\":0}";
     }
 
     /* ==================================================================

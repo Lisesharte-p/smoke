@@ -27,7 +27,9 @@ window.API = (function () {
       controlLogs:'/api/control-logs',
       boardRefresh:'/api/board/refresh',
       registerRequests: '/api/register-requests',
-      chat:       '/api/assistant/chat'
+      chat:       '/api/assistant/chat',
+      conversations: '/api/conversations',
+      conversation:   '/api/conversations/{id}'
     }
   };
 
@@ -61,12 +63,12 @@ window.API = (function () {
   function login(username, password, role) {
     if (config.useMock) {
       var users = {
-        'farmer':   { name: '张老三', roleName: '农户',       role: 'farmer' },
-        'admin':    { name: '李四',   roleName: '农场管理员', role: 'admin' },
-        'sysadmin': { name: '王五',   roleName: '系统管理员', role: 'sysadmin' }
+        'farmer':   { username: 'farmer01', name: '张老三', roleName: '农户',       role: 'farmer' },
+        'admin':    { username: 'admin01',  name: '李四',   roleName: '农场管理员', role: 'admin' },
+        'sysadmin': { username: 'sysadmin01', name: '王五', roleName: '系统管理员', role: 'sysadmin' }
       };
       var u = users[role] || users.farmer;
-      return mockDelay({ code: 0, msg: 'ok', data: { token: 'mock-token-' + role, name: u.name, roleName: u.roleName, role: u.role } }, 600);
+      return mockDelay({ code: 0, msg: 'ok', data: { token: 'mock-token-' + role, username: u.username, name: u.name, roleName: u.roleName, role: u.role } }, 600);
     }
     return request(config.endpoints.login, { method: 'POST', data: { username: username, password: password, role: role } });
   }
@@ -279,12 +281,50 @@ window.API = (function () {
   /* ==================================================================
      智能问答
      ================================================================== */
-  function getChatReply(question) {
+  /* 多轮对话：user 用户名，messages 整段历史 [{role,content},...]，conversationId 当前会话（无则新建） */
+  function getChatReply(user, messages, conversationId) {
     if (config.useMock) {
-      var reply = window.MOCK.getChatReply(question);
+      // mock 模式取最后一条用户消息做关键词匹配
+      var q = '';
+      for (var i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') { q = messages[i].content; break; }
+      }
+      var reply = window.MOCK.getChatReply(q);
+      reply.conversationId = conversationId || 999001;
       return mockDelay({ code: 0, data: reply }, 800);
     }
-    return request(config.endpoints.chat, { method: 'POST', data: { question: question } });
+    return request(config.endpoints.chat, {
+      method: 'POST',
+      data: { user: user, conversationId: conversationId, messages: messages }
+    });
+  }
+
+  /* 当前用户的对话历史列表（按用户隔离） */
+  function getConversations(user) {
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.conversations || [] }, 300);
+    return request(config.endpoints.conversations + '?user=' + encodeURIComponent(user));
+  }
+
+  /* 加载某次对话的完整上下文（消息列表） */
+  function getConversationMessages(conversationId, user) {
+    if (config.useMock) {
+      var arr = window.MOCK.conversations || [];
+      var c = null;
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i].id === conversationId) { c = arr[i]; break; }
+      }
+      return mockDelay({ code: 0, data: c || { id: conversationId, title: '', messages: [] } }, 300);
+    }
+    return request(config.endpoints.conversation.replace('{id}', conversationId) + '?user=' + encodeURIComponent(user));
+  }
+
+  /* 删除某次对话 */
+  function deleteConversation(conversationId, user) {
+    if (config.useMock) {
+      window.MOCK.conversations = (window.MOCK.conversations || []).filter(function (c) { return c.id !== conversationId; });
+      return mockDelay({ code: 0 }, 300);
+    }
+    return request(config.endpoints.conversation.replace('{id}', conversationId) + '?user=' + encodeURIComponent(user), { method: 'DELETE' });
   }
 
   return {
@@ -308,6 +348,9 @@ window.API = (function () {
     reviewRegisterRequest: reviewRegisterRequest,
     getControlLogs: getControlLogs,
     refreshBoard: refreshBoard,
-    getChatReply: getChatReply
+    getChatReply: getChatReply,
+    getConversations: getConversations,
+    getConversationMessages: getConversationMessages,
+    deleteConversation: deleteConversation
   };
 })();

@@ -60,6 +60,9 @@ public class WebServer {
         server.setExecutor(Executors.newFixedThreadPool(10));
         server.start();
 
+        // 确保对话历史表存在（幂等，多个环境都能跑）
+        DBUtil.ensureChatTables();
+
         // 启动板子数据采集器（后台守护线程，周期读板子数据写入 sensor_data）
         BoardCollector.start();
 

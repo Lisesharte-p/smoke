@@ -109,7 +109,7 @@
 
       API.login(username, password).then(function (res) {
         if (res.code === 0) {
-          Layout.setUser({ name: res.data.name, roleName: res.data.roleName, role: res.data.role });
+          Layout.setUser({ username: res.data.username, name: res.data.name, roleName: res.data.roleName, role: res.data.role });
           Toast.success('欢迎，' + res.data.name);
           setTimeout(function () { location.href = 'index.html'; }, 400);
         } else {
