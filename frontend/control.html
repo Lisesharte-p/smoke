@@ -61,6 +61,7 @@
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
   <script>
     Layout.init();
 
@@ -74,7 +75,7 @@
 
       devices.forEach(function (dev) {
         var card = document.createElement('div');
-        card.className = 'plot-card';
+        card.className = 'plot-card' + (dev.running ? ' running' : '');
         card.innerHTML =
           '<div class="head">' +
             '<div>' +
@@ -99,6 +100,7 @@
           '<div class="mt-12"><a class="btn btn-outline btn-sm" href="monitoring.html">📡 查看实时数据</a></div>';
         grid.appendChild(card);
       });
+      Animate.staggerIn(grid, { selector: '.plot-card' });
 
       // 绑定开关事件
       grid.querySelectorAll('input[type="checkbox"]').forEach(function (input) {

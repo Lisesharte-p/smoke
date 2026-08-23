@@ -26,7 +26,6 @@
             </div>
             <div class="flex items-center gap-8">
               <span class="text-muted" id="updatedAt" style="font-size:12px">--</span>
-              <span class="text-danger" id="refreshMsg" style="font-size:12px"></span>
               <button class="btn btn-outline btn-sm" id="refreshBtn">🔄 手动刷新</button>
             </div>
           </div>
@@ -74,6 +73,7 @@
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
   <script>
     Layout.init();
 
@@ -117,65 +117,32 @@
       });
     }
 
-    /* ---------- 更新实时温湿度显示（手动/自动刷新共用） ---------- */
-    function updateMetrics(temp, humidity, updatedAt) {
-      if (temp == null || humidity == null) return;
-      document.getElementById('metricTemp').textContent = temp;
-      document.getElementById('metricTempBox').className =
-        'value' + (temp >= thresholds.tempMax ? ' danger' : '');
-
-      document.getElementById('metricHum').textContent = humidity;
-      document.getElementById('metricHumBox').className =
-        'value' + (humidity < thresholds.humidityMin ? ' warn' : '');
-
-      document.getElementById('updatedAt').textContent = '更新于 ' + (updatedAt || '--');
-    }
-
-    /* 顶部错误提示：显示 4 秒后自动消失 */
-    function showRefreshError(msg) {
-      var el = document.getElementById('refreshMsg');
-      el.textContent = '⚠ ' + msg;
-      el.style.color = '#e74c3c';
-      clearTimeout(el._t);
-      el._t = setTimeout(function () { el.textContent = ''; }, 4000);
-    }
-
-    /* ---------- 刷新实时温湿度（读数据库最新值） ---------- */
+    /* ---------- 刷新实时温湿度 ---------- */
     function refreshRealtime() {
       if (!selectedPlotId) return;
       API.getRealtime(selectedPlotId).then(function (res) {
-        if (res && res.code === 0 && res.data) {
-          updateMetrics(res.data.temp, res.data.humidity, res.data.updatedAt);
-        } else {
-          showRefreshError((res && res.msg) ? res.msg : '实时数据读取失败');
-        }
-      }).catch(function () {
-        showRefreshError('网络错误：无法连接服务器');
-      });
-    }
+        var d = res.data;
 
-    /* ---------- 手动刷新：强制读一次板子，再同步显示 ---------- */
-    function doRefresh() {
-      if (!selectedPlotId) return;
-      var btn = document.getElementById('refreshBtn');
-      var old = btn.textContent;
-      btn.textContent = '刷新中…';
-      btn.disabled = true;
-      API.refreshBoard().then(function (res) {
-        if (res && res.code === 0 && res.data) {
-          // 直接用板子返回的最新值显示；再同步一次 DB 实时数据（含阈值配色）
-          updateMetrics(res.data.temp, res.data.humidity, res.data.updatedAt);
-          refreshRealtime();
+        var tempEl = document.getElementById('metricTemp');
+        var humEl = document.getElementById('metricHum');
+        var first = tempEl.textContent === '--';
+
+        document.getElementById('metricTempBox').className =
+          'value' + (d.temp >= thresholds.tempMax ? ' danger' : '');
+        document.getElementById('metricHumBox').className =
+          'value' + (d.humidity < thresholds.humidityMin ? ' warn' : '');
+
+        if (first) {
+          Animate.countUp(tempEl, d.temp, { decimals: 1 });
+          Animate.countUp(humEl, d.humidity, { decimals: 1 });
         } else {
-          // 读板子失败：提示并退回显示数据库里的最新值
-          showRefreshError((res && res.msg) ? res.msg : '板子读取失败');
-          refreshRealtime();
+          tempEl.textContent = d.temp;
+          humEl.textContent = d.humidity;
+          Animate.flash(tempEl);
+          Animate.flash(humEl);
         }
-      }).catch(function () {
-        showRefreshError('网络错误：无法连接服务器');
-      }).then(function () {
-        btn.textContent = old;
-        btn.disabled = false;
+
+        document.getElementById('updatedAt').textContent = '更新于 ' + d.updatedAt;
       });
     }
 
@@ -185,7 +152,7 @@
       refreshRealtime();
       renderDeviceTable();
     });
-    document.getElementById('refreshBtn').addEventListener('click', doRefresh);
+    document.getElementById('refreshBtn').addEventListener('click', refreshRealtime);
 
     /* ---------- 初始化 ---------- */
     API.getThresholds().then(function (res) { thresholds = res.data; });
