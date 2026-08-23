@@ -233,6 +233,48 @@ public class BoardCollector {
         return v.isEmpty() ? null : v;
     }
 
+    /**
+     * 向设备下发一条控制指令（on / off），等板子确认回包后返回。
+     * 板子收到 "on" → 开启马达并回 "motor started"；收到 "off" → 关闭马达并回 "motor stopped"。
+     * 回包以 NUL(0x00) 结尾（与 DATA/HEARTBEAT 同一格式），也可能先收到心跳再收到确认，因此
+     * 累计读取、只要出现含 "motor" 的记录即视为指令执行成功。
+     *
+     * @return 收到 motor 确认回包返回 true；连接失败 / 超时 / 无确认回包返回 false
+     */
+    static boolean sendCommand(String host, int port, String command) {
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(host, port), 3000);
+            s.setSoTimeout(1500);
+            OutputStream out = s.getOutputStream();
+            out.write((command + "\n").getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            InputStream in = s.getInputStream();
+            StringBuilder sb = new StringBuilder();
+            byte[] buf = new byte[128];
+            long end = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < end) {
+                try {
+                    int n = in.read(buf);
+                    if (n < 0) break; // 连接被设备关闭
+                    for (int i = 0; i < n; i++) {
+                        if (buf[i] == 0) {
+                            // 一条完整记录：确认指令已执行
+                            if (sb.toString().contains("motor")) return true;
+                            sb.setLength(0);
+                        } else {
+                            sb.append((char) (buf[i] & 0xFF));
+                        }
+                    }
+                } catch (java.net.SocketTimeoutException e) {
+                    // 没等到回包，继续等
+                }
+            }
+            return sb.toString().contains("motor");
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** 把一次读数写入 sensor_data：temp/humidity/lux 三行，同一采集时间戳 */
     static void writeToDb(String deviceId, Map<String, String> reading) throws SQLException {
         try (Connection c = DBUtil.getConnection()) {

@@ -693,7 +693,10 @@ public class Api {
 
     /**
      * POST /api/devices/{deviceId}/control —— 灌溉开关。
-     * 请求体：{action:'on'|'off'}；更新 device.running，并写一条 control_log 留痕。
+     * 请求体：{action:'on'|'off'}。会真正向设备（板子）下发 on/off 指令：
+     *   板子收到 on → 开启马达，收到 off → 关闭马达。
+     * 只有指令下发成功才更新 device.running 并记「成功」日志；
+     * 下发失败（设备未配置地址 / 连不上 / 无确认回包）记「失败」日志并返回错误。
      */
     private static String controlJson(String deviceId, HttpExchange ex) throws IOException, SQLException {
         Map<String, String> body = Json.parseObject(readBody(ex));
@@ -706,26 +709,65 @@ public class Api {
         String operator = body.containsKey("operator") && body.get("operator") != null
                 ? body.get("operator") : "演示用户";
 
+        // 1. 查设备网络地址（只有配置了 ip/port 的设备才能向板子下发指令）
+        String[] target = deviceTarget(deviceId); // {ip, port}
+        if (target == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("设备不存在: " + deviceId) + "}";
+        }
+        if (target[0] == null || target[1] == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("设备「" + deviceId + "」未配置网络地址，无法下发指令") + "}";
+        }
+
+        // 2. 向板子下发 on/off，收到 motor 确认回包才算成功
+        boolean ok;
+        try {
+            ok = BoardCollector.sendCommand(target[0], Integer.parseInt(target[1]), action);
+        } catch (NumberFormatException e) {
+            ok = false;
+        }
+        if (!ok) {
+            writeControlLog(deviceId, actionText, "失败", operator);
+            return "{\"code\":1,\"msg\":" + Json.str("指令下发失败：无法连接设备或设备无响应") + "}";
+        }
+
+        // 3. 指令成功：更新运行状态 + 写成功日志
         try (Connection conn = DBUtil.getConnection()) {
-            // 1. 更新设备运行状态
             try (PreparedStatement ps = conn.prepareStatement("UPDATE device SET running = ? WHERE id = ?")) {
                 ps.setInt(1, running);
                 ps.setString(2, deviceId);
-                if (ps.executeUpdate() == 0) {
-                    return "{\"code\":1,\"msg\":" + Json.str("设备不存在: " + deviceId) + "}";
-                }
-            }
-            // 2. 写入控制日志（留痕）
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO control_log(device_id, action, result, operator) VALUES (?, ?, ?, ?)")) {
-                ps.setString(1, deviceId);
-                ps.setString(2, actionText);
-                ps.setString(3, "成功");
-                ps.setString(4, operator);
                 ps.executeUpdate();
             }
         }
+        writeControlLog(deviceId, actionText, "成功", operator);
         return "{\"code\":0,\"data\":" + deviceJson(deviceId) + "}";
+    }
+
+    /** 查设备的网络地址 {ip, port}；设备不存在返回 null，地址未配置则 ip 为 null */
+    private static String[] deviceTarget(String deviceId) throws SQLException {
+        String sql = "SELECT ip, port FROM device WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                String ip = rs.getString("ip");
+                Object port = rs.getObject("port");
+                return new String[]{ ip, port == null ? null : port.toString() };
+            }
+        }
+    }
+
+    /** 写一条控制日志（留痕） */
+    private static void writeControlLog(String deviceId, String action, String result, String operator) throws SQLException {
+        String sql = "INSERT INTO control_log(device_id, action, result, operator) VALUES (?, ?, ?, ?)";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            ps.setString(2, action);
+            ps.setString(3, result);
+            ps.setString(4, operator);
+            ps.executeUpdate();
+        }
     }
 
     /* ==================================================================

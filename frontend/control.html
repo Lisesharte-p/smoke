@@ -18,7 +18,7 @@
 
       <main class="content">
         <!-- 提示横幅 -->
-        <div class="alert-banner success">💡 支持远程开启 / 关闭灌溉设备，指令通过 MQTT 下发到硬件执行。</div>
+        <div class="alert-banner success">💡 支持远程开启 / 关闭灌溉设备，开关状态会通过 TCP 向板子下发 on / off 指令控制马达。</div>
 
         <!-- 灌溉设备 -->
         <div class="section-title">灌溉设备</div>
@@ -136,7 +136,8 @@
 
       API.controlIrrigation(id, action).then(function (res) {
         var success = res.code === 0;
-        if (dev) dev.running = (action === 'on');
+        // 只有指令下发成功才切换设备运行状态；失败保持原状
+        if (dev && success) dev.running = (action === 'on');
 
         // 插入一条控制日志
         var user = Layout.getUser();
@@ -151,7 +152,11 @@
 
         renderLogs();
         renderDevices(); // 刷新卡片状态
-        Toast.success('灌溉设备「' + (dev ? dev.name : id) + '」已' + (action === 'on' ? '开启' : '关闭'));
+        if (success) {
+          Toast.success('灌溉设备「' + (dev ? dev.name : id) + '」已' + (action === 'on' ? '开启' : '关闭'));
+        } else {
+          Toast.error((res.msg || '指令下发失败') + '：设备状态未改变');
+        }
       }).finally(function () {
         input.disabled = false;
       });
