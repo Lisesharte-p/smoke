@@ -37,6 +37,7 @@
                   <th>设备名称</th>
                   <th>类型</th>
                   <th>绑定地块</th>
+                  <th>网络地址</th>
                   <th>状态</th>
                   <th>操作</th>
                 </tr>
@@ -68,6 +69,14 @@
       <div class="form-group">
         <label class="form-label">绑定地块</label>
         <select class="form-control" id="devPlot"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">设备 IP</label>
+        <input type="text" class="form-control" id="devIp" placeholder="如 192.168.70.167">
+      </div>
+      <div class="form-group">
+        <label class="form-label">设备端口</label>
+        <input type="number" class="form-control" id="devPort" min="1" max="65535" placeholder="如 8888">
       </div>
       <div class="modal-actions">
         <button class="btn btn-outline" id="cancelAdd">取消</button>
@@ -113,6 +122,7 @@
           '<td>' + dev.name + '</td>' +
           '<td>' + typeBadge(dev.type) + '</td>' +
           '<td>' + dev.plotName + '</td>' +
+          '<td>' + (dev.ip && dev.port ? dev.ip + ':' + dev.port : '—') + '</td>' +
           '<td>' + status + '</td>' +
           '<td><div class="flex gap-8">' + controlBtn +
           '<button class="btn btn-sm btn-danger" data-id="' + dev.id + '">解绑</button></div></td>';
@@ -155,6 +165,8 @@
     var modal = document.getElementById('addModal');
     document.getElementById('openAdd').addEventListener('click', function () {
       document.getElementById('devName').value = '';
+      document.getElementById('devIp').value = '';
+      document.getElementById('devPort').value = '';
       modal.classList.add('show');
     });
     document.getElementById('cancelAdd').addEventListener('click', function () {
@@ -166,11 +178,15 @@
       var name = document.getElementById('devName').value.trim();
       var type = document.getElementById('devType').value;
       var plotId = document.getElementById('devPlot').value;
+      var ip = document.getElementById('devIp').value.trim();
+      var port = parseInt(document.getElementById('devPort').value.trim(), 10);
       var plot = plots.filter(function (p) { return p.id === plotId; })[0];
 
       if (!name) { Toast.error('请输入设备名称'); return; }
+      if (!ip) { Toast.error('请输入设备 IP'); return; }
+      if (isNaN(port) || port < 1 || port > 65535) { Toast.error('请输入 1-65535 之间的端口'); return; }
 
-      API.addDevice({ name: name, type: type, plotId: plotId, plotName: plot ? plot.name : '-' }).then(function (res) {
+      API.addDevice({ name: name, type: type, plotId: plotId, plotName: plot ? plot.name : '-', ip: ip, port: port }).then(function (res) {
         devices.push(res.data);
         renderDevices();
         modal.classList.remove('show');

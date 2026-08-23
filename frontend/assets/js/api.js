@@ -100,6 +100,8 @@ window.API = (function () {
         type: data.type,
         plotId: data.plotId,
         plotName: data.plotName,
+        ip: data.ip,
+        port: data.port,
         online: true,
         controllable: data.type === '灌溉设备',
         running: false

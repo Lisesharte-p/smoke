@@ -28,7 +28,7 @@ window.MOCK = (function () {
     { id: 'D003', name: '灌溉电磁阀-01',     type: '灌溉设备',   plotId: 'P001', plotName: '一号大棚', online: true,  controllable: true,  running: false },
     { id: 'D004', name: '土壤湿度传感器-02', type: '土壤湿度',   plotId: 'P002', plotName: '二号大棚', online: true,  controllable: false },
     { id: 'D005', name: '温度传感器-02',     type: '温度',       plotId: 'P002', plotName: '二号大棚', online: true,  controllable: false },
-    { id: 'D006', name: '灌溉电磁阀-02',     type: '灌溉设备',   plotId: 'P002', plotName: '二号大棚', online: true,  controllable: true,  running: true  },
+    { id: 'D006', name: '灌溉电磁阀-02',     type: '灌溉设备',   plotId: 'P002', plotName: '二号大棚', ip: '192.168.70.167', port: 8888, online: true,  controllable: true,  running: true  },
     { id: 'D007', name: '土壤湿度传感器-03', type: '土壤湿度',   plotId: 'P003', plotName: '三号菜地', online: false, controllable: false },
     { id: 'D008', name: '灌溉电磁阀-03',     type: '灌溉设备',   plotId: 'P004', plotName: '四号果园', online: true,  controllable: true,  running: false }
   ];

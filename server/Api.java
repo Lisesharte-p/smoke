@@ -211,7 +211,7 @@ public class Api {
     private static String devicesJson() throws SQLException {
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running" +
+                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port" +
                 " FROM device d LEFT JOIN plot p ON p.id = d.plot_id ORDER BY d.id";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -227,6 +227,8 @@ public class Api {
                   .append("\"type\":").append(Json.str(typeMap(type))).append(',')
                   .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
                   .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
+                  .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
+                  .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
                   .append("\"online\":").append(rs.getInt("online") == 1).append(',')
                   .append("\"controllable\":").append("灌溉设备".equals(type)).append(',')
                   .append("\"running\":").append(rs.getInt("running") == 1)
@@ -246,21 +248,37 @@ public class Api {
         String name = body.get("name");
         String type = body.get("type");
         String plotId = body.get("plotId");
-        if (name == null || name.isEmpty() || type == null || plotId == null) {
-            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：name/type/plotId 必填") + "}";
+        String ip = body.get("ip");
+        String portStr = body.get("port");
+        if (name == null || name.isEmpty() || type == null || plotId == null
+                || ip == null || ip.trim().isEmpty() || portStr == null || portStr.trim().isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：name/type/plotId/ip/port 必填") + "}";
         }
+        int port;
+        try {
+            port = Integer.parseInt(portStr.trim());
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 必须是数字") + "}";
+        }
+        if (port < 1 || port > 65535) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 需在 1-65535 之间") + "}";
+        }
+        // 前端类型契约 → 入库类型（typeMap 只认 '土壤湿度传感器'/'温度传感器'/'灌溉设备'）
+        if ("土壤湿度".equals(type)) type = "土壤湿度传感器";
+        else if ("温度".equals(type)) type = "温度传感器";
         String id = nextDeviceId();
-        String plotName = plotName(plotId);
-        String sql = "INSERT INTO device(id, plot_id, name, type) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, plotId);
             ps.setString(3, name);
             ps.setString(4, type);
+            ps.setString(5, ip.trim());
+            ps.setInt(6, port);
             ps.executeUpdate();
         }
-        return "{\"code\":0,\"data\":" + deviceJson(id, name, type, plotId, plotName, true) + "}";
+        return "{\"code\":0,\"data\":" + deviceJson(id) + "}";
     }
 
     /** DELETE /api/devices/{id} —— 解绑设备 */
@@ -298,23 +316,10 @@ public class Api {
         }
     }
 
-    /** 组一个设备对象的 JSON（新增设备响应用） */
-    private static String deviceJson(String id, String name, String type, String plotId,
-                                     String plotName, boolean online) {
-        return "{\"id\":" + Json.str(id)
-                + ",\"name\":" + Json.str(name)
-                + ",\"type\":" + Json.str(typeMap(type))
-                + ",\"plotId\":" + Json.str(plotId)
-                + ",\"plotName\":" + Json.str(plotName)
-                + ",\"online\":" + online
-                + ",\"controllable\":" + "灌溉设备".equals(type)
-                + ",\"running\":false}";
-    }
-
-    /** 按设备编号查单个设备 JSON（含 plotName / controllable / running）；不存在返回 null */
+    /** 按设备编号查单个设备 JSON（含 plotName / controllable / running / ip / port）；不存在返回 null */
     private static String deviceJson(String id) throws SQLException {
         String sql =
-                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running" +
+                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port" +
                 " FROM device d LEFT JOIN plot p ON p.id = d.plot_id WHERE d.id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -326,6 +331,8 @@ public class Api {
                         + ",\"type\":" + Json.str(typeMap(rs.getString("type")))
                         + ",\"plotId\":" + Json.str(rs.getString("plot_id"))
                         + ",\"plotName\":" + Json.str(rs.getString("plotName"))
+                        + ",\"ip\":" + Json.str(rs.getString("ip"))
+                        + ",\"port\":" + Json.num(rs.getObject("port"))
                         + ",\"online\":" + (rs.getInt("online") == 1)
                         + ",\"controllable\":" + "灌溉设备".equals(rs.getString("type"))
                         + ",\"running\":" + (rs.getInt("running") == 1)
