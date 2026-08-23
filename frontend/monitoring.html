@@ -73,6 +73,7 @@
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
   <script>
     Layout.init();
 
@@ -122,13 +123,24 @@
       API.getRealtime(selectedPlotId).then(function (res) {
         var d = res.data;
 
-        document.getElementById('metricTemp').textContent = d.temp;
+        var tempEl = document.getElementById('metricTemp');
+        var humEl = document.getElementById('metricHum');
+        var first = tempEl.textContent === '--';
+
         document.getElementById('metricTempBox').className =
           'value' + (d.temp >= thresholds.tempMax ? ' danger' : '');
-
-        document.getElementById('metricHum').textContent = d.humidity;
         document.getElementById('metricHumBox').className =
           'value' + (d.humidity < thresholds.humidityMin ? ' warn' : '');
+
+        if (first) {
+          Animate.countUp(tempEl, d.temp, { decimals: 1 });
+          Animate.countUp(humEl, d.humidity, { decimals: 1 });
+        } else {
+          tempEl.textContent = d.temp;
+          humEl.textContent = d.humidity;
+          Animate.flash(tempEl);
+          Animate.flash(humEl);
+        }
 
         document.getElementById('updatedAt').textContent = '更新于 ' + d.updatedAt;
       });

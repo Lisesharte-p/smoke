@@ -825,3 +825,137 @@ select.form-control { cursor: pointer; }
   color: var(--text-muted);
   font-size: 13px;
 }
+
+/* ==========================================================================
+   动画增强层（全局，所有页面共享）
+   纯 CSS + 少量 JS 配合，让界面更生动
+   ========================================================================== */
+
+/* 统一动效缓动 */
+:root {
+  --ease-out: cubic-bezier(.22, .61, .36, 1);
+}
+
+/* ---------- 页面进场：上移 + 淡入 ---------- */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim-in {
+  /* 用 backwards 填充：delay 期间应用 from 状态(透明)，结束后回到元素默认(opacity:1)，
+     即使本动画被更高特异性规则覆盖也不会让元素永久隐形 */
+  animation: fade-up .5s var(--ease-out) backwards;
+}
+
+/* ---------- 卡片悬浮增强（覆盖默认 hover，阴影更深 + 主色描边） ---------- */
+.kpi-card:hover,
+.plot-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-lg);
+  border-color: rgba(22, 163, 74, .35);
+}
+
+/* ---------- 状态点呼吸灯（在线/告警的圆点脉冲） ---------- */
+@keyframes pulse-green {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, .55); }
+  70%  { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+@keyframes pulse-red {
+  0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, .55); }
+  70%  { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.badge-online .dot { animation: pulse-green 2s infinite; }
+.badge-alarm .dot  { animation: pulse-red 1.4s infinite; }
+
+/* ---------- 数值刷新闪烁（实时数据更新） ---------- */
+@keyframes value-flash {
+  0%   { color: var(--success); transform: scale(1.12); }
+  100% { color: inherit; transform: scale(1); }
+}
+.anim-flash {
+  display: inline-block;
+  animation: value-flash .7s var(--ease-out);
+}
+
+/* ---------- 按钮：按下回弹 + 涟漪波纹 ---------- */
+.btn {
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(.96); }
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .45);
+  transform: scale(0);
+  animation: ripple .55s var(--ease-out) forwards;
+  pointer-events: none;
+}
+.btn-outline .ripple,
+.btn-ghost .ripple { background: rgba(22, 163, 74, .18); }
+@keyframes ripple {
+  to { transform: scale(2.6); opacity: 0; }
+}
+
+/* ---------- 灌溉运行态：流动光带 ---------- */
+.plot-card.running {
+  border-color: var(--primary);
+  position: relative;
+  overflow: hidden;
+}
+.plot-card.running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(34, 197, 94, .14) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: sheen 2.2s var(--ease-out) infinite;
+  pointer-events: none;
+}
+@keyframes sheen {
+  to { transform: translateX(100%); }
+}
+
+/* ---------- 告警横幅脉冲 ---------- */
+.alert-banner.danger { animation: banner-pulse 2s infinite; }
+@keyframes banner-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  50%      { box-shadow: 0 0 0 5px rgba(239, 68, 68, .15); }
+}
+
+/* ---------- 聊天消息弹入 ---------- */
+.msg { animation: msg-in .32s var(--ease-out) both; }
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(12px) scale(.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---------- 侧边栏：图标微弹 + active 指示条 ---------- */
+.nav-item { position: relative; }
+.nav-item .icon { transition: transform .2s var(--ease-out); }
+.nav-item:hover .icon { transform: scale(1.18); }
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 18px;
+  border-radius: 2px;
+  background: #fff;
+}
+
+/* ---------- 登录页：面板入场 + 视图切换淡入（背景保持原样静态） ---------- */
+.login-panel { animation: panel-in .5s var(--ease-out) both; }
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(24px) scale(.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+#loginView, #registerView { animation: view-in .3s var(--ease-out); }
+@keyframes view-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}

@@ -44,6 +44,7 @@
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
   <script>
     Layout.init();
 
@@ -52,7 +53,7 @@
     var sendBtn = document.getElementById('sendBtn');
 
     /* ---------- 添加一条消息 ---------- */
-    function addMessage(role, text, action) {
+    function addMessage(role, text, action, typew) {
       var msg = document.createElement('div');
       msg.className = 'msg ' + role;
 
@@ -64,8 +65,13 @@
         ? '<div class="msg-action"><a class="btn btn-sm btn-primary" href="' + action.href + '">' + action.text + '</a></div>'
         : '';
 
-      msg.innerHTML = avatar + '<div class="bubble">' + text + actionHtml + '</div>';
+      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : text) + actionHtml + '</div>';
+      msg.innerHTML = avatar + bubble;
       messagesEl.appendChild(msg);
+
+      if (typew) {
+        Animate.typewrite(msg.querySelector('.type-text'), text, { onTick: scrollBottom, onDone: scrollBottom });
+      }
       scrollBottom();
       return msg;
     }
@@ -102,7 +108,7 @@
 
       API.getChatReply(question).then(function (res) {
         hideTyping();
-        addMessage('bot', res.data.answer, res.data.action);
+        addMessage('bot', res.data.answer, res.data.action, true);
       });
     }
 
