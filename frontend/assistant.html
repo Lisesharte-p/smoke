@@ -155,11 +155,36 @@
         convs.forEach(function (c) {
           var item = document.createElement('div');
           item.className = 'conv-item' + (c.id === selectId ? ' active' : '');
-          item.innerHTML = '<div class="conv-title">' + c.title + '</div>' +
+          item.innerHTML = '<div class="conv-head">' +
+                             '<div class="conv-title">' + c.title + '</div>' +
+                             '<button class="conv-del" title="删除该对话">✕</button>' +
+                           '</div>' +
                            '<div class="conv-meta">' + (c.messageCount || 0) + ' 条 · ' + (c.updatedAt || '') + '</div>';
+          // 删除按钮：阻止冒泡，避免触发打开会话
+          item.querySelector('.conv-del').addEventListener('click', function (e) {
+            e.stopPropagation();
+            handleDeleteConversation(c.id, c.title);
+          });
           item.addEventListener('click', function () { openConversation(c.id); });
           list.appendChild(item);
         });
+      });
+    }
+
+    /* ---------- 删除某条历史对话 ---------- */
+    function handleDeleteConversation(convId, title) {
+      if (!confirm('确定要删除对话「' + title + '」吗？删除后不可恢复。')) return;
+      API.deleteConversation(convId, getUsername()).then(function (res) {
+        if (res.code !== 0) { Toast.error(res.msg || '删除失败'); return; }
+        // 删除的是当前打开的会话 → 清空聊天区回到新会话状态
+        if (activeConvId === convId) {
+          activeConvId = null;
+          chatHistory = [];
+          messagesEl.innerHTML = '';
+          addMessage('bot', '你好，我是智慧农业助手 🌾 可以为您提供灌溉建议和农事指导。您可以点击下方快捷问题，或直接输入您的问题。');
+        }
+        Toast.success('对话已删除');
+        renderConvs();
       });
     }
 
