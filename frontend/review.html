@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>注册审核 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="review">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <!-- 待审核提示 -->
+        <div class="alert-banner success" id="pendingBanner"></div>
+
+        <!-- 注册申请列表 -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">注册申请</div>
+              <div class="card-sub">用户提交注册申请后在此审核，通过后自动开通登录账号</div>
+            </div>
+            <button class="btn btn-outline btn-sm" id="refreshBtn">🔄 刷新</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>申请时间</th>
+                  <th>账号</th>
+                  <th>申请角色</th>
+                  <th>状态</th>
+                  <th>审核信息</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="reviewBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script>
+    Layout.init();
+
+    var requests = [];
+
+    /* ---------- 状态徽章 ---------- */
+    function statusBadge(status) {
+      if (status === '已通过') return '<span class="badge badge-normal"><span class="dot"></span>已通过</span>';
+      if (status === '已拒绝') return '<span class="badge badge-offline"><span class="dot"></span>已拒绝</span>';
+      return '<span class="badge badge-alarm"><span class="dot"></span>待审核</span>';
+    }
+
+    /* ---------- 渲染申请列表 ---------- */
+    function renderList() {
+      var body = document.getElementById('reviewBody');
+      body.innerHTML = '';
+
+      if (!requests.length) {
+        body.innerHTML = '<tr><td colspan="6" class="empty">暂无注册申请</td></tr>';
+        updateBanner();
+        return;
+      }
+
+      requests.forEach(function (r) {
+        var action = '';
+        if (r.status === '待审核') {
+          action = '<div class="flex gap-8">' +
+                   '<button class="btn btn-sm btn-primary" data-id="' + r.id + '" data-act="approve">通过</button>' +
+                   '<button class="btn btn-sm btn-outline" data-id="' + r.id + '" data-act="reject">拒绝</button>' +
+                   '</div>';
+        } else {
+          action = '<span class="text-muted">—</span>';
+        }
+
+        var info = r.status === '已通过' ? (r.reviewer || '') + ' · ' + r.reviewedAt
+                 : r.status === '已拒绝' ? ((r.rejectReason || '无原因') + ' · ' + (r.reviewer || ''))
+                 : '—';
+
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + r.createdAt + '</td>' +
+          '<td>' + r.username + '</td>' +
+          '<td>' + r.roleName + '</td>' +
+          '<td>' + statusBadge(r.status) + '</td>' +
+          '<td>' + info + '</td>' +
+          '<td>' + action + '</td>';
+        body.appendChild(tr);
+      });
+
+      // 绑定操作按钮
+      body.querySelectorAll('button[data-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var id = btn.getAttribute('data-id');
+          var act = btn.getAttribute('data-act');
+          act === 'approve' ? approve(Number(id)) : reject(Number(id));
+        });
+      });
+
+      updateBanner();
+    }
+
+    /* ---------- 更新待审核横幅 ---------- */
+    function updateBanner() {
+      var count = requests.filter(function (r) { return r.status === '待审核'; }).length;
+      var banner = document.getElementById('pendingBanner');
+      if (count > 0) {
+        banner.style.display = 'flex';
+        banner.innerHTML = '📝 当前有 <b>' + count + '</b> 条注册申请待审核，请及时处理。';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    /* ---------- 通过：确认并可选改显示名（默认用账号名） ---------- */
+    function approve(id) {
+      var r = requests.filter(function (x) { return x.id === id; })[0];
+      if (!r) return;
+      var name = window.prompt('通过「' + r.username + '」的申请。\n登录后显示名（留空则用账号名）：', r.username);
+      if (name === null) return; // 用户取消
+
+      API.reviewRegisterRequest(id, '已通过', { name: name }).then(function (res) {
+        if (res && res.code === 0) {
+          Toast.success('已通过，「' + (name || r.username) + '」可登录使用');
+          load();
+        } else {
+          Toast.error((res && res.msg) ? res.msg : '审核失败');
+          load();
+        }
+      }).catch(function () {
+        Toast.error('网络错误：无法连接服务器');
+      });
+    }
+
+    /* ---------- 拒绝：填写拒绝原因（可选） ---------- */
+    function reject(id) {
+      var r = requests.filter(function (x) { return x.id === id; })[0];
+      if (!r) return;
+      var reason = window.prompt('拒绝「' + r.username + '」的申请。\n拒绝原因（可选）：', '');
+      if (reason === null) return; // 用户取消
+
+      API.reviewRegisterRequest(id, '已拒绝', { rejectReason: reason }).then(function (res) {
+        if (res && res.code === 0) {
+          Toast.info('已拒绝「' + r.username + '」的申请');
+          load();
+        } else {
+          Toast.error((res && res.msg) ? res.msg : '审核失败');
+          load();
+        }
+      }).catch(function () {
+        Toast.error('网络错误：无法连接服务器');
+      });
+    }
+
+    /* ---------- 加载申请列表 ---------- */
+    function load() {
+      API.getRegisterRequests().then(function (res) {
+        if (res && res.code === 0 && res.data) {
+          requests = res.data;
+          renderList();
+        }
+      }).catch(function () {
+        Toast.error('网络错误：无法连接服务器');
+      });
+    }
+
+    /* ---------- 事件 ---------- */
+    document.getElementById('refreshBtn').addEventListener('click', load);
+
+    /* ---------- 初始化 ---------- */
+    load();
+  </script>
+</body>
+</html>

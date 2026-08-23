@@ -24,6 +24,8 @@ window.API = (function () {
       thresholds: '/api/thresholds',
       alarms:     '/api/alarms',
       controlLogs:'/api/control-logs',
+      boardRefresh:'/api/board/refresh',
+      registerRequests: '/api/register-requests',
       chat:       '/api/assistant/chat'
     }
   };
@@ -127,9 +129,19 @@ window.API = (function () {
     return request(config.endpoints.realtime.replace('{plotId}', plotId));
   }
 
-  function getHistory(plotId, days) {
+  function getHistory(plotId, days, win) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getHistory(plotId, days) }, 500);
-    return request(config.endpoints.history.replace('{plotId}', plotId) + '?days=' + (days || 7));
+    // win 为短时窗口（1m/30m/24h）时走 ?window=，否则走 ?days=
+    var url = win
+      ? config.endpoints.history.replace('{plotId}', plotId) + '?window=' + win
+      : config.endpoints.history.replace('{plotId}', plotId) + '?days=' + (days || 7);
+    return request(url);
+  }
+
+  /* 板子手动刷新：立即读一次板子并写库，返回最新读数 */
+  function refreshBoard() {
+    if (config.useMock) return mockDelay({ code: 0, data: { temp: 30.5, humidity: 55, lux: 520, updatedAt: '模拟数据' } }, 300);
+    return request(config.endpoints.boardRefresh, { method: 'POST' });
   }
 
   /* ==================================================================
@@ -188,6 +200,24 @@ window.API = (function () {
   }
 
   /* ==================================================================
+     注册申请审核（管理员）
+     ================================================================== */
+  function getRegisterRequests() {
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.registerRequests || [] });
+    return request(config.endpoints.registerRequests);
+  }
+
+  /* 审核：status='已通过'|'已拒绝'；通过可带 name（显示名），拒绝可带 rejectReason */
+  function reviewRegisterRequest(id, status, extra) {
+    extra = extra || {};
+    if (config.useMock) return mockDelay({ code: 0 }, 300);
+    var data = { status: status };
+    if (extra.name) data.name = extra.name;
+    if (extra.rejectReason) data.rejectReason = extra.rejectReason;
+    return request(config.endpoints.registerRequests + '/' + id, { method: 'PUT', data: data });
+  }
+
+  /* ==================================================================
      控制日志
      ================================================================== */
   function getControlLogs() {
@@ -221,7 +251,10 @@ window.API = (function () {
     saveThresholds: saveThresholds,
     getAlarms: getAlarms,
     updateAlarmStatus: updateAlarmStatus,
+    getRegisterRequests: getRegisterRequests,
+    reviewRegisterRequest: reviewRegisterRequest,
     getControlLogs: getControlLogs,
+    refreshBoard: refreshBoard,
     getChatReply: getChatReply
   };
 })();

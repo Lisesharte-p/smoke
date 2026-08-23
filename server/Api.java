@@ -104,6 +104,16 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 注册申请审核（管理员） ---------- */
+            if ("GET".equals(method) && path.equals("/api/register-requests")) {
+                ok(ex, registerRequestsJson());
+                return true;
+            }
+            if ("PUT".equals(method) && path.matches("/api/register-requests/[^/]+")) {
+                ok(ex, reviewRegisterJson(path.substring("/api/register-requests/".length()), ex));
+                return true;
+            }
+
             /* ---------- 控制日志 ---------- */
             if ("GET".equals(method) && path.equals("/api/control-logs")) {
                 ok(ex, controlLogsJson());
@@ -113,6 +123,12 @@ public class Api {
             /* ---------- 传感器数据上报（模拟硬件 / MQTT 接收端） ---------- */
             if ("POST".equals(method) && path.equals("/api/sensor-data")) {
                 ok(ex, sensorDataJson(ex));
+                return true;
+            }
+
+            /* ---------- 板子手动刷新（立即读一次板子并入库） ---------- */
+            if ("POST".equals(method) && path.equals("/api/board/refresh")) {
+                ok(ex, refreshBoardJson());
                 return true;
             }
 
@@ -343,41 +359,91 @@ public class Api {
                 + "}}";
     }
 
-    /** GET /api/plots/{plotId}/history?days=N —— 近 N 天按日聚合的温湿度趋势 */
+    /**
+     * GET /api/plots/{plotId}/history —— 温湿度趋势。
+     * 支持两种查询方式：
+     *   ?days=N     近 N 天按日聚合（默认 7）
+     *   ?window=1m|30m|24h   短时窗口实时趋势（1分钟按秒、30分钟按分钟、24小时按5分钟聚合）
+     * 返回 {dates:[], temp:[], humidity:[]}，三个数组一一对齐。
+     */
     private static String historyJson(String plotId, String query) throws SQLException {
         int days = 7;
+        String window = null;
         if (query != null) {
             for (String kv : query.split("&")) {
                 String[] p = kv.split("=");
-                if (p.length == 2 && "days".equals(p[0])) {
-                    try { days = Integer.parseInt(p[1]); } catch (NumberFormatException ignore) { }
+                if (p.length == 2) {
+                    if ("days".equals(p[0])) {
+                        try { days = Integer.parseInt(p[1]); } catch (NumberFormatException ignore) { }
+                    } else if ("window".equals(p[0])) {
+                        window = p[1];
+                    }
                 }
             }
         }
-        String sql =
-                "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS day, s.metric, AVG(s.value) AS avgv" +
-                " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
-                " GROUP BY day, s.metric ORDER BY day";
+
+        // 短时窗口：按各自粒度聚合；1m/30m/24h 都 GROUP BY 时间标签，保证每桶 temp/humidity 齐全
+        String intervalSql = null; // DATE_SUB(NOW(), INTERVAL xxx)
+        String selectExpr  = null; // SELECT 的时间标签表达式 + 值表达式
+        String groupSql    = null; // GROUP BY 的时间标签
+        if ("1m".equals(window)) {
+            intervalSql = "1 MINUTE";
+            selectExpr  = "DATE_FORMAT(s.collected_at, '%H:%i:%s') AS x, s.metric, AVG(s.value) AS v";
+            groupSql    = "x, s.metric";
+        } else if ("30m".equals(window)) {
+            intervalSql = "30 MINUTE";
+            selectExpr  = "DATE_FORMAT(s.collected_at, '%H:%i') AS x, s.metric, AVG(s.value) AS v";
+            groupSql    = "x, s.metric";
+        } else if ("24h".equals(window)) {
+            intervalSql = "24 HOUR";
+            selectExpr  = "CONCAT(DATE_FORMAT(s.collected_at, '%Y-%m-%d %H:'), "
+                        + "LPAD(FLOOR(MINUTE(s.collected_at)/5)*5, 2, '0')) AS x, s.metric, AVG(s.value) AS v";
+            groupSql    = "x, s.metric";
+        }
+
+        String sql;
+        if (window != null && intervalSql != null) {
+            sql = "SELECT " + selectExpr +
+                  " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                  " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL " + intervalSql + ")" +
+                  " GROUP BY " + groupSql + " ORDER BY x";
+        } else {
+            sql = "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS x, s.metric, AVG(s.value) AS v" +
+                  " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                  " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
+                  " GROUP BY x, s.metric ORDER BY x";
+        }
+
         StringBuilder dates = new StringBuilder();
         StringBuilder temp = new StringBuilder();
         StringBuilder hum = new StringBuilder();
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, plotId);
-            ps.setInt(2, days);
+            if (window == null || intervalSql == null) {
+                ps.setInt(2, days);
+            }
+            // 同一时间标签只记一次日期，保证 dates 与 temp/humidity 一一对齐
+            String lastX = null;
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    String day = rs.getString("day");
-                    double v = rs.getDouble("avgv");
-                    if (dates.length() > 0) dates.append(',');
-                    dates.append(Json.str(day));
-                    if ("temp".equals(rs.getString("metric"))) {
-                        if (temp.length() > 0) temp.append(',');
-                        temp.append(v);
-                    } else {
-                        if (hum.length() > 0) hum.append(',');
-                        hum.append(v);
+                    String x = rs.getString("x");
+                    double v = rs.getDouble("v");
+                    String metric = rs.getString("metric");
+                    // 只有 temp/humidity 进温湿度趋势；lux 等其它指标不进
+                    if ("temp".equals(metric) || "humidity".equals(metric)) {
+                        if (!x.equals(lastX)) {
+                            if (dates.length() > 0) dates.append(',');
+                            dates.append(Json.str(x));
+                            lastX = x;
+                        }
+                        if ("temp".equals(metric)) {
+                            if (temp.length() > 0) temp.append(',');
+                            temp.append(v);
+                        } else {
+                            if (hum.length() > 0) hum.append(',');
+                            hum.append(v);
+                        }
                     }
                 }
             }
@@ -774,6 +840,119 @@ public class Api {
     }
 
     /* ==================================================================
+       注册申请审核（管理员）
+       ================================================================== */
+
+    /** GET /api/register-requests —— 注册申请列表（待审核的排前面） */
+    private static String registerRequestsJson() throws SQLException {
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        String sql = "SELECT id, username, role, status, reject_reason, created_at, reviewed_at, reviewer"
+                + " FROM register_request ORDER BY (status = '待审核') DESC, created_at DESC";
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            boolean first = true;
+            while (rs.next()) {
+                if (!first) sb.append(',');
+                first = false;
+                Timestamp ts = rs.getTimestamp("created_at");
+                Timestamp rt = rs.getTimestamp("reviewed_at");
+                sb.append('{')
+                  .append("\"id\":").append(rs.getLong("id")).append(',')
+                  .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
+                  .append("\"role\":").append(Json.str(rs.getString("role"))).append(',')
+                  .append("\"roleName\":").append(Json.str(roleName(rs.getString("role")))).append(',')
+                  .append("\"status\":").append(Json.str(rs.getString("status"))).append(',')
+                  .append("\"rejectReason\":").append(Json.str(rs.getString("reject_reason"))).append(',')
+                  .append("\"createdAt\":").append(Json.str(ts == null ? "" : fmt.format(ts))).append(',')
+                  .append("\"reviewedAt\":").append(Json.str(rt == null ? "" : fmt.format(rt))).append(',')
+                  .append("\"reviewer\":").append(Json.str(rs.getString("reviewer")))
+                  .append('}');
+            }
+        }
+        return sb.append("]}").toString();
+    }
+
+    /**
+     * PUT /api/register-requests/{id} —— 审核注册申请。
+     * body: {status:'已通过'|'已拒绝', name?(通过时显示名,默认账号名), rejectReason?(拒绝原因)}。
+     * 通过：写入 user 表（沿用申请时存的密码哈希，登录无需改密）。
+     */
+    private static String reviewRegisterJson(String id, HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String status = body.get("status");
+        if (status == null || (!"已通过".equals(status) && !"已拒绝".equals(status))) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：status 需为 已通过 或 已拒绝") + "}";
+        }
+        long reqId;
+        try { reqId = Long.parseLong(id); } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+        }
+        String reviewer = body.get("reviewer");
+        if (reviewer == null || reviewer.isEmpty()) reviewer = "管理员";
+
+        // 取申请记录
+        String username = null, password = null, role = null;
+        String sel = "SELECT username, password, role FROM register_request WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sel)) {
+            ps.setLong(1, reqId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "{\"code\":1,\"msg\":" + Json.str("申请不存在: " + id) + "}";
+                username = rs.getString("username");
+                password = rs.getString("password");
+                role = rs.getString("role");
+            }
+        }
+        if (username == null || password == null || role == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("申请数据不完整，无法审核") + "}";
+        }
+
+        if ("已通过".equals(status)) {
+            if (exists("SELECT 1 FROM user WHERE username = ?", username)) {
+                return "{\"code\":1,\"msg\":" + Json.str("账号已存在：" + username + "（可能已审核过）") + "}";
+            }
+            String name = body.get("name");
+            if (name == null || name.isEmpty()) name = username;
+            long userId = 0L;
+            String insUser = "INSERT INTO user(username, password, name, role) VALUES (?, ?, ?, ?)";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(insUser, PreparedStatement.RETURN_GENERATED_KEYS)) {
+                ps.setString(1, username);
+                ps.setString(2, password);
+                ps.setString(3, name);
+                ps.setString(4, role);
+                ps.executeUpdate();
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) userId = keys.getLong(1);
+                }
+            }
+            String upd = "UPDATE register_request SET status = '已通过', reviewed_at = NOW(), reviewer = ?, user_id = ? WHERE id = ?";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(upd)) {
+                ps.setString(1, reviewer);
+                ps.setLong(2, userId);
+                ps.setLong(3, reqId);
+                ps.executeUpdate();
+            }
+            return "{\"code\":0,\"msg\":" + Json.str("已通过，「" + username + "」可登录使用") + "}";
+        }
+
+        // 已拒绝
+        String reason = body.get("rejectReason");
+        String upd2 = "UPDATE register_request SET status = '已拒绝', reject_reason = ?, reviewed_at = NOW(), reviewer = ? WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(upd2)) {
+            ps.setString(1, reason);
+            ps.setString(2, reviewer);
+            ps.setLong(3, reqId);
+            ps.executeUpdate();
+        }
+        return "{\"code\":0,\"msg\":" + Json.str("已拒绝「" + username + "」的申请") + "}";
+    }
+
+    /* ==================================================================
        控制日志
        ================================================================== */
 
@@ -819,6 +998,28 @@ public class Api {
        传感器数据上报（模拟硬件 / MQTT 接收端）
        ================================================================== */
 
+    /* ==================================================================
+       板子手动刷新
+       ================================================================== */
+
+    /**
+     * POST /api/board/refresh —— 手动刷新：立即读一次板子并写库，返回最新读数。
+     * 前端刷新按钮调用，让板子日志能立刻看到一次请求（不用等采集器 30 秒周期）。
+     */
+    private static String refreshBoardJson() {
+        Map<String, String> r = BoardCollector.refreshNow();
+        if (r == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("板子读取失败：" + BoardCollector.getLastError()) + "}";
+        }
+        return "{\"code\":0,\"data\":{"
+                + "\"temp\":" + Json.num(r.get("temp"))
+                + ",\"humidity\":" + Json.num(r.get("humidity"))
+                + ",\"lux\":" + Json.num(r.get("lux"))
+                + ",\"updatedAt\":" + Json.str(java.time.LocalDateTime.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
+                + "}}";
+    }
+
     /**
      * POST /api/sensor-data —— 接收一条传感器读数。
      * body: {deviceId, metric:'temp'|'humidity', value}。
@@ -859,7 +1060,7 @@ public class Api {
     }
 
     /** 设备所属地块；不存在返回 null */
-    private static String plotOfDevice(String deviceId) throws SQLException {
+    static String plotOfDevice(String deviceId) throws SQLException {
         String sql = "SELECT plot_id FROM device WHERE id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -871,7 +1072,7 @@ public class Api {
     }
 
     /** 越过阈值时插入一条告警（同一地块同类型未处理告警不重复插） */
-    private static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
+    static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
         BigDecimal humidityMin = new BigDecimal(40);
         BigDecimal tempMax = new BigDecimal(35);
         String sql = "SELECT humidity_min, temp_max FROM plot_threshold WHERE plot_id = ?";
