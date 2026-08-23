@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设备管理 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="devices">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <!-- 设备列表 -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">设备列表</div>
+              <div class="card-sub">管理监测设备的绑定关系</div>
+            </div>
+            <div class="flex gap-8">
+              <a class="btn btn-outline btn-sm" href="alarm.html">🔔 告警记录</a>
+              <button class="btn btn-primary btn-sm" id="openAdd">＋ 添加设备</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>设备ID</th>
+                  <th>设备名称</th>
+                  <th>类型</th>
+                  <th>绑定地块</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="deviceBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- 添加设备弹窗 -->
+  <div class="modal-mask" id="addModal">
+    <div class="modal">
+      <div class="modal-title">添加设备</div>
+      <div class="form-group">
+        <label class="form-label">设备名称</label>
+        <input type="text" class="form-control" id="devName" placeholder="如：土壤湿度传感器-04">
+      </div>
+      <div class="form-group">
+        <label class="form-label">设备类型</label>
+        <select class="form-control" id="devType">
+          <option>土壤湿度</option>
+          <option>温度</option>
+          <option>灌溉设备</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">绑定地块</label>
+        <select class="form-control" id="devPlot"></select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelAdd">取消</button>
+        <button class="btn btn-primary" id="confirmAdd">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
+  <script>
+    Layout.init();
+
+    var devices = [];
+    var plots = [];
+
+    /* ---------- 类型徽章 ---------- */
+    function typeBadge(type) {
+      if (type === '灌溉设备') return '<span class="badge badge-normal">灌溉设备</span>';
+      if (type === '温度')     return '<span class="badge badge-warning">温度</span>';
+      return '<span class="badge badge-online">土壤湿度</span>';
+    }
+
+    /* ---------- 渲染设备列表 ---------- */
+    function renderDevices() {
+      var body = document.getElementById('deviceBody');
+      body.innerHTML = '';
+
+      devices.forEach(function (dev) {
+        var status = dev.online
+          ? '<span class="badge badge-online"><span class="dot"></span>在线</span>'
+          : '<span class="badge badge-offline"><span class="dot"></span>离线</span>';
+
+        var controlBtn = dev.controllable
+          ? '<a class="btn btn-sm btn-outline" href="control.html">🎛️ 去控制</a>'
+          : '';
+
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + dev.id + '</td>' +
+          '<td>' + dev.name + '</td>' +
+          '<td>' + typeBadge(dev.type) + '</td>' +
+          '<td>' + dev.plotName + '</td>' +
+          '<td>' + status + '</td>' +
+          '<td><div class="flex gap-8">' + controlBtn +
+          '<button class="btn btn-sm btn-danger" data-id="' + dev.id + '">解绑</button></div></td>';
+        body.appendChild(tr);
+      });
+
+      body.querySelectorAll('button[data-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          handleUnbind(btn.getAttribute('data-id'));
+        });
+      });
+    }
+
+    /* ---------- 解绑设备 ---------- */
+    function handleUnbind(id) {
+      var dev = devices.filter(function (d) { return d.id === id; })[0];
+      if (!dev) return;
+      if (!confirm('确定要解绑设备「' + dev.name + '」吗？')) return;
+
+      API.unbindDevice(id).then(function () {
+        devices = devices.filter(function (d) { return d.id !== id; });
+        renderDevices();
+        Toast.success('设备「' + dev.name + '」已解绑');
+      });
+    }
+
+    /* ---------- 填充地块下拉 ---------- */
+    function fillPlotSelect() {
+      var sel = document.getElementById('devPlot');
+      sel.innerHTML = '';
+      plots.forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name + '（' + p.crop + '）';
+        sel.appendChild(opt);
+      });
+    }
+
+    /* ---------- 弹窗控制 ---------- */
+    var modal = document.getElementById('addModal');
+    document.getElementById('openAdd').addEventListener('click', function () {
+      document.getElementById('devName').value = '';
+      modal.classList.add('show');
+    });
+    document.getElementById('cancelAdd').addEventListener('click', function () {
+      modal.classList.remove('show');
+    });
+
+    /* ---------- 确认添加 ---------- */
+    document.getElementById('confirmAdd').addEventListener('click', function () {
+      var name = document.getElementById('devName').value.trim();
+      var type = document.getElementById('devType').value;
+      var plotId = document.getElementById('devPlot').value;
+      var plot = plots.filter(function (p) { return p.id === plotId; })[0];
+
+      if (!name) { Toast.error('请输入设备名称'); return; }
+
+      API.addDevice({ name: name, type: type, plotId: plotId, plotName: plot ? plot.name : '-' }).then(function (res) {
+        devices.push(res.data);
+        renderDevices();
+        modal.classList.remove('show');
+        Toast.success('设备「' + name + '」添加成功');
+      });
+    });
+
+    /* ---------- 初始化 ---------- */
+    API.getDevices().then(function (res) {
+      devices = res.data;
+      renderDevices();
+    });
+    API.getPlots().then(function (res) {
+      plots = res.data;
+      fillPlotSelect();
+    });
+  </script>
+</body>
+</html>

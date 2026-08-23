@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能问答 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="assistant">
+
+  <div class="app">
+    <!-- 侧边栏：由 layout.js 动态注入 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <!-- 顶栏：由 layout.js 动态注入 -->
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content">
+        <div class="card" style="padding: 20px;">
+          <div class="chat-wrap">
+            <!-- 快捷提问 -->
+            <div class="quick-asks">
+              <button class="chip" data-q="现在该浇水吗？">现在该浇水吗？</button>
+              <button class="chip" data-q="土壤太干怎么办？">土壤太干怎么办？</button>
+              <button class="chip" data-q="如何设置告警阈值？">如何设置告警阈值？</button>
+              <button class="chip" data-q="温度太高怎么办？">温度太高怎么办？</button>
+            </div>
+
+            <!-- 消息列表 -->
+            <div class="chat-messages" id="chatMessages"></div>
+
+            <!-- 输入区 -->
+            <div class="chat-input-bar">
+              <input type="text" class="form-control" id="chatInput" placeholder="输入灌溉相关问题，例如：现在该浇水吗？">
+              <button class="btn btn-primary" id="sendBtn">发送</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
+  <script>
+    Layout.init();
+
+    var messagesEl = document.getElementById('chatMessages');
+    var inputEl = document.getElementById('chatInput');
+    var sendBtn = document.getElementById('sendBtn');
+
+    /* ---------- 添加一条消息 ---------- */
+    function addMessage(role, text, action, typew) {
+      var msg = document.createElement('div');
+      msg.className = 'msg ' + role;
+
+      var avatar = role === 'bot'
+        ? '<div class="avatar-sm">🤖</div>'
+        : '<div class="avatar-sm" style="background:var(--primary);color:#fff">👤</div>';
+
+      var actionHtml = action
+        ? '<div class="msg-action"><a class="btn btn-sm btn-primary" href="' + action.href + '">' + action.text + '</a></div>'
+        : '';
+
+      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : text) + actionHtml + '</div>';
+      msg.innerHTML = avatar + bubble;
+      messagesEl.appendChild(msg);
+
+      if (typew) {
+        Animate.typewrite(msg.querySelector('.type-text'), text, { onTick: scrollBottom, onDone: scrollBottom });
+      }
+      scrollBottom();
+      return msg;
+    }
+
+    /* ---------- 显示「正在输入」动画 ---------- */
+    function showTyping() {
+      var msg = document.createElement('div');
+      msg.className = 'msg bot';
+      msg.id = 'typingMsg';
+      msg.innerHTML = '<div class="avatar-sm">🤖</div>' +
+                      '<div class="bubble"><span class="typing"><span></span><span></span><span></span></span></div>';
+      messagesEl.appendChild(msg);
+      scrollBottom();
+      return msg;
+    }
+
+    function hideTyping() {
+      var t = document.getElementById('typingMsg');
+      if (t) t.remove();
+    }
+
+    function scrollBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    /* ---------- 发送消息 ---------- */
+    function send(question) {
+      question = (question || '').trim();
+      if (!question) return;
+
+      addMessage('user', question);
+      inputEl.value = '';
+      showTyping();
+
+      API.getChatReply(question).then(function (res) {
+        hideTyping();
+        addMessage('bot', res.data.answer, res.data.action, true);
+      });
+    }
+
+    /* ---------- 事件绑定 ---------- */
+    sendBtn.addEventListener('click', function () { send(inputEl.value); });
+    inputEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') send(inputEl.value);
+    });
+
+    document.querySelectorAll('.chip').forEach(function (chip) {
+      chip.addEventListener('click', function () { send(chip.getAttribute('data-q')); });
+    });
+
+    /* ---------- 初始欢迎消息 ---------- */
+    addMessage('bot', '你好，我是智慧农业助手 🌾 可以为您提供灌溉建议和农事指导。您可以点击下方快捷问题，或直接输入您的问题。');
+  </script>
+</body>
+</html>
