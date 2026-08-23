@@ -623,7 +623,7 @@ select.form-control { cursor: pointer; }
 .login-page {
   min-height: 100vh;
   display: flex;
-  background: linear-gradient(135deg, #0f2a17 0%, #14532d 45%, #1b7a3f 100%);
+  background: url('../../image/登陆页面背景.png') center / cover no-repeat;
   position: relative;
   overflow: hidden;
 }
@@ -632,9 +632,7 @@ select.form-control { cursor: pointer; }
   content: "";
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 15% 20%, rgba(34, 197, 94, .25), transparent 45%),
-    radial-gradient(circle at 85% 80%, rgba(74, 222, 128, .18), transparent 40%);
+  background: rgba(0, 0, 0, .15);
 }
 
 .login-panel {
