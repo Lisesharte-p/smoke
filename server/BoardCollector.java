@@ -13,74 +13,120 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 设备数据采集器：周期从所有配置了 ip/port 的设备（板子协议）读取温湿度/光照，写入 sensor_data。
+ * 设备数据采集器：与每台板子保持一条 TCP 长连接，持续接收板子推送的数据并写库。
  *
- * 板子协议（TCP，见 07_板子环境数据采集.sql）：
- *   连接后发送 "query\n"，
- *   板子返回数据流，每行形如：
- *     DATA      TEMP:31.22 HUMI:56.03 LUX:533.34
- *     HEARTBEAT TEMP:31.26 HUMI:56.05 LUX:533.34
- *   DATA 是采集读数，HEARTBEAT 是周期性心跳，两者都带当前 TEMP/HUMI/LUX。
+ * 板子协议（TCP，见 wifi-iot/app/sensor_tcp_server/sensor_server_demo.c）：
+ *   连接后发送 "query\n"，板子回 DATA TEMP:.. HUMI:.. LUX:..，之后每 5 秒推 HEARTBEAT。
+ *   （记录以 NUL 字节 0x00 结尾；控制指令 on/off 同样走这条连接，板子回 motor started/stopped。）
  *
- * 采集目标来自 device 表：ip/port 不为空的设备都会被轮询（动态添加设备后自动纳入采集）。
- * 写入映射（metric 名对齐前端监测页 /api/plots/{plotId}/realtime 读取的字段）：
- *   TEMP -> temp、HUMI -> humidity、LUX -> lux
- * 采集时间用 MySQL NOW(3)。非板子设备连不上/不回包时优雅失败（记入 deviceStatus），不影响其他设备。
+ * 板子固件一次只处理一条客户端连接（单客户端 accept 循环），因此：
+ *   - 连接按 <ip:port> 去重：同一块板子上的多个设备（如温度/湿度/亮度传感器都指向同一块板子）
+ *     共用一条长连接，板子推的数据会写入所有共享该连接的设备；
+ *   - 灌溉控制指令复用该长连接下发。
+ * 连接断开后自动重连；设备动态增删由后台监控线程每 30 秒扫描 device 表。
  */
 public class BoardCollector {
 
-    /** 采集间隔：每 30 秒读一次板子 */
-    private static final long COLLECT_INTERVAL_MS = 30_000L;
+    private static final long MONITOR_INTERVAL_MS = 30_000L;
+    private static final long RECONNECT_DELAY_MS = 5_000L;
+    private static final int READ_TIMEOUT_MS = 15_000;
+    private static final int CONNECT_TIMEOUT_MS = 3_000;
+    private static final int COMMAND_TIMEOUT_MS = 5_000;
 
-    /** 每次连接后读取数据的窗口（毫秒），取窗口内第一条有效读数。
-     *  板子收到 query 后立刻回第一条 DATA，窗口留 5 秒足够覆盖网络抖动。 */
-    private static final long READ_WINDOW_MS = 5_000L;
-
-    /** 最近一次采集状态（方便排查） */
     private static volatile boolean lastOk = false;
-    private static volatile String  lastError = "";
-    private static volatile String  lastReading = "";
+    private static volatile String lastError = "";
+    private static volatile String lastReading = "";
 
-    /** 最近一轮各设备采集结果快照：deviceId -> "ok:TEMP:.. HUMI:.. LUX:.." 或 "err:<信息>"。
-     *  volatile + 整体替换发布：锁内组快照、锁外整体赋值，读取方无锁、不撕裂。 */
+    /** 各设备最近一次采集结果快照：deviceId -> "ok:.." 或 "err:.." */
     private static volatile Map<String, String> deviceStatus = new HashMap<>();
 
-    /** 周期采集与手动刷新共用一把锁，避免并发连板子（板子可能单线程处理） */
-    private static final Object LOCK = new Object();
+    /** 各设备最近一次有效读数：deviceId -> {temp, humidity, lux}（供手动刷新返回） */
+    private static final Map<String, Map<String, String>> latestReadings = new ConcurrentHashMap<>();
 
-    public static boolean isLastOk()      { return lastOk; }
-    public static String  getLastError()  { return lastError; }
-    public static String  getLastReading() { return lastReading; }
+    /** 板子长连接：<ip:port> -> DeviceConn */
+    private static final Map<String, DeviceConn> connectors = new HashMap<>();
+
+    /** 每个 <ip:port> 共享连接的设备列表（每轮扫描重建） */
+    private static final Map<String, List<String>> connDevices = new HashMap<>();
+
+    /** 正在运行连接的 <ip:port> 集合（地址删除后移除，线程退出） */
+    private static final Set<String> runningConns = ConcurrentHashMap.newKeySet();
+
+    public static boolean isLastOk()        { return lastOk; }
+    public static String  getLastError()    { return lastError; }
+    public static String  getLastReading()  { return lastReading; }
     public static Map<String, String> getDeviceStatus() { return deviceStatus; }
 
     private BoardCollector() {}
 
-    /** 启动后台守护线程周期采集，采集失败只记状态、不中断循环 */
+    /** 启动后台监控线程：立即扫描一次，之后每 30 秒扫描设备表，动态建连/断连 */
     public static void start() {
-        Thread t = new Thread(() -> {
+        Thread monitor = new Thread(() -> {
             while (true) {
-                collect();
                 try {
-                    Thread.sleep(COLLECT_INTERVAL_MS);
+                    ensureConnectors();
+                } catch (Exception e) {
+                    System.out.println("[BoardCollector] 设备列表扫描失败: " + e);
+                }
+                try {
+                    Thread.sleep(MONITOR_INTERVAL_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
                 }
             }
-        }, "board-collector");
-        t.setDaemon(true);
-        t.start();
-        System.out.println("[BoardCollector] 已启动：每 " + COLLECT_INTERVAL_MS / 1000
-                + " 秒遍历所有配置了 IP/端口的设备并采集");
+        }, "board-monitor");
+        monitor.setDaemon(true);
+        monitor.start();
+        System.out.println("[BoardCollector] 常驻长连接模式已启动：同一块板子（ip:port）共享一条 TCP 连接，数据写入所有关联传感器");
     }
 
-    /** 供 API 手动刷新调用：立即读一次全部设备并写库 */
+    /** 供 API 手动刷新调用：返回最近一次捕获的读数（不另开连接，板子单客户端） */
     public static Map<String, String> refreshNow() {
-        return collect();
+        for (Map.Entry<String, Map<String, String>> e : latestReadings.entrySet()) {
+            return new HashMap<>(e.getValue());
+        }
+        lastError = "暂无板子读数";
+        return null;
+    }
+
+    /** 在板子共享长连接上给设备下发 on/off；该板子未连接/设备无地址返回 false */
+    public static boolean sendPersistentCommand(String deviceId, String action) {
+        String key = deviceKey(deviceId);
+        if (key == null) return false;
+        DeviceConn conn;
+        synchronized (connectors) {
+            conn = connectors.get(key);
+        }
+        return conn != null && conn.command(action);
+    }
+
+    /** 查设备 ip:port，拼成共享连接 key；未配置地址返回 null */
+    private static String deviceKey(String deviceId) {
+        String sql = "SELECT ip, port FROM device WHERE id = ?";
+        try (Connection c = DBUtil.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String ip = rs.getString("ip");
+                    Object port = rs.getObject("port");
+                    if (ip != null && !ip.trim().isEmpty() && port != null) {
+                        return ip.trim() + ":" + port;
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("[BoardCollector] 查设备地址失败: " + e);
+        }
+        return null;
     }
 
     /** 从 device 表加载采集目标：所有 ip/port 不为空的设备 */
@@ -98,112 +144,144 @@ public class BoardCollector {
         return list;
     }
 
-    /**
-     * 读一轮全部目标设备并写库；成功返回第一台成功的读数，全部失败返回 null。
-     * 单台失败只记入状态与摘要，不中断整轮；所有状态字段都在锁内写。
-     */
-    private static Map<String, String> collect() {
-        synchronized (LOCK) {
-            List<String[]> targets;
-            try {
-                targets = loadTargets();
-            } catch (SQLException e) {
-                lastOk = false;
-                lastError = "加载设备列表失败：" + e;
-                return null;
-            }
-            if (targets.isEmpty()) {
-                lastOk = false;
-                lastError = "没有配置 IP/端口的设备";
-                deviceStatus = new HashMap<>();
-                return null;
-            }
-
-            Map<String, String> status = new HashMap<>();
-            Map<String, String> first = null;
-            StringBuilder errs = new StringBuilder();
-            for (String[] t : targets) {
-                String deviceId = t[0];
-                String host = t[1];
-                int port;
+    /** 扫描设备表：无地址设备置离线；同一 <ip:port> 只建一条长连接（多个设备共享） */
+    private static void ensureConnectors() throws SQLException {
+        // 1. 无 ip/port 的设备不可能在线
+        try (Connection c = DBUtil.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE device SET online = 0 WHERE ip IS NULL OR TRIM(ip) = '' OR port IS NULL")) {
+            ps.executeUpdate();
+        }
+        // 2. 加载目标，按 <ip:port> 分组
+        List<String[]> targets = loadTargets();
+        Map<String, List<String>> byAddr = new HashMap<>();
+        for (String[] t : targets) {
+            String key = t[1] + ":" + t[2];
+            byAddr.computeIfAbsent(key, k -> new ArrayList<>()).add(t[0]);
+        }
+        synchronized (connDevices) {
+            connDevices.clear();
+            connDevices.putAll(byAddr);
+        }
+        // 3. 停止已不存在的 <ip:port> 连接
+        for (String key : runningConns) {
+            if (!byAddr.containsKey(key)) runningConns.remove(key);
+        }
+        // 4. 为新出现的 <ip:port> 建连
+        for (Map.Entry<String, List<String>> e : byAddr.entrySet()) {
+            String key = e.getKey();
+            if (runningConns.add(key)) {
+                String[] hp = key.split(":");
                 try {
-                    port = Integer.parseInt(t[2]);
-                } catch (NumberFormatException e) {
-                    status.put(deviceId, "err:port 非法(" + t[2] + ")");
-                    errs.append(deviceId).append(":端口非法; ");
-                    continue;
-                }
-                try {
-                    Map<String, String> reading = fetchOnce(host, port);
-                    if (reading != null) {
-                        writeToDb(deviceId, reading);
-                        status.put(deviceId, "ok:TEMP:" + reading.get("temp")
-                                + " HUMI:" + reading.get("humidity")
-                                + " LUX:" + reading.get("lux"));
-                        if (first == null) first = reading;
-                    } else {
-                        status.put(deviceId, "err:未读到有效读数");
-                        errs.append(deviceId).append(":未读到有效读数; ");
-                    }
-                } catch (Exception e) {
-                    status.put(deviceId, "err:" + e);
-                    errs.append(deviceId).append(":").append(e).append("; ");
+                    startConnector(key, hp[0], Integer.parseInt(hp[1]));
+                } catch (NumberFormatException ex) {
+                    runningConns.remove(key);
                 }
             }
-
-            lastOk = first != null;
-            lastReading = first == null ? "" : "TEMP:" + first.get("temp")
-                    + " HUMI:" + first.get("humidity") + " LUX:" + first.get("lux");
-            lastError = errs.length() == 0 ? "" : errs.toString();
-            deviceStatus = status;
-            return first;
         }
     }
 
     /**
-     * 连设备发 "query\n"，在读取窗口内解析第一条 DATA/HEARTBEAT 读数。
-     * <p>设备每条记录以 NUL 字节(0x00)结尾（不是换行），所以按字节读、遇 0x00 切一条。
-     * @return {temp, humidity, lux}；窗口内没读到有效记录返回 null
+     * 为一块板子启动常驻连接线程：连接后发 query，循环读 DATA/HEARTBEAT 写库到所有共享设备；
+     * 断流（读超时）或断开后全部置离线并间隔重连。控制指令由外部经 conn.command() 复用本连接发送。
      */
-    static Map<String, String> fetchOnce(String host, int port) throws IOException {
-        try (Socket s = new Socket()) {
-            s.connect(new InetSocketAddress(host, port), 3000);
-            s.setSoTimeout(1500);
-            OutputStream out = s.getOutputStream();
-            out.write("query\n".getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            InputStream in = s.getInputStream();
-            StringBuilder sb = new StringBuilder();
-            byte[] buf = new byte[512];
-            long end = System.currentTimeMillis() + READ_WINDOW_MS;
-            while (System.currentTimeMillis() < end) {
-                try {
-                    int n = in.read(buf);
-                    if (n < 0) break; // 连接被设备关闭
-                    for (int i = 0; i < n; i++) {
-                        if (buf[i] == 0) {
-                            // 一条完整记录（可能跨多个 read）
-                            Map<String, String> m = parseLine(sb.toString().trim());
-                            sb.setLength(0);
-                            if (m != null) return m;
-                        } else {
-                            sb.append((char) (buf[i] & 0xFF));
+    private static void startConnector(String key, String host, int port) {
+        DeviceConn conn = new DeviceConn(key);
+        synchronized (connectors) {
+            connectors.put(key, conn);
+        }
+        Thread t = new Thread(() -> {
+            while (runningConns.contains(key)) {
+                try (Socket s = new Socket()) {
+                    s.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+                    s.setSoTimeout(READ_TIMEOUT_MS);
+                    conn.socket = s;
+                    setOnlineFor(key, true);
+                    putStatusFor(key, "ok:已连接");
+                    OutputStream out = s.getOutputStream();
+                    out.write("query\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+
+                    InputStream in = s.getInputStream();
+                    StringBuilder sb = new StringBuilder();
+                    byte[] buf = new byte[512];
+                    while (runningConns.contains(key)) {
+                        try {
+                            int n = in.read(buf);
+                            if (n < 0) break; // 板子关闭连接
+                            for (int i = 0; i < n; i++) {
+                                if (buf[i] == 0) {
+                                    String record = sb.toString().trim();
+                                    sb.setLength(0);
+                                    handleRecord(conn, record);
+                                } else {
+                                    sb.append((char) (buf[i] & 0xFF));
+                                }
+                            }
+                        } catch (java.net.SocketTimeoutException e) {
+                            // 心跳 5s 一条，超时说明断流 → 断开重连
+                            putStatusFor(key, "err:读超时，板子断流");
+                            break;
                         }
                     }
-                } catch (java.net.SocketTimeoutException e) {
-                    // 设备按固定周期推数据，超时说明还没到下一个推送周期，继续等
+                } catch (IOException e) {
+                    putStatusFor(key, "err:" + e.getMessage());
+                } finally {
+                    conn.socket = null;
+                    setOnlineFor(key, false);
+                }
+                if (!runningConns.contains(key)) break;
+                try {
+                    Thread.sleep(RECONNECT_DELAY_MS);
+                } catch (InterruptedException e) {
+                    break;
                 }
             }
-        }
-        return null;
+            synchronized (connectors) {
+                connectors.remove(key);
+            }
+        }, "board-conn-" + key);
+        t.setDaemon(true);
+        t.start();
     }
 
-    /**
-     * 解析一行设备数据，形如：
-     *   DATA TEMP:31.22 HUMI:56.03 LUX:533.34
-     *   HEARTBEAT TEMP:31.26 HUMI:56.05 LUX:533.34
-     * @return {temp, humidity, lux}；不是有效行返回 null
-     */
+    /** 处理一条 NUL 结尾的记录：DATA/HEARTBEAT 写入所有共享设备；motor 回包确认控制指令 */
+    private static void handleRecord(DeviceConn conn, String record) {
+        if (record.isEmpty()) return;
+        if (record.contains("motor")) {
+            // on/off 指令的确认回包（motor started / motor stopped）
+            synchronized (conn.lock) {
+                conn.confirmed = true;
+            }
+            return;
+        }
+        Map<String, String> m = parseLine(record);
+        if (m == null) return; // 其它未知记录忽略
+        List<String> ids = currentDevices(conn.key);
+        if (ids.isEmpty()) return;
+        for (String id : ids) {
+            try {
+                writeToDb(id, m);
+            } catch (Exception e) {
+                System.out.println("[BoardCollector] " + id + " 写库失败: " + e);
+            }
+            putStatus(id, "ok:TEMP:" + m.get("temp") + " HUMI:" + m.get("humidity") + " LUX:" + m.get("lux"));
+            latestReadings.put(id, new HashMap<>(m));
+        }
+        lastOk = true;
+        lastReading = "TEMP:" + m.get("temp") + " HUMI:" + m.get("humidity") + " LUX:" + m.get("lux");
+        lastError = "";
+    }
+
+    /** 当前共享某条连接的所有设备 id */
+    private static List<String> currentDevices(String key) {
+        synchronized (connDevices) {
+            List<String> ids = connDevices.get(key);
+            return ids == null ? new ArrayList<>() : new ArrayList<>(ids);
+        }
+    }
+
+    /** 解析一行设备数据，形如：DATA TEMP:31.22 HUMI:56.03 LUX:533.34 */
     static Map<String, String> parseLine(String line) {
         if (line == null) return null;
         int idx = line.indexOf(' ');
@@ -233,48 +311,6 @@ public class BoardCollector {
         return v.isEmpty() ? null : v;
     }
 
-    /**
-     * 向设备下发一条控制指令（on / off），等板子确认回包后返回。
-     * 板子收到 "on" → 开启马达并回 "motor started"；收到 "off" → 关闭马达并回 "motor stopped"。
-     * 回包以 NUL(0x00) 结尾（与 DATA/HEARTBEAT 同一格式），也可能先收到心跳再收到确认，因此
-     * 累计读取、只要出现含 "motor" 的记录即视为指令执行成功。
-     *
-     * @return 收到 motor 确认回包返回 true；连接失败 / 超时 / 无确认回包返回 false
-     */
-    static boolean sendCommand(String host, int port, String command) {
-        try (Socket s = new Socket()) {
-            s.connect(new InetSocketAddress(host, port), 3000);
-            s.setSoTimeout(1500);
-            OutputStream out = s.getOutputStream();
-            out.write((command + "\n").getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            InputStream in = s.getInputStream();
-            StringBuilder sb = new StringBuilder();
-            byte[] buf = new byte[128];
-            long end = System.currentTimeMillis() + 3000;
-            while (System.currentTimeMillis() < end) {
-                try {
-                    int n = in.read(buf);
-                    if (n < 0) break; // 连接被设备关闭
-                    for (int i = 0; i < n; i++) {
-                        if (buf[i] == 0) {
-                            // 一条完整记录：确认指令已执行
-                            if (sb.toString().contains("motor")) return true;
-                            sb.setLength(0);
-                        } else {
-                            sb.append((char) (buf[i] & 0xFF));
-                        }
-                    }
-                } catch (java.net.SocketTimeoutException e) {
-                    // 没等到回包，继续等
-                }
-            }
-            return sb.toString().contains("motor");
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
     /** 把一次读数写入 sensor_data：temp/humidity/lux 三行，同一采集时间戳 */
     static void writeToDb(String deviceId, Map<String, String> reading) throws SQLException {
         try (Connection c = DBUtil.getConnection()) {
@@ -296,7 +332,6 @@ public class BoardCollector {
                 Api.checkThresholdAlarm(plotId, "temp", new BigDecimal(reading.get("temp")));
                 Api.checkThresholdAlarm(plotId, "humidity", new BigDecimal(reading.get("humidity")));
             } catch (SQLException e) {
-                // 告警检查失败不影响本次采集结果（数据已入库），下个周期会重试
                 System.out.println("[BoardCollector] 告警检查失败（数据已入库）：" + e);
             }
         }
@@ -307,5 +342,71 @@ public class BoardCollector {
         ps.setString(2, metric);
         ps.setBigDecimal(3, new BigDecimal(value));
         ps.addBatch();
+    }
+
+    /** 把共享某条连接的所有设备置在线/离线 */
+    private static void setOnlineFor(String key, boolean online) {
+        List<String> ids = currentDevices(key);
+        try (Connection c = DBUtil.getConnection()) {
+            for (String id : ids) {
+                try (PreparedStatement ps = c.prepareStatement("UPDATE device SET online = ? WHERE id = ?")) {
+                    ps.setInt(1, online ? 1 : 0);
+                    ps.setString(2, id);
+                    ps.executeUpdate();
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("[BoardCollector] 更新在线状态失败: " + e);
+        }
+    }
+
+    /** 更新某个 <ip:port> 下所有设备的状态快照 */
+    private static void putStatusFor(String key, String status) {
+        for (String id : currentDevices(key)) putStatus(id, status);
+    }
+
+    /** 更新单台设备状态快照（copy-on-write 发布，读取方无锁） */
+    private static void putStatus(String deviceId, String status) {
+        Map<String, String> copy = new HashMap<>(deviceStatus);
+        copy.put(deviceId, status);
+        deviceStatus = copy;
+    }
+
+    /** 一台板子的常驻连接：后台线程读心跳；外部通过 command() 复用本连接发 on/off 并等确认 */
+    private static class DeviceConn {
+        final String key;   // "ip:port"
+        volatile Socket socket;
+        final Object lock = new Object();   // 发指令与等待确认的锁
+        volatile String pendingAction;
+        volatile boolean confirmed;
+
+        DeviceConn(String key) { this.key = key; }
+
+        /** 在常驻连接上发 on/off，等板子 motor 确认回包；超时返回 false */
+        boolean command(String action) {
+            Socket s = socket;
+            if (s == null || s.isClosed()) return false;
+            synchronized (lock) {
+                pendingAction = action;
+                confirmed = false;
+                try {
+                    OutputStream out = s.getOutputStream();
+                    out.write((action + "\n").getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                } catch (IOException e) {
+                    return false;
+                }
+            }
+            long end = System.currentTimeMillis() + COMMAND_TIMEOUT_MS;
+            while (System.currentTimeMillis() < end) {
+                if (confirmed) return true;
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    return false;
+                }
+            }
+            return confirmed;
+        }
     }
 }

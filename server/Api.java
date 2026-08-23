@@ -196,9 +196,13 @@ public class Api {
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id) AS deviceCount," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id AND d.online=1) AS onlineCount," +
                 "  (SELECT s.value FROM sensor_data s JOIN device d ON d.id=s.device_id" +
-                "    WHERE d.plot_id=p.id AND s.metric='temp' ORDER BY s.collected_at DESC LIMIT 1) AS temp," +
+                "    WHERE d.plot_id=p.id AND s.metric='temp' AND d.online=1" +
+                "    AND d.type IN ('温度传感器','环境监测板')" +
+                "    ORDER BY s.collected_at DESC LIMIT 1) AS temp," +
                 "  (SELECT s.value FROM sensor_data s JOIN device d ON d.id=s.device_id" +
-                "    WHERE d.plot_id=p.id AND s.metric='humidity' ORDER BY s.collected_at DESC LIMIT 1) AS humidity" +
+                "    WHERE d.plot_id=p.id AND s.metric='humidity' AND d.online=1" +
+                "    AND d.type IN ('土壤湿度传感器','环境监测板')" +
+                "    ORDER BY s.collected_at DESC LIMIT 1) AS humidity" +
                 " FROM plot p ORDER BY p.id";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -341,6 +345,7 @@ public class Api {
                     String devType = type;
                     if ("土壤湿度".equals(type)) devType = "土壤湿度传感器";
                     else if ("温度".equals(type)) devType = "温度传感器";
+                    else if ("亮度".equals(type)) devType = "亮度传感器";
                     try (PreparedStatement ps = conn.prepareStatement(
                             "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)")) {
                         ps.setString(1, nextDeviceId(conn));
@@ -417,6 +422,7 @@ public class Api {
      * plotName 由 join plot 得出；controllable 由 type=='灌溉设备' 推出。
      */
     private static String devicesJson() throws SQLException {
+        Map<String, Map<String, BigDecimal>> latest = latestByDevice();
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port" +
@@ -429,6 +435,7 @@ public class Api {
                 if (!first) sb.append(',');
                 first = false;
                 String type = rs.getString("type");
+                Map<String, BigDecimal> vals = latest.get(rs.getString("id"));
                 sb.append('{')
                   .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
                   .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
@@ -438,6 +445,9 @@ public class Api {
                   .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
                   .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
                   .append("\"online\":").append(rs.getInt("online") == 1).append(',')
+                  .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
+                  .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
+                  .append("\"lux\":").append(numOrNull(vals, "lux")).append(',')
                   .append("\"controllable\":").append("灌溉设备".equals(type)).append(',')
                   .append("\"running\":").append(rs.getInt("running") == 1)
                   .append('}');
@@ -445,6 +455,32 @@ public class Api {
         }
         sb.append("]}");
         return sb.toString();
+    }
+
+    /** 每台设备各指标的最新一条读数：deviceId -> {temp, humidity, lux} */
+    private static Map<String, Map<String, BigDecimal>> latestByDevice() throws SQLException {
+        Map<String, Map<String, BigDecimal>> map = new HashMap<>();
+        String sql =
+                "SELECT device_id, metric, value FROM sensor_data WHERE id IN (" +
+                " SELECT MAX(id) FROM sensor_data WHERE metric IN ('temp','humidity','lux')" +
+                " GROUP BY device_id, metric)";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String deviceId = rs.getString("device_id");
+                String metric = rs.getString("metric");
+                map.computeIfAbsent(deviceId, k -> new HashMap<>()).put(metric, rs.getBigDecimal("value"));
+            }
+        }
+        return map;
+    }
+
+    /** 从设备最新值表里取某指标；无则返回 null */
+    private static String numOrNull(Map<String, BigDecimal> vals, String key) {
+        if (vals == null) return "null";
+        BigDecimal v = vals.get(key);
+        return v == null ? "null" : String.valueOf(v);
     }
 
     /**
@@ -471,9 +507,10 @@ public class Api {
         if (port < 1 || port > 65535) {
             return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 需在 1-65535 之间") + "}";
         }
-        // 前端类型契约 → 入库类型（typeMap 只认 '土壤湿度传感器'/'温度传感器'/'灌溉设备'）
+        // 前端类型契约 → 入库类型（typeMap 反向映射）
         if ("土壤湿度".equals(type)) type = "土壤湿度传感器";
         else if ("温度".equals(type)) type = "温度传感器";
+        else if ("亮度".equals(type)) type = "亮度传感器";
         String id = nextDeviceId();
         String sql = "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
@@ -540,6 +577,7 @@ public class Api {
             ps.setString(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return "null";
+                Map<String, BigDecimal> vals = latestByDevice().get(id);
                 return "{\"id\":" + Json.str(rs.getString("id"))
                         + ",\"name\":" + Json.str(rs.getString("name"))
                         + ",\"type\":" + Json.str(typeMap(rs.getString("type")))
@@ -548,6 +586,9 @@ public class Api {
                         + ",\"ip\":" + Json.str(rs.getString("ip"))
                         + ",\"port\":" + Json.num(rs.getObject("port"))
                         + ",\"online\":" + (rs.getInt("online") == 1)
+                        + ",\"temp\":" + numOrNull(vals, "temp")
+                        + ",\"humidity\":" + numOrNull(vals, "humidity")
+                        + ",\"lux\":" + numOrNull(vals, "lux")
                         + ",\"controllable\":" + "灌溉设备".equals(rs.getString("type"))
                         + ",\"running\":" + (rs.getInt("running") == 1)
                         + "}";
@@ -559,6 +600,8 @@ public class Api {
     private static String typeMap(String type) {
         if ("灌溉设备".equals(type)) return "灌溉设备";
         if ("温度传感器".equals(type)) return "温度";
+        if ("亮度传感器".equals(type)) return "亮度";
+        if ("环境监测板".equals(type)) return "环境监测板";
         return "土壤湿度"; // 土壤湿度传感器等统一归为土壤湿度
     }
 
@@ -566,16 +609,18 @@ public class Api {
        实时 / 历史数据
        ================================================================== */
 
-    /** GET /api/plots/{plotId}/realtime —— 某地块最新温湿度 */
+    /** GET /api/plots/{plotId}/realtime —— 某地块最新温湿度/亮度 */
     private static String realtimeJson(String plotId) throws SQLException {
         BigDecimal temp = latestValue(plotId, "temp");
         BigDecimal humidity = latestValue(plotId, "humidity");
+        BigDecimal lux = latestValue(plotId, "lux");
         String updatedAt = latestTime(plotId);
         return "{\"code\":0,\"data\":{"
                 + "\"plotId\":" + Json.str(plotId)
                 + ",\"plotName\":" + Json.str(plotName(plotId))
                 + ",\"temp\":" + Json.num(temp)
                 + ",\"humidity\":" + Json.num(humidity)
+                + ",\"lux\":" + Json.num(lux)
                 + ",\"updatedAt\":" + Json.str(updatedAt)
                 + "}}";
     }
@@ -623,15 +668,18 @@ public class Api {
         }
 
         String sql;
+        String dataTypes = " AND d.type IN ('温度传感器','环境监测板','土壤湿度传感器','亮度传感器')";
         if (window != null && intervalSql != null) {
             sql = "SELECT " + selectExpr +
                   " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                  " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL " + intervalSql + ")" +
+                  " WHERE d.plot_id = ? AND d.online = 1" + dataTypes +
+                  " AND s.collected_at >= DATE_SUB(NOW(), INTERVAL " + intervalSql + ")" +
                   " GROUP BY " + groupSql + " ORDER BY x";
         } else {
             sql = "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS x, s.metric, AVG(s.value) AS v" +
                   " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                  " WHERE d.plot_id = ? AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
+                  " WHERE d.plot_id = ? AND d.online = 1" + dataTypes +
+                  " AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
                   " GROUP BY x, s.metric ORDER BY x";
         }
 
@@ -676,11 +724,22 @@ public class Api {
                 + "}";
     }
 
-    /** 某地块某指标的最新一条读数；没有数据返回 null */
+    /** 各指标由哪些设备类型提供（数据查询只统计对应类型设备，避免灌溉设备等的板子数据混入） */
+    private static String metricTypes(String metric) {
+        if ("temp".equals(metric)) return "('温度传感器','环境监测板')";
+        if ("humidity".equals(metric)) return "('土壤湿度传感器','环境监测板')";
+        if ("lux".equals(metric)) return "('亮度传感器','环境监测板')";
+        return null;
+    }
+
+    /** 某地块某指标的最新一条读数（仅统计在线且类型匹配的设备）；没有数据返回 null */
     private static BigDecimal latestValue(String plotId, String metric) throws SQLException {
+        String types = metricTypes(metric);
         String sql =
                 "SELECT s.value FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                " WHERE d.plot_id = ? AND s.metric = ? ORDER BY s.collected_at DESC LIMIT 1";
+                " WHERE d.plot_id = ? AND s.metric = ? AND d.online = 1" +
+                (types == null ? "" : " AND d.type IN " + types) +
+                " ORDER BY s.collected_at DESC LIMIT 1";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, plotId);
@@ -691,11 +750,12 @@ public class Api {
         }
     }
 
-    /** 某地块最新采集时间；没有数据返回空串 */
+    /** 某地块最新采集时间（仅统计在线且提供数据的设备）；没有数据返回空串 */
     private static String latestTime(String plotId) throws SQLException {
         String sql =
                 "SELECT MAX(s.collected_at) FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                " WHERE d.plot_id = ?";
+                " WHERE d.plot_id = ? AND d.online = 1" +
+                " AND d.type IN ('温度传感器','环境监测板','土壤湿度传感器','亮度传感器')";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, plotId);
@@ -740,16 +800,11 @@ public class Api {
             return "{\"code\":1,\"msg\":" + Json.str("设备「" + deviceId + "」未配置网络地址，无法下发指令") + "}";
         }
 
-        // 2. 向板子下发 on/off，收到 motor 确认回包才算成功
-        boolean ok;
-        try {
-            ok = BoardCollector.sendCommand(target[0], Integer.parseInt(target[1]), action);
-        } catch (NumberFormatException e) {
-            ok = false;
-        }
+        // 2. 在常驻长连接上向板子下发 on/off，收到 motor 确认回包才算成功
+        boolean ok = BoardCollector.sendPersistentCommand(deviceId, action);
         if (!ok) {
             writeControlLog(deviceId, actionText, "失败", operator);
-            return "{\"code\":1,\"msg\":" + Json.str("指令下发失败：无法连接设备或设备无响应") + "}";
+            return "{\"code\":1,\"msg\":" + Json.str("指令下发失败：板子未连接或无响应") + "}";
         }
 
         // 3. 指令成功：更新运行状态 + 写成功日志
@@ -1056,9 +1111,36 @@ public class Api {
             }
         }
 
+        // 用户想看实时数据 → 附带跳转监测页的按钮
+        String actionJson = "null";
+        if (wantsRealtime(lastUserQuestion(valid))) {
+            actionJson = "{\"text\":\"查看实时数据\",\"href\":\"monitoring.html\"}";
+        }
+
         return "{\"code\":0,\"data\":{\"answer\":" + Json.str(answer)
-                + ",\"action\":null,\"conversationId\":"
+                + ",\"action\":" + actionJson + ",\"conversationId\":"
                 + (conversationId == null ? "null" : conversationId) + "}}";
+    }
+
+    /** 取对话里最后一条用户消息（用于判断本轮问题意图） */
+    private static String lastUserQuestion(List<Map<String, String>> msgs) {
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if ("user".equals(msgs.get(i).get("role"))) return msgs.get(i).get("content");
+        }
+        return "";
+    }
+
+    /** 判断用户是否想查看实时数据（命中关键词则回答附带跳转监测页的按钮） */
+    private static boolean wantsRealtime(String q) {
+        if (q == null || q.isEmpty()) return false;
+        String s = q.replaceAll("[？?。.，,、\\s]", "");
+        String[] kws = {"实时", "监测", "温湿度", "查看数据", "看下数据", "看数据", "现在多少", "当前多少",
+                        "现在温度", "当前温度", "现在湿度", "当前湿度", "现在光照", "当前光照",
+                        "打开监测", "进入监测", "数据多少", "多少度", "多少湿度"};
+        for (String kw : kws) {
+            if (s.contains(kw)) return true;
+        }
+        return false;
     }
 
     /**
@@ -1144,10 +1226,13 @@ public class Api {
         if (DEEPSEEK_API_KEY == null || DEEPSEEK_API_KEY.isEmpty()) {
             throw new IOException("未配置环境变量 DEEPSEEK_API_KEY");
         }
-        // 系统提示：基础角色 + 最新一次采集的温湿度/光照数据（让回答结合实时数据）
+        // 系统提示：基础角色 + 当前时间 + 最新一次采集的温湿度/光照数据（让回答结合实时数据）
         String dataCtx = latestReadingsContext();
+        String now = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
         String system = "你是「智慧农业平台」的智能助手，负责解答大棚种植、灌溉、温湿度监测、告警阈值、设备控制等农业问题。"
-                      + "回答要简洁实用、直接给出建议；只回答与农业种植相关的问题，无关问题礼貌说明无法回答。";
+                      + "回答要简洁实用、直接给出建议；只回答与农业种植相关的问题，无关问题礼貌说明无法回答。"
+                      + " 当前服务器时间是 " + now + "，回答时间相关问题以这个时间为准。";
         if (!dataCtx.isEmpty()) {
             system += " 当前系统实时采集的环境数据如下：" + dataCtx
                     + " 回答灌溉、通风等建议时可参考这些数据，但不要编造未提供的数据。";
@@ -1196,8 +1281,10 @@ public class Api {
      */
     private static String latestReadingsContext() throws SQLException {
         String sql =
-                "SELECT metric, value, DATE_FORMAT(collected_at, '%Y-%m-%d %H:%i:%s') AS t" +
-                " FROM sensor_data WHERE id IN (" +
+                "SELECT s.metric, s.value, DATE_FORMAT(s.collected_at, '%Y-%m-%d %H:%i:%s') AS t" +
+                " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                " WHERE d.online = 1 AND d.type IN ('温度传感器','环境监测板','土壤湿度传感器','亮度传感器')" +
+                " AND s.id IN (" +
                 "  SELECT MAX(id) FROM sensor_data WHERE metric IN ('temp','humidity','lux') GROUP BY metric)";
         String temp = null, humidity = null, lux = null, time = null;
         try (Connection conn = DBUtil.getConnection();

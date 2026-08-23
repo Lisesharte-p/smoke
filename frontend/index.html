@@ -224,8 +224,12 @@
       plots.forEach(function (p) {
         var devs = devices.filter(function (d) { return d.plotId === p.id; });
         var online = devs.filter(function (d) { return d.online; }).length;
-        var tempHot = p.temp >= 35;
-        var humDry = p.humidity < 40;
+        var hasTemp = p.temp !== null && p.temp !== undefined;
+        var hasHum = p.humidity !== null && p.humidity !== undefined;
+        var tempHot = hasTemp && p.temp >= 35;
+        var humDry = hasHum && p.humidity < 40;
+        var tempText = hasTemp ? p.temp : '--';
+        var humText = hasHum ? p.humidity : '--';
 
         var card = document.createElement('div');
         card.className = 'plot-card';
@@ -241,8 +245,8 @@
             '</div>' +
           '</div>' +
           '<div class="plot-metrics">' +
-            '<div class="plot-metric"><div class="v' + (tempHot ? ' hot' : '') + '">' + p.temp + '℃</div><div class="l">温度</div></div>' +
-            '<div class="plot-metric"><div class="v' + (humDry ? ' dry' : '') + '">' + p.humidity + '%</div><div class="l">湿度</div></div>' +
+            '<div class="plot-metric"><div class="v' + (tempHot ? ' hot' : '') + '">' + tempText + '℃</div><div class="l">温度</div></div>' +
+            '<div class="plot-metric"><div class="v' + (humDry ? ' dry' : '') + '">' + humText + '%</div><div class="l">湿度</div></div>' +
             '<div class="plot-metric"><div class="v">' + devs.length + '</div><div class="l">设备</div></div>' +
           '</div>';
         grid.appendChild(card);

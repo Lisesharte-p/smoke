@@ -31,16 +31,21 @@
           </div>
         </div>
 
-        <!-- 实时数值 -->
-        <div class="grid grid-2 mt-16">
-          <div class="metric-big">
+        <!-- 实时数值（按地块内设备类型动态显示） -->
+        <div class="grid metric-grid mt-16">
+          <div class="metric-big" id="tempBox">
             <div class="value" id="metricTempBox"><span id="metricTemp">--</span><span class="unit">℃</span></div>
             <div class="label">🌡️ 实时温度</div>
           </div>
-          <div class="metric-big">
+          <div class="metric-big" id="humBox">
             <div class="value" id="metricHumBox"><span id="metricHum">--</span><span class="unit">%</span></div>
             <div class="label">💧 土壤湿度</div>
           </div>
+          <div class="metric-big" id="luxBox">
+            <div class="value" id="metricLuxBox"><span id="metricLux">--</span><span class="unit">lx</span></div>
+            <div class="label">💡 光照亮度</div>
+          </div>
+          <div class="empty" id="metricEmpty" style="display:none">该地块暂无数据监测设备</div>
         </div>
 
         <!-- 设备状态 -->
@@ -48,7 +53,7 @@
           <div class="card-header">
             <div>
               <div class="card-title">设备状态</div>
-              <div class="card-sub">当前地块绑定的监测设备</div>
+              <div class="card-sub">当前地块绑定的监测设备（数值按设备类型显示）</div>
             </div>
             <a class="btn btn-outline btn-sm" href="devices.html">🗂️ 设备管理</a>
           </div>
@@ -58,6 +63,7 @@
                 <tr>
                   <th>设备名称</th>
                   <th>类型</th>
+                  <th>数值</th>
                   <th>状态</th>
                   <th>操作</th>
                 </tr>
@@ -81,10 +87,21 @@
     var devices = [];
     var thresholds = { humidityMin: 40, tempMax: 35 };
 
+    /* 设备类型 → 该类型提供的监测指标（用于设备表格数值 + 状态总览显隐） */
+    var TYPE_METRICS = {
+      '温度':       ['temp'],
+      '土壤湿度':   ['humidity'],
+      '亮度':       ['lux'],
+      '环境监测板': ['temp', 'humidity', 'lux'],
+      '灌溉设备':   []
+    };
+
     /* ---------- 类型徽章 ---------- */
     function typeBadge(type) {
-      if (type === '灌溉设备') return '<span class="badge badge-normal">灌溉设备</span>';
-      if (type === '温度')     return '<span class="badge badge-warning">温度</span>';
+      if (type === '灌溉设备')   return '<span class="badge badge-normal">灌溉设备</span>';
+      if (type === '温度')       return '<span class="badge badge-warning">温度</span>';
+      if (type === '亮度')       return '<span class="badge badge-info">亮度</span>';
+      if (type === '环境监测板') return '<span class="badge badge-info">环境监测板</span>';
       return '<span class="badge badge-online">土壤湿度</span>';
     }
 
@@ -95,7 +112,7 @@
 
       var list = devices.filter(function (d) { return d.plotId === selectedPlotId; });
       if (!list.length) {
-        body.innerHTML = '<tr><td colspan="4" class="empty">该地块暂无设备</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="empty">该地块暂无设备</td></tr>';
         return;
       }
 
@@ -111,44 +128,90 @@
         tr.innerHTML =
           '<td>' + d.name + '</td>' +
           '<td>' + typeBadge(d.type) + '</td>' +
+          '<td>' + deviceValueHtml(d) + '</td>' +
           '<td>' + status + '</td>' +
           '<td>' + control + '</td>';
         body.appendChild(tr);
       });
     }
 
-    /* ---------- 刷新实时温湿度 ---------- */
+    /* 按设备类型显示对应数值；离线设备不显示数据 */
+    function deviceValueHtml(d) {
+      var metrics = TYPE_METRICS[d.type] || [];
+      if (!metrics.length) {
+        if (d.controllable) return d.running ? '<span class="text-success">灌溉中</span>' : '<span class="text-muted">已停止</span>';
+        return '<span class="text-muted">—</span>';
+      }
+      if (!d.online) return '<span class="text-muted">--</span>';
+      var units = { temp: '℃', humidity: '%', lux: ' lx' };
+      var htmls = [];
+      metrics.forEach(function (m) {
+        var v = d[m];
+        htmls.push(v === null || v === undefined
+          ? '<span class="text-muted">--</span>'
+          : '<span class="text-secondary">' + Number(v).toFixed(1) + units[m] + '</span>');
+      });
+      return htmls.join(' ');
+    }
+
+    /* ---------- 根据地块内设备类型，决定状态总览显示哪些指标框 ---------- */
+    function renderOverviewBoxes() {
+      var plotDevices = devices.filter(function (d) { return d.plotId === selectedPlotId; });
+      var has = { temp: false, humidity: false, lux: false };
+      plotDevices.forEach(function (d) {
+        (TYPE_METRICS[d.type] || []).forEach(function (m) { has[m] = true; });
+      });
+      document.getElementById('tempBox').style.display = has.temp ? '' : 'none';
+      document.getElementById('humBox').style.display = has.humidity ? '' : 'none';
+      document.getElementById('luxBox').style.display = has.lux ? '' : 'none';
+      document.getElementById('metricEmpty').style.display =
+        (has.temp || has.humidity || has.lux) ? 'none' : '';
+    }
+
+    /* ---------- 更新单个指标框：无数据→--，有数据→数值+阈值变色 ---------- */
+    function setMetricBox(boxId, valueId, value, decimals, dangerWhen, warnWhen) {
+      var box = document.getElementById(boxId);
+      var el = document.getElementById(valueId);
+      if (value === null || value === undefined) {
+        el.textContent = '--';
+        box.className = 'value';
+        return;
+      }
+      var cls = '';
+      if (dangerWhen !== null && dangerWhen !== undefined && value >= dangerWhen) cls = ' danger';
+      else if (warnWhen !== null && warnWhen !== undefined && value < warnWhen) cls = ' warn';
+      box.className = 'value' + cls;
+      el.textContent = Number(value).toFixed(decimals);
+    }
+
+    /* ---------- 刷新实时数据（只更新可见的指标框） ---------- */
     function refreshRealtime() {
       if (!selectedPlotId) return;
-      API.getRealtime(selectedPlotId).then(function (res) {
+      var plotId = selectedPlotId;
+      API.getRealtime(plotId).then(function (res) {
+        if (plotId !== selectedPlotId) return; // 响应过期（用户已切换地块），丢弃
         var d = res.data;
-
-        var tempEl = document.getElementById('metricTemp');
-        var humEl = document.getElementById('metricHum');
-        var first = tempEl.textContent === '--';
-
-        document.getElementById('metricTempBox').className =
-          'value' + (d.temp >= thresholds.tempMax ? ' danger' : '');
-        document.getElementById('metricHumBox').className =
-          'value' + (d.humidity < thresholds.humidityMin ? ' warn' : '');
-
-        if (first) {
-          Animate.countUp(tempEl, d.temp, { decimals: 1 });
-          Animate.countUp(humEl, d.humidity, { decimals: 1 });
-        } else {
-          tempEl.textContent = d.temp;
-          humEl.textContent = d.humidity;
-          Animate.flash(tempEl);
-          Animate.flash(humEl);
+        if (document.getElementById('tempBox').style.display !== 'none') {
+          setMetricBox('metricTempBox', 'metricTemp', d.temp, 1, thresholds.tempMax, null);
         }
-
-        document.getElementById('updatedAt').textContent = '更新于 ' + d.updatedAt;
+        if (document.getElementById('humBox').style.display !== 'none') {
+          setMetricBox('metricHumBox', 'metricHum', d.humidity, 1, null, thresholds.humidityMin);
+        }
+        if (document.getElementById('luxBox').style.display !== 'none') {
+          setMetricBox('metricLuxBox', 'metricLux', d.lux, 0, null, null);
+        }
+        var anyData = (d.temp !== null && d.temp !== undefined) ||
+                      (d.humidity !== null && d.humidity !== undefined) ||
+                      (d.lux !== null && d.lux !== undefined);
+        document.getElementById('updatedAt').textContent =
+          anyData && d.updatedAt ? ('更新于 ' + d.updatedAt) : '暂无在线设备数据';
       });
     }
 
     /* ---------- 事件 ---------- */
     document.getElementById('plotSelect').addEventListener('change', function () {
       selectedPlotId = this.value;
+      renderOverviewBoxes();
       refreshRealtime();
       renderDeviceTable();
     });
@@ -171,11 +234,24 @@
 
     API.getDevices().then(function (res) {
       devices = res.data;
+      renderOverviewBoxes();
       renderDeviceTable();
     });
 
-    // 每 5 秒自动刷新实时数据
-    setInterval(refreshRealtime, 5000);
+    // 每 5 秒自动刷新实时数据 + 设备数值（让状态栏与上方实时数据同步）
+    function refreshDevices() {
+      API.getDevices().then(function (res) {
+        if (res.code === 0) {
+          devices = res.data;
+          renderOverviewBoxes();
+          renderDeviceTable();
+        }
+      });
+    }
+    setInterval(function () {
+      refreshRealtime();
+      refreshDevices();
+    }, 5000);
   </script>
 </body>
 </html>

@@ -63,6 +63,8 @@
         <select class="form-control" id="devType">
           <option>土壤湿度</option>
           <option>温度</option>
+          <option>亮度</option>
+          <option>环境监测板</option>
           <option>灌溉设备</option>
         </select>
       </div>
@@ -97,8 +99,10 @@
 
     /* ---------- 类型徽章 ---------- */
     function typeBadge(type) {
-      if (type === '灌溉设备') return '<span class="badge badge-normal">灌溉设备</span>';
-      if (type === '温度')     return '<span class="badge badge-warning">温度</span>';
+      if (type === '灌溉设备')   return '<span class="badge badge-normal">灌溉设备</span>';
+      if (type === '温度')       return '<span class="badge badge-warning">温度</span>';
+      if (type === '亮度')       return '<span class="badge badge-info">亮度</span>';
+      if (type === '环境监测板') return '<span class="badge badge-info">环境监测板</span>';
       return '<span class="badge badge-online">土壤湿度</span>';
     }
 

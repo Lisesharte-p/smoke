@@ -356,6 +356,7 @@ ul { list-style: none; }
 .badge-alarm   { background: #fee2e2; color: var(--danger); }
 .badge-warning { background: #fef3c7; color: #b45309; }
 .badge-normal  { background: var(--primary-light); color: var(--primary-dark); }
+.badge-info    { background: #dbeafe; color: #1d4ed8; }
 
 /* ==========================================================================
    表格
@@ -497,6 +498,9 @@ select.form-control { cursor: pointer; }
 
 .metric-big .unit { font-size: 16px; color: var(--text-muted); margin-left: 4px; }
 .metric-big .label { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+/* 数据监测：状态总览指标框（按设备类型动态数量） */
+.metric-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
 /* ==========================================================================
    地块卡片（数据总览用，预留给同伴）
