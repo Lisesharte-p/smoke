@@ -27,6 +27,7 @@ window.API = (function () {
       controlLogs:'/api/control-logs',
       boardRefresh:'/api/board/refresh',
       registerRequests: '/api/register-requests',
+      advice:     '/api/advice',
       chat:       '/api/assistant/chat',
       conversations: '/api/conversations',
       conversation:   '/api/conversations/{id}'
@@ -286,6 +287,14 @@ window.API = (function () {
   }
 
   /* ==================================================================
+     农事建议（根据实时数据动态生成）
+     ================================================================== */
+  function getAdvice() {
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getAdvice() }, 300);
+    return request(config.endpoints.advice);
+  }
+
+  /* ==================================================================
      智能问答
      ================================================================== */
   /* 多轮对话：user 用户名，messages 整段历史 [{role,content},...]，conversationId 当前会话（无则新建） */
@@ -355,6 +364,7 @@ window.API = (function () {
     reviewRegisterRequest: reviewRegisterRequest,
     getControlLogs: getControlLogs,
     refreshBoard: refreshBoard,
+    getAdvice: getAdvice,
     getChatReply: getChatReply,
     getConversations: getConversations,
     getConversationMessages: getConversationMessages,

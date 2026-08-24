@@ -719,6 +719,21 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   word-break: break-word;
 }
 
+/* 气泡内 markdown 元素 */
+.msg .bubble strong { font-weight: 600; }
+.msg .bubble em { font-style: italic; }
+.msg .bubble code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .08);
+  font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
+  font-size: .9em;
+}
+.msg .bubble a { color: var(--primary); text-decoration: underline; }
+.msg .bubble a:hover { color: #34d399; }
+.msg.user .bubble code { background: rgba(4, 40, 28, .16); }
+.msg.user .bubble a { color: #04281c; text-decoration: underline; }
+
 .msg.bot .bubble { background: rgba(15, 23, 42, .6); border: 1px solid var(--border); color: var(--text); border-top-left-radius: 4px; }
 .msg.user .bubble { background: linear-gradient(135deg, #34d399, #10b981); color: #04281c; border-top-right-radius: 4px; }
 

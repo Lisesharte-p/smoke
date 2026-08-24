@@ -73,12 +73,42 @@
 
     /* 把动作按钮数组渲染成 HTML（可多个，如去控制灌溉 / 查看历史趋势） */
     function actionsHtml(actions) {
+      if (actions && !Array.isArray(actions)) actions = [actions];
       if (!actions || !actions.length) return '';
       var html = '<div class="msg-action">';
       actions.forEach(function (a) {
         html += '<a class="btn btn-sm btn-primary" href="' + a.href + '">' + a.text + '</a>';
       });
       return html + '</div>';
+    }
+
+    /* ---------- 轻量 markdown 渲染 ----------
+       支持：**加粗** / *斜体* / `行内代码` / [链接](url) / 换行 */
+    function renderMarkdown(text) {
+      var esc = String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      // 先把行内代码抽离为占位符，避免其内容被后续规则误处理
+      var codeStore = [];
+      esc = esc.replace(/`([^`]+)`/g, function (m, c) {
+        codeStore.push('<code>' + c + '</code>');
+        return '' + (codeStore.length - 1) + '';
+      });
+
+      esc = esc
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+        .replace(/\n/g, '<br>');
+
+      // 还原行内代码
+      esc = esc.replace(/(\d+)/g, function (m, i) {
+        return codeStore[+i];
+      });
+
+      return esc;
     }
 
     /* ---------- 添加一条消息 ---------- */
@@ -90,12 +120,12 @@
         ? '<div class="avatar-sm">🤖</div>'
         : '<div class="avatar-sm" style="background:var(--primary);color:#fff">👤</div>';
 
-      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : text) + actionsHtml(actions) + '</div>';
+      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : renderMarkdown(text)) + actionsHtml(actions) + '</div>';
       msg.innerHTML = avatar + bubble;
       messagesEl.appendChild(msg);
 
       if (typew) {
-        Animate.typewrite(msg.querySelector('.type-text'), text, { onTick: scrollBottom, onDone: scrollBottom });
+        Animate.typewrite(msg.querySelector('.type-text'), text, { render: renderMarkdown, onTick: scrollBottom, onDone: scrollBottom });
       }
       scrollBottom();
       return msg;
@@ -148,7 +178,7 @@
           var answer = res.data.answer;
           chatHistory.push({ role: 'assistant', content: answer });
           if (res.data.conversationId) activeConvId = res.data.conversationId;
-          addMessage('bot', answer, res.data.actions, true);
+          addMessage('bot', answer, res.data.actions || res.data.action, true);
           addSourcesLine(res.data.sources);   // RAG 命中的知识库参考来源
           renderConvs(activeConvId);   // 刷新历史列表并高亮当前会话
         } else {

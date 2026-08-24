@@ -79,14 +79,55 @@ window.MOCK = (function () {
   };
 
   /* ------------------------------------------------------------------
-     农事建议（数据总览用，模拟数据；可结合告警 / 阈值动态生成）
+     农事建议（数据总览用）
+     根据地块 / 设备 / 阈值 / 天气等数据动态生成，数据变化则建议随之变化。
      ------------------------------------------------------------------ */
-  var advice = [
-    { icon: '💧', tag: '灌溉', text: '未来 48 小时有小雨，建议今日傍晚前完成本轮灌溉，雨后无需补浇。', href: 'control.html', action: '去灌溉' },
-    { icon: '🌡️', tag: '通风', text: '明日午后气温偏高，一号、三号地块需加强通风降温。', href: 'monitoring.html', action: '看数据' },
-    { icon: '⚠️', tag: '告警', text: '三号菜地土壤湿度仅 38%，低于阈值 40%，建议尽快补水。', href: 'alarm.html', action: '看告警' },
-    { icon: '🐛', tag: '防病', text: '雨后湿度上升，番茄地块注意通风除湿，预防灰霉病。', href: null, action: '' }
-  ];
+  function getAdvice() {
+    var list = [];
+
+    // 未来几天是否有降雨 / 降雪
+    var hasRain = weather.forecast.some(function (d) {
+      return /雨|雷|雪/.test(d.text);
+    });
+
+    // 1. 天气提醒
+    if (hasRain) {
+      list.push({ icon: '🌧️', tag: '天气', text: '天气预报显示近期有降雨，可暂缓灌溉，雨后视土壤湿度再决定是否补水。', href: null, action: '' });
+    }
+
+    // 2. 灌溉建议：土壤湿度低于阈值的干旱地块
+    var dry = plots.filter(function (p) { return p.humidity < thresholds.humidityMin; });
+    if (dry.length) {
+      var dryNames = dry.map(function (p) { return p.name; }).join('、');
+      list.push({ icon: '💧', tag: '灌溉', text: dryNames + ' 土壤湿度低于阈值 ' + thresholds.humidityMin + '%，建议尽快补水。', href: 'control.html', action: '去灌溉' });
+    }
+
+    // 3. 通风建议：温度超过阈值的高温地块
+    var hot = plots.filter(function (p) { return p.temp > thresholds.tempMax; });
+    if (hot.length) {
+      var hotNames = hot.map(function (p) { return p.name; }).join('、');
+      list.push({ icon: '🌡️', tag: '通风', text: hotNames + ' 温度超过 ' + thresholds.tempMax + '℃，建议加强通风降温。', href: 'monitoring.html', action: '看数据' });
+    }
+
+    // 4. 设备离线提醒
+    var offline = devices.filter(function (d) { return !d.online; });
+    if (offline.length) {
+      list.push({ icon: '🔌', tag: '设备', text: '有 ' + offline.length + ' 台设备离线，请检查供电与网络连接。', href: 'devices.html', action: '去设备' });
+    }
+
+    // 5. 防病建议：高湿或雨后
+    var humid = plots.filter(function (p) { return p.humidity > 70; });
+    if (hasRain || humid.length) {
+      list.push({ icon: '🐛', tag: '防病', text: '近期湿度偏高，注意通风除湿，预防灰霉病等病害。', href: null, action: '' });
+    }
+
+    // 兜底：数据均正常时给一条常规建议
+    if (!list.length) {
+      list.push({ icon: '✅', tag: '正常', text: '各地块温湿度均在正常范围，请保持当前管理节奏。', href: null, action: '' });
+    }
+
+    return list;
+  }
 
   /* ------------------------------------------------------------------
      工具
@@ -170,10 +211,10 @@ window.MOCK = (function () {
     var q = (question || '').replace(/[？?。.，,\s]/g, '');
 
     var replies = [
-      { kw: ['浇水', '灌溉', '什么时候浇', '该不该浇'], answer: '根据当前土壤湿度数据，建议在清晨 6:00–8:00 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 ' + thresholds.humidityMin + '%（当前阈值），请及时补水。', actions: [{ text: '去控制灌溉', href: 'control.html' }], sources: ['浇水的最佳时间', '如何判断该不该浇水', '远程灌溉控制操作'] },
-      { kw: ['太干', '干旱', '缺水', '湿度低'], answer: '当前部分地块土壤湿度偏低，存在缺水风险。建议开启灌溉设备补水 20–30 分钟，并关注告警记录，避免作物因缺水萎蔫。', actions: [{ text: '查看告警', href: 'alarm.html' }], sources: ['土壤太干怎么办', '土壤湿度的适宜范围'] },
-      { kw: ['阈值', '告警条件', '设置'], answer: '您可以在「告警管理」页设置土壤湿度下限和温度上限。当实测值越过阈值时，系统会自动触发告警并通知您。', actions: [{ text: '去设置阈值', href: 'alarm.html' }], sources: ['告警阈值如何设置', '如何避免告警误报'] },
-      { kw: ['温度', '太热', '高温'], answer: '若大棚温度超过 ' + thresholds.tempMax + '℃（当前阈值），建议及时通风或开启遮阳。温度过高会影响作物生长，请留意实时温度曲线。', actions: [{ text: '查看实时数据', href: 'monitoring.html' }], sources: ['温度太高怎么降温', '大棚温度的适宜范围'] }
+      { kw: ['浇水', '灌溉', '什么时候浇', '该不该浇'], answer: '根据当前土壤湿度数据，建议在**清晨 6:00–8:00** 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 **' + thresholds.humidityMin + '%**（当前阈值），请及时补水。', actions: [{ text: '去控制灌溉', href: 'control.html' }], sources: ['浇水的最佳时间', '如何判断该不该浇水', '远程灌溉控制操作'] },
+      { kw: ['太干', '干旱', '缺水', '湿度低'], answer: '当前部分地块土壤湿度偏低，存在**缺水风险**。建议开启灌溉设备补水 20–30 分钟，并关注告警记录，避免作物因缺水萎蔫。', actions: [{ text: '查看告警', href: 'alarm.html' }], sources: ['土壤太干怎么办', '土壤湿度的适宜范围'] },
+      { kw: ['阈值', '告警条件', '设置'], answer: '您可以在「告警管理」页设置**土壤湿度下限**和**温度上限**。\n设置方式：进入告警页 → 点击「编辑阈值」→ 输入数值并保存。\n当前默认下限为 `' + thresholds.humidityMin + '%`、上限为 `' + thresholds.tempMax + '℃`，当实测值越过阈值时，系统会自动触发告警并通知您。', actions: [{ text: '去设置阈值', href: 'alarm.html' }], sources: ['告警阈值如何设置', '如何避免告警误报'] },
+      { kw: ['温度', '太热', '高温'], answer: '若大棚温度超过 **' + thresholds.tempMax + '℃**（当前阈值），建议及时通风或开启遮阳。温度过高会影响作物生长，请留意实时温度曲线。', actions: [{ text: '查看实时数据', href: 'monitoring.html' }], sources: ['温度太高怎么降温', '大棚温度的适宜范围'] }
     ];
 
     for (var i = 0; i < replies.length; i++) {
@@ -184,7 +225,7 @@ window.MOCK = (function () {
       }
     }
     return {
-      answer: '我是智慧农业助手，可以为您提供灌溉建议和农事指导。您可以试试问我：「现在该浇水吗？」「土壤太干怎么办？」「如何设置告警阈值？」',
+      answer: '我是智慧农业助手，可以为您提供灌溉建议和农事指导。\n您可以试试问我：\n· 「现在该浇水吗？」\n· 「土壤太干怎么办？」\n· 「如何设置告警阈值？」',
       actions: [],
       sources: []
     };
@@ -200,7 +241,7 @@ window.MOCK = (function () {
     alarms: alarms,
     controlLogs: controlLogs,
     weather: weather,
-    advice: advice,
+    getAdvice: getAdvice,
     getRealtime: getRealtime,
     getHistory: getHistory,
     getChatReply: getChatReply,
