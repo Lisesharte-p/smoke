@@ -59,6 +59,18 @@ public class BoardCollector {
     /** 正在运行连接的 <ip:port> 集合（地址删除后移除，线程退出） */
     private static final Set<String> runningConns = ConcurrentHashMap.newKeySet();
 
+    /**
+     * 传感器落库线程池：读循环只负责收板子数据、更新内存快照，真正的数据库写入丢给后台线程。
+     * 否则每个心跳要给多台设备写库（每次都新开数据库连接，单次 ~0.5s），会长时间阻塞读循环，
+     * 导致板子回的控制确认（motor started/stopped）积压在 socket 缓冲里读不到、指令超时。
+     */
+    private static final java.util.concurrent.ExecutorService writePool =
+            java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+                Thread t = new Thread(r, "sensor-writer");
+                t.setDaemon(true);
+                return t;
+            });
+
     public static boolean isLastOk()        { return lastOk; }
     public static String  getLastError()    { return lastError; }
     public static String  getLastReading()  { return lastReading; }
@@ -259,14 +271,19 @@ public class BoardCollector {
         if (m == null) return; // 其它未知记录忽略
         List<String> ids = currentDevices(conn.key);
         if (ids.isEmpty()) return;
+        // 内存快照同步更新（毫秒级），数据库落库丢给后台线程池，避免阻塞读循环
         for (String id : ids) {
-            try {
-                writeToDb(id, m);
-            } catch (Exception e) {
-                System.out.println("[BoardCollector] " + id + " 写库失败: " + e);
-            }
+            final String did = id;
+            final Map<String, String> reading = new HashMap<>(m);
+            writePool.execute(() -> {
+                try {
+                    writeToDb(did, reading);
+                } catch (Exception e) {
+                    System.out.println("[BoardCollector] " + did + " 写库失败: " + e);
+                }
+            });
             putStatus(id, "ok:TEMP:" + m.get("temp") + " HUMI:" + m.get("humidity") + " LUX:" + m.get("lux"));
-            latestReadings.put(id, new HashMap<>(m));
+            latestReadings.put(id, reading);
         }
         lastOk = true;
         lastReading = "TEMP:" + m.get("temp") + " HUMI:" + m.get("humidity") + " LUX:" + m.get("lux");
