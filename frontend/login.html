@@ -9,7 +9,15 @@
 <body>
 
   <div class="login-page">
+    <div class="login-fx" id="loginFx">
+      <div class="login-grid"></div>
+      <div class="login-scan"></div>
+    </div>
+    <div class="login-slogan" id="loginSlogan">
+      <div class="slogan-text" id="sloganText">让生长看得见</div>
+    </div>
     <div class="login-panel">
+      <div class="login-shimmer"></div>
       <div class="login-brand">
         <div class="logo-big">🌾</div>
         <h1>智慧农业平台</h1>
@@ -71,6 +79,94 @@
   <script>
     var regRole = 'farmer';
 
+    /* ===== 登录页动效初始化：背景粒子 + 开场标语 + 面板登场 + 品牌动效 ===== */
+    (function initLoginFx() {
+      // 漂浮粒子（萤火，始终运行）
+      var fx = document.getElementById('loginFx');
+      if (fx) {
+        var palette = ['52,211,153', '34,211,238'];
+        var count = 28;
+        for (var i = 0; i < count; i++) {
+          var p = document.createElement('span');
+          p.className = 'login-particle';
+          var c = palette[i % palette.length];
+          var size = 3 + Math.random() * 6;
+          p.style.left = (Math.random() * 100).toFixed(2) + '%';
+          p.style.width = size.toFixed(1) + 'px';
+          p.style.height = size.toFixed(1) + 'px';
+          p.style.background = 'radial-gradient(circle, rgba(' + c + ',.95), rgba(' + c + ',.3) 55%, transparent 75%)';
+          p.style.animationDuration = (6 + Math.random() * 8).toFixed(2) + 's';
+          p.style.animationDelay = (Math.random() * 8).toFixed(2) + 's';
+          p.style.opacity = 0;
+          fx.appendChild(p);
+        }
+      }
+
+      // 开场标语：逐字显现
+      var slogan = document.getElementById('loginSlogan');
+      var sloganText = document.getElementById('sloganText');
+      if (sloganText) {
+        var s = sloganText.textContent;
+        sloganText.textContent = '';
+        for (var k = 0; k < s.length; k++) {
+          var sc = document.createElement('span');
+          sc.className = 'ch';
+          sc.textContent = s[k];
+          sc.style.animationDelay = (0.15 + k * 0.08).toFixed(2) + 's';
+          sloganText.appendChild(sc);
+        }
+      }
+
+      // 面板登场 + 品牌动效（标语淡出后调用）
+      function showPanel() {
+        var panel = document.querySelector('.login-panel');
+        if (panel) panel.classList.add('show');
+
+        // 标题「智慧农业平台」逐字浮现
+        var h1 = document.querySelector('.login-brand h1');
+        if (h1) {
+          var title = h1.textContent;
+          h1.textContent = '';
+          for (var j = 0; j < title.length; j++) {
+            var ch = document.createElement('span');
+            ch.className = 'ch';
+            ch.textContent = title[j];
+            ch.style.animationDelay = (0.25 + j * 0.09).toFixed(2) + 's';
+            h1.appendChild(ch);
+          }
+        }
+
+        // 副标题打字机（保留闪烁光标）
+        var sub = document.querySelector('.login-brand p');
+        if (sub) {
+          var text = sub.textContent;
+          sub.textContent = '';
+          var node = document.createTextNode('');
+          sub.appendChild(node);
+          var idx = 0;
+          var speed = 45;
+          function typeSub() {
+            if (idx < text.length) {
+              node.textContent += text[idx++];
+              setTimeout(typeSub, speed);
+            }
+          }
+          setTimeout(typeSub, 600);
+        }
+      }
+
+      // 开场时序：标语停留 → 淡出 → 面板登场
+      var hold = 3000;   // 标语停留时长（ms）
+      var out = 650;     // 标语淡出时长（ms，与 CSS slogan-out 一致）
+      setTimeout(function () {
+        if (slogan) slogan.classList.add('out');
+      }, hold);
+      setTimeout(function () {
+        if (slogan) slogan.style.display = 'none';
+        showPanel();
+      }, hold + out);
+    })();
+
     /* ---------- 登录 / 注册视图切换 ---------- */
     function showLogin() {
       document.getElementById('loginView').style.display = '';
@@ -105,17 +201,18 @@
 
       var btn = document.getElementById('loginBtn');
       btn.disabled = true;
-      btn.textContent = '登录中...';
+      btn.classList.add('loading');
 
       API.login(username, password).then(function (res) {
         if (res.code === 0) {
           Layout.setUser({ name: res.data.name, roleName: res.data.roleName, role: res.data.role });
           Toast.success('欢迎，' + res.data.name);
-          setTimeout(function () { location.href = 'index.html'; }, 400);
+          document.querySelector('.login-page').classList.add('success');
+          setTimeout(function () { location.href = 'index.html'; }, 550);
         } else {
           Toast.error(res.msg || '登录失败');
           btn.disabled = false;
-          btn.textContent = '登 录';
+          btn.classList.remove('loading');
         }
       });
     }
@@ -144,11 +241,11 @@
 
       var btn = document.getElementById('registerBtn');
       btn.disabled = true;
-      btn.textContent = '注册中...';
+      btn.classList.add('loading');
 
       API.register({ username: username, password: password, role: regRole }).then(function (res) {
         btn.disabled = false;
-        btn.textContent = '注 册';
+        btn.classList.remove('loading');
         if (res.code === 0) {
           Toast.info(res.msg || '注册接口已预留，待后端接入');
           showLogin();

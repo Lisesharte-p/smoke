@@ -869,6 +869,230 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 .login-switch a:hover { text-decoration: underline; }
 
 /* ==========================================================================
+   登录页动效（丰富炫酷版）
+   分层：背景网格/扫描/粒子 → 面板流光/呼吸 → 表单/按钮 → 转场
+   ========================================================================== */
+
+/* --- 层级调整：面板提到最上，标语层盖在最顶 --- */
+.login-panel { z-index: 2; }
+
+/* --- 开场标语（艺术字，先显现后淡出） --- */
+.login-slogan {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.login-slogan .slogan-text {
+  font-size: clamp(28px, 5vw, 46px);
+  font-weight: 700;
+  letter-spacing: 6px;
+  line-height: 1.5;
+  text-align: center;
+  color: #d9fff0;
+  text-shadow:
+    0 0 8px rgba(52, 211, 153, .9),
+    0 0 22px rgba(52, 211, 153, .5),
+    0 0 46px rgba(34, 211, 238, .4);
+}
+.login-slogan .ch {
+  display: inline-block;
+  opacity: 0;
+  animation: slogan-ch-in .6s var(--ease-out) forwards;
+}
+@keyframes slogan-ch-in {
+  from { opacity: 0; transform: translateY(22px) scale(.8); filter: blur(8px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.login-slogan.out {
+  animation: slogan-out .65s var(--ease-out) forwards;
+}
+@keyframes slogan-out {
+  to { opacity: 0; transform: scale(1.08); filter: blur(12px); }
+}
+
+/* --- 特效容器（背景层，位于蒙层与面板之间） --- */
+.login-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* --- 科技细网格（径向淡出，缓慢漂移） --- */
+.login-grid {
+  position: absolute;
+  inset: -1px;
+  background-image:
+    linear-gradient(rgba(52, 211, 153, .05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(52, 211, 153, .05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(ellipse 78% 78% at 50% 50%, #000 35%, transparent 100%);
+  mask-image: radial-gradient(ellipse 78% 78% at 50% 50%, #000 35%, transparent 100%);
+  animation: login-grid-drift 26s linear infinite;
+}
+@keyframes login-grid-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 46px 46px; }
+}
+
+/* --- 横向扫描光带（自上而下周期性扫过） --- */
+.login-scan {
+  position: absolute;
+  left: -10%; right: -10%; top: -30%;
+  height: 200px;
+  background: linear-gradient(180deg,
+      transparent,
+      rgba(34, 211, 238, .07) 40%,
+      rgba(52, 211, 153, .05) 60%,
+      transparent);
+  transform: skewY(-3deg);
+  animation: login-scan-move 7s var(--ease-out) infinite;
+}
+@keyframes login-scan-move {
+  0%   { top: -30%; }
+  55%  { top: 115%; }
+  100% { top: 115%; }
+}
+
+/* --- 漂浮粒子（萤火，JS 随机生成） --- */
+.login-particle {
+  position: absolute;
+  bottom: -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 211, 153, .95), rgba(34, 211, 238, .35) 55%, transparent 75%);
+  animation: login-particle-rise linear infinite;
+  will-change: transform, opacity;
+}
+@keyframes login-particle-rise {
+  0%   { transform: translateY(0) translateX(0) scale(.6); opacity: 0; }
+  12%  { opacity: .8; }
+  80%  { opacity: .3; }
+  100% { transform: translateY(-106vh) translateX(70px) scale(1.15); opacity: 0; }
+}
+
+/* --- Logo 呼吸发光 --- */
+.login-brand .logo-big {
+  animation: login-logo-breathe 2.6s ease-in-out infinite;
+}
+@keyframes login-logo-breathe {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 26px rgba(52, 211, 153, .5); }
+  50%      { transform: scale(1.06); box-shadow: 0 0 46px rgba(52, 211, 153, .8), 0 0 80px rgba(34, 211, 238, .35); }
+}
+
+/* --- 标题逐字浮现（字由 JS 拆为 span.ch） --- */
+.login-brand h1 .ch {
+  display: inline-block;
+  opacity: 0;
+  animation: login-ch-in .5s var(--ease-out) forwards;
+}
+@keyframes login-ch-in {
+  from { opacity: 0; transform: translateY(14px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0);   filter: blur(0); }
+}
+
+/* --- 面板：入场玻璃高光扫过（shimmer） --- */
+.login-shimmer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.login-shimmer::before {
+  content: "";
+  position: absolute;
+  top: -20%; bottom: -20%; left: -40%;
+  width: 45%;
+  background: linear-gradient(100deg,
+      transparent, rgba(255, 255, 255, .08), rgba(52, 211, 153, .05), transparent);
+  transform: skewX(-18deg);
+  animation: login-shimmer-sweep 1.1s var(--ease-out) .4s forwards;
+}
+@keyframes login-shimmer-sweep {
+  to { transform: skewX(-18deg) translateX(360%); }
+}
+
+/* --- 面板边框霓虹流光（沿四边循环跑圈，需 @property 支持；不支持则静置为角标） --- */
+@property --login-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.login-panel::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--login-angle),
+      transparent 0deg,
+      transparent 295deg,
+      rgba(52, 211, 153, .85) 325deg,
+      rgba(34, 211, 238, .9) 350deg,
+      transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: login-border-flow 4s linear infinite;
+}
+@keyframes login-border-flow { to { --login-angle: 360deg; } }
+
+/* --- 输入框聚焦增强（登录页） --- */
+.login-panel .form-control:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, .16), 0 0 20px rgba(52, 211, 153, .35);
+}
+
+/* --- 登录按钮：hover 光扫 --- */
+.btn-primary { position: relative; }
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -70%;
+  width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .4), transparent);
+  transform: skewX(-20deg);
+  opacity: 0;
+  pointer-events: none;
+}
+.btn-primary:hover::after { animation: login-btn-shine .6s var(--ease-out); }
+@keyframes login-btn-shine {
+  0%   { left: -70%; opacity: 1; }
+  100% { left: 130%; opacity: 0; }
+}
+
+/* --- 按钮 loading 转圈 --- */
+.btn.loading { color: transparent !important; pointer-events: none; }
+.btn.loading::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 18px; height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 2px solid rgba(4, 40, 28, .25);
+  border-top-color: #04281c;
+  border-radius: 50%;
+  animation: login-btn-spin .7s linear infinite;
+}
+@keyframes login-btn-spin { to { transform: rotate(360deg); } }
+
+/* --- 登录成功转场：面板上浮淡出 --- */
+.login-page.success .login-panel {
+  animation: login-panel-out .5s var(--ease-out) forwards;
+}
+@keyframes login-panel-out {
+  to { opacity: 0; transform: translateY(-26px) scale(.96); filter: blur(6px); }
+}
+
+/* ==========================================================================
    弹窗（设备管理添加设备用）
    ========================================================================== */
 .modal-mask {
@@ -1108,14 +1332,20 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 }
 
 /* ---------- 登录页：面板入场 + 视图切换淡入 ---------- */
-.login-panel { animation: panel-in .5s var(--ease-out) both; }
+.login-panel { opacity: 0; visibility: hidden; }
+.login-panel.show { visibility: visible; animation: panel-in .6s var(--ease-out) both; }
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(24px) scale(.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-#loginView, #registerView { animation: view-in .3s var(--ease-out); }
+#loginView, #registerView { animation: view-in .32s var(--ease-out); }
 @keyframes view-in {
-  from { opacity: 0; transform: translateX(8px); }
+  from { opacity: 0; transform: translateX(30px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+#registerView { animation-name: view-in-left; }
+@keyframes view-in-left {
+  from { opacity: 0; transform: translateX(-30px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
