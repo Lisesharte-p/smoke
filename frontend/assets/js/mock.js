@@ -65,6 +65,30 @@ window.MOCK = (function () {
   ];
 
   /* ------------------------------------------------------------------
+     天气预报（数据总览用，模拟数据；后端就绪后接真实天气 API）
+     ------------------------------------------------------------------ */
+  var weather = {
+    now: { icon: '☀️', text: '晴', temp: '26℃', humidity: '45%', wind: '东南风 2 级' },
+    forecast: [
+      { day: '今天', icon: '☀️', text: '晴',      high: 28, low: 18 },
+      { day: '明天', icon: '⛅', text: '多云',    high: 25, low: 17 },
+      { day: '后天', icon: '🌧️', text: '小雨',    high: 22, low: 16 },
+      { day: '周六', icon: '🌤️', text: '晴间多云', high: 27, low: 19 },
+      { day: '周日', icon: '☁️', text: '阴',      high: 24, low: 18 }
+    ]
+  };
+
+  /* ------------------------------------------------------------------
+     农事建议（数据总览用，模拟数据；可结合告警 / 阈值动态生成）
+     ------------------------------------------------------------------ */
+  var advice = [
+    { icon: '💧', tag: '灌溉', text: '未来 48 小时有小雨，建议今日傍晚前完成本轮灌溉，雨后无需补浇。', href: 'control.html', action: '去灌溉' },
+    { icon: '🌡️', tag: '通风', text: '明日午后气温偏高，一号、三号地块需加强通风降温。', href: 'monitoring.html', action: '看数据' },
+    { icon: '⚠️', tag: '告警', text: '三号菜地土壤湿度仅 38%，低于阈值 40%，建议尽快补水。', href: 'alarm.html', action: '看告警' },
+    { icon: '🐛', tag: '防病', text: '雨后湿度上升，番茄地块注意通风除湿，预防灰霉病。', href: null, action: '' }
+  ];
+
+  /* ------------------------------------------------------------------
      工具
      ------------------------------------------------------------------ */
   function rand(min, max) {
@@ -175,6 +199,8 @@ window.MOCK = (function () {
     thresholds: thresholds,
     alarms: alarms,
     controlLogs: controlLogs,
+    weather: weather,
+    advice: advice,
     getRealtime: getRealtime,
     getHistory: getHistory,
     getChatReply: getChatReply,

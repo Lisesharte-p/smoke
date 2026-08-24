@@ -107,29 +107,28 @@ window.Layout = (function () {
     location.href = 'login.html';
   }
 
-  /* ---------- 渲染侧边栏 ---------- */
+  /* ---------- 渲染顶部导航（标题 + 选项） ---------- */
   function renderSidebar(activeKey) {
     var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
-    var html = '<div class="sidebar-brand"><span class="logo">🌾</span>智慧农业平台</div>';
+    var html = '<div class="sidebar-brand">' +
+               '<span class="brand-logo">🌾</span>' +
+               '<span class="brand-text">' +
+                 '<span class="brand-name">智慧农业平台</span>' +
+                 '<span class="brand-sub">SMART AGRICULTURE</span>' +
+               '</span>' +
+               '</div>';
     html += '<nav class="sidebar-nav">';
 
     NAV.forEach(function (group) {
-      // 按当前角色过滤导航项，整组被过滤掉时不渲染该分组标题
-      var items = group.items.filter(function (item) {
-        return allowed.indexOf(item.key) !== -1;
-      });
-      if (!items.length) return;
-
-      html += '<div class="nav-group-label">' + group.group + '</div>';
-      items.forEach(function (item) {
+      group.items.forEach(function (item) {
+        // 按当前角色过滤导航项，无权限的项不渲染
+        if (allowed.indexOf(item.key) === -1) return;
         var active = item.key === activeKey ? ' active' : '';
-        html += '<a class="nav-item' + active + '" href="' + item.href + '">' +
-                '<span class="icon">' + item.icon + '</span>' + item.label + '</a>';
+        html += '<a class="nav-item' + active + '" href="' + item.href + '">' + item.label + '</a>';
       });
     });
 
     html += '</nav>';
-    html += '<div class="sidebar-footer">智慧农业平台 v1.0</div>';
     document.getElementById('sidebar').innerHTML = html;
   }
 

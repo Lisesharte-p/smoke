@@ -61,21 +61,86 @@
         </div>
         <div class="plot-grid" id="plotGrid"></div>
 
-        <!-- 实时趋势 -->
-        <div class="card mt-20">
-          <div class="card-header">
-            <div>
-              <div class="card-title">实时趋势</div>
-              <div class="card-sub">近 7 天温湿度与亮度变化（温度 / 湿度 / 亮度分图显示）</div>
+        <!-- 实时趋势 + 天气预报 / 农事建议（双栏） -->
+        <div class="grid grid-2 mt-20">
+          <!-- 左：实时趋势（半宽） -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">实时趋势</div>
+                <div class="card-sub">近 7 天温湿度与亮度变化</div>
+              </div>
+              <div class="flex gap-8">
+                <select class="form-control" id="trendPlot" style="width:150px"></select>
+                <a class="btn btn-outline btn-sm" href="history.html">📈 历史</a>
+              </div>
             </div>
-            <div class="flex gap-8">
-              <select class="form-control" id="trendPlot" style="width:180px"></select>
-              <a class="btn btn-outline btn-sm" href="history.html">📈 完整历史</a>
+            <div id="chartTemp" style="height:200px"></div>
+            <div id="chartHum" style="height:200px;margin-top:8px"></div>
+            <div id="chartLux" style="height:200px;margin-top:8px"></div>
+          </div>
+
+          <!-- 右：天气预报 + 农事建议 -->
+          <div class="grid">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">天气预报</div>
+                  <div class="card-sub">未来 5 天 · 农场本地</div>
+                </div>
+              </div>
+              <div id="weatherNow"></div>
+              <div id="weatherForecast"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">农事建议</div>
+                  <div class="card-sub">基于天气与当前环境数据</div>
+                </div>
+              </div>
+              <div id="adviceList"></div>
             </div>
           </div>
-          <div id="chartTemp" style="height:230px"></div>
-          <div id="chartHum" style="height:230px;margin-top:8px"></div>
-          <div id="chartLux" style="height:230px;margin-top:8px"></div>
+        </div>
+
+        <!-- 设备状态 + 实时告警 + 最近操作（三栏） -->
+        <div class="grid grid-3 mt-20">
+          <!-- 设备状态 -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">设备状态</div>
+                <div class="card-sub">在线 / 运行 / 离线占比</div>
+              </div>
+            </div>
+            <div id="deviceChart" style="height:200px"></div>
+          </div>
+
+          <!-- 实时告警 -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">实时告警</div>
+                <div class="card-sub">最近告警记录</div>
+              </div>
+              <a class="btn btn-outline btn-sm" href="alarm.html">全部</a>
+            </div>
+            <div id="alarmPanel"></div>
+          </div>
+
+          <!-- 最近操作 -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">最近操作</div>
+                <div class="card-sub">设备控制日志</div>
+              </div>
+              <a class="btn btn-outline btn-sm" href="control.html">控制台</a>
+            </div>
+            <div id="operationLog"></div>
+          </div>
         </div>
       </main>
     </div>
@@ -118,10 +183,18 @@
   <script>
     Layout.init();
 
+    // 以下板块用模拟数据，直接渲染（不依赖后端接口）
+    renderWeather();
+    renderAdvice();
+    renderDeviceStatus();
+    renderAlarmPanel();
+    renderOperationLog();
+
     var plots = [];
     var devices = [];
     var alarms = [];
     var charts = {};
+    var humCharts = [];
 
     /* 是否可管理地块（添加/删除）：仅 农场管理员 admin / 系统管理员 sysadmin */
     function canManagePlot() {
@@ -133,9 +206,9 @@
       if (addPlotBtn) addPlotBtn.style.display = 'none';
     }
 
-    var COLOR_TEMP = '#f59e0b';  // 温度：暖橙
-    var COLOR_HUM  = '#3b82f6';  // 湿度：水蓝
-    var COLOR_LUX  = '#10b981';  // 亮度：翠绿
+    var COLOR_TEMP = '#fbbf24';  // 温度：暖橙（暗底提亮）
+    var COLOR_HUM  = '#38bdf8';  // 湿度：水蓝（暗底提亮）
+    var COLOR_LUX  = '#34d399';  // 亮度：翠绿（暗底提亮）
 
     /* ---------- 颜色工具：hex 转 rgba / 面积渐变 ---------- */
     function hexToRgba(hex, a) {
@@ -154,14 +227,14 @@
     /* ---------- ECharts 通用折线图配置（单指标，一轴一图） ---------- */
     function lineOption(title, unit, color, dates, values) {
       return {
-        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: '#1f2937' } },
+        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: '#e7efff' } },
         tooltip: {
           trigger: 'axis',
-          backgroundColor: '#fff',
-          borderColor: '#e5e9e5',
+          backgroundColor: 'rgba(14, 23, 40, .96)',
+          borderColor: 'rgba(52, 211, 153, .35)',
           borderWidth: 1,
           padding: [8, 12],
-          textStyle: { color: '#1f2937', fontSize: 12 },
+          textStyle: { color: '#e7efff', fontSize: 12 },
           formatter: function (ps) {
             var p = ps[0];
             return p.axisValue + '<br/>' + p.marker + ' ' + p.seriesName + '　' + p.value + unit;
@@ -172,17 +245,17 @@
           type: 'category',
           data: dates,
           boundaryGap: false,
-          axisLine: { lineStyle: { color: '#e5e9e5' } },
+          axisLine: { lineStyle: { color: 'rgba(148, 163, 184, .25)' } },
           axisTick: { show: false },
-          axisLabel: { color: '#9ca3af', fontSize: 10, hideOverlap: true }
+          axisLabel: { color: '#64748b', fontSize: 10, hideOverlap: true }
         },
         yAxis: {
           type: 'value',
           scale: true,
           axisLine: { show: false },
           axisTick: { show: false },
-          axisLabel: { color: '#9ca3af', fontSize: 11 },
-          splitLine: { lineStyle: { color: '#eef2ee' } }
+          axisLabel: { color: '#64748b', fontSize: 11 },
+          splitLine: { lineStyle: { color: 'rgba(148, 163, 184, .08)' } }
         },
         series: [{
           name: title,
@@ -208,8 +281,43 @@
       charts[id].setOption(option, true);
     }
 
+    /* ---------- 湿度环形图配置（多地块总览） ---------- */
+    function humRingOption(hum) {
+      var pct = Math.max(0, Math.min(100, Number(hum) || 0));
+      return {
+        series: [{
+          type: 'pie',
+          radius: ['72%', '92%'],
+          center: ['50%', '50%'],
+          silent: true,
+          hoverAnimation: false,
+          label: { show: false },
+          labelLine: { show: false },
+          data: [
+            { value: pct, itemStyle: { color: COLOR_HUM } },
+            { value: 100 - pct, itemStyle: { color: 'rgba(148, 163, 184, .14)' } }
+          ],
+          animationDuration: 1200,
+          animationEasing: 'cubicOut'
+        }]
+      };
+    }
+
+    function renderHumRings(grid) {
+      humCharts.forEach(function (c) { try { c.dispose(); } catch (e) {} });
+      humCharts = [];
+      if (!window.echarts) return;
+      grid.querySelectorAll('.hum-ring-chart').forEach(function (dom) {
+        var hum = parseFloat(dom.getAttribute('data-hum'));
+        var chart = echarts.init(dom);
+        chart.setOption(humRingOption(hum));
+        humCharts.push(chart);
+      });
+    }
+
     window.addEventListener('resize', function () {
       Object.keys(charts).forEach(function (k) { charts[k].resize(); });
+      humCharts.forEach(function (c) { c.resize(); });
     });
 
     /* ---------- 渲染 KPI ---------- */
@@ -259,7 +367,13 @@
           '</div>' +
           '<div class="plot-metrics">' +
             '<div class="plot-metric"><div class="v' + (tempHot ? ' hot' : '') + '">' + tempText + '℃</div><div class="l">温度</div></div>' +
-            '<div class="plot-metric"><div class="v' + (humDry ? ' dry' : '') + '">' + humText + '%</div><div class="l">湿度</div></div>' +
+            '<div class="plot-metric">' +
+              '<div class="hum-ring-wrap">' +
+                '<div class="hum-ring-chart" data-hum="' + (hasHum ? p.humidity : 0) + '"></div>' +
+                '<div class="hum-ring-center' + (humDry ? ' dry' : '') + '">' + humText + '%</div>' +
+              '</div>' +
+              '<div class="l">湿度</div>' +
+            '</div>' +
             '<div class="plot-metric"><div class="v">' + devs.length + '</div><div class="l">设备</div></div>' +
           '</div>';
         grid.appendChild(card);
@@ -270,6 +384,7 @@
         }
       });
       Animate.staggerIn(grid, { selector: '.plot-card' });
+      renderHumRings(grid);
     }
 
     /* ---------- 填充趋势图地块下拉 ---------- */
@@ -292,6 +407,140 @@
         renderChart('chartHum', lineOption('土壤湿度（%）', '%', COLOR_HUM, d.dates, d.humidity));
         renderChart('chartLux', lineOption('亮度（lux）', ' lux', COLOR_LUX, d.dates, d.lux));
       });
+    }
+
+    /* ---------- 渲染天气预报（模拟数据） ---------- */
+    function renderWeather() {
+      var w = MOCK.weather;
+      document.getElementById('weatherNow').innerHTML =
+        '<div class="weather-now">' +
+          '<span class="w-icon">' + w.now.icon + '</span>' +
+          '<div class="w-now-info">' +
+            '<div class="w-now-temp">' + w.now.temp +
+              '<span class="w-now-text">' + w.now.text + '</span></div>' +
+            '<div class="w-now-meta">湿度 ' + w.now.humidity + ' · ' + w.now.wind + '</div>' +
+          '</div>' +
+        '</div>';
+
+      var fcHtml = '<div class="weather-forecast">';
+      w.forecast.forEach(function (d) {
+        fcHtml +=
+          '<div class="weather-day">' +
+            '<div class="wd-day">' + d.day + '</div>' +
+            '<div class="wd-icon">' + d.icon + '</div>' +
+            '<div class="wd-text">' + d.text + '</div>' +
+            '<div class="wd-temp">' + d.low + '~' + d.high + '℃</div>' +
+          '</div>';
+      });
+      fcHtml += '</div>';
+      document.getElementById('weatherForecast').innerHTML = fcHtml;
+    }
+
+    /* ---------- 渲染农事建议（模拟数据） ---------- */
+    function renderAdvice() {
+      var html = '<div class="advice-list">';
+      MOCK.advice.forEach(function (a) {
+        var actionHtml = a.href
+          ? '<a class="ai-action" href="' + a.href + '">' + a.action + ' →</a>'
+          : '';
+        html +=
+          '<div class="advice-item">' +
+            '<span class="ai-icon">' + a.icon + '</span>' +
+            '<div class="ai-body">' +
+              '<div class="ai-top"><span class="ai-tag">' + a.tag + '</span>' + actionHtml + '</div>' +
+              '<div class="ai-text">' + a.text + '</div>' +
+            '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+      document.getElementById('adviceList').innerHTML = html;
+    }
+
+    /* ---------- 渲染设备状态环形图（模拟数据） ---------- */
+    function renderDeviceStatus() {
+      var dom = document.getElementById('deviceChart');
+      if (!window.echarts || !dom) return;
+
+      var total = MOCK.devices.length;
+      var running = MOCK.devices.filter(function (d) { return d.running; }).length;
+      var offline = MOCK.devices.filter(function (d) { return !d.online; }).length;
+      var online = total - running - offline;
+
+      var chart = echarts.init(dom);
+      chart.setOption({
+        tooltip: {
+          trigger: 'item',
+          backgroundColor: 'rgba(14, 23, 40, .96)',
+          borderColor: 'rgba(52, 211, 153, .35)',
+          borderWidth: 1,
+          textStyle: { color: '#e7efff', fontSize: 12 },
+          formatter: '{b}：{c} 台（{d}%）'
+        },
+        legend: {
+          bottom: 0,
+          itemWidth: 10,
+          itemHeight: 10,
+          itemGap: 16,
+          textStyle: { color: '#9db1cc', fontSize: 12 }
+        },
+        title: {
+          text: total + '',
+          subtext: '设备总数',
+          left: 'center',
+          top: '30%',
+          textStyle: { color: '#e7efff', fontSize: 24, fontWeight: 700 },
+          subtextStyle: { color: '#64748b', fontSize: 11 }
+        },
+        series: [{
+          type: 'pie',
+          radius: ['55%', '75%'],
+          center: ['50%', '42%'],
+          avoidLabelOverlap: false,
+          label: { show: false },
+          emphasis: { scaleSize: 6 },
+          data: [
+            { value: online,  name: '在线',   itemStyle: { color: '#34d399' } },
+            { value: running, name: '运行中', itemStyle: { color: '#22d3ee' } },
+            { value: offline, name: '离线',   itemStyle: { color: '#64748b' } }
+          ]
+        }]
+      });
+    }
+
+    /* ---------- 渲染实时告警面板（模拟数据） ---------- */
+    function renderAlarmPanel() {
+      var html = '<div class="alarm-list">';
+      MOCK.alarms.slice(0, 5).forEach(function (a) {
+        var severe = a.level === '严重';
+        var pending = a.status === '未处理';
+        html +=
+          '<div class="alarm-item">' +
+            '<span class="alarm-dot ' + (severe ? 'severe' : 'warn') + '"></span>' +
+            '<div class="alarm-body">' +
+              '<div class="alarm-title">' + a.type + ' · ' + a.plotName + '</div>' +
+              '<div class="alarm-meta">' + a.time + '</div>' +
+            '</div>' +
+            '<span class="badge ' + (pending ? 'badge-alarm' : 'badge-normal') + '">' + a.status + '</span>' +
+          '</div>';
+      });
+      html += '</div>';
+      document.getElementById('alarmPanel').innerHTML = html;
+    }
+
+    /* ---------- 渲染最近操作日志（模拟数据） ---------- */
+    function renderOperationLog() {
+      var html = '<div class="log-list">';
+      MOCK.controlLogs.slice(0, 5).forEach(function (l) {
+        var success = l.result === '成功';
+        html +=
+          '<div class="log-item">' +
+            '<span class="log-time">' + l.time.slice(11) + '</span>' +
+            '<span class="log-desc">' + l.action + ' · ' + l.deviceName + '</span>' +
+            '<span class="log-result ' + (success ? 'success' : 'fail') + '">' + l.result + '</span>' +
+          '</div>';
+      });
+      html += '</div>';
+      document.getElementById('operationLog').innerHTML = html;
     }
 
     document.getElementById('trendPlot').addEventListener('change', function () {
