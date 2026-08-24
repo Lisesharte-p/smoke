@@ -154,6 +154,12 @@ public class Api {
                 return true;
             }
 
+            /* ---------- 农事建议 ---------- */
+            if ("GET".equals(method) && path.equals("/api/advice")) {
+                ok(ex, adviceJson());
+                return true;
+            }
+
             /* ---------- 对话历史（按用户隔离） ---------- */
             if ("GET".equals(method) && path.equals("/api/conversations")) {
                 ok(ex, conversationsJson(ex.getRequestURI().getQuery()));
@@ -1087,6 +1093,119 @@ public class Api {
         if ("admin".equals(role)) return "农场管理员";
         if ("sysadmin".equals(role)) return "系统管理员";
         return role;
+    }
+
+    /* ==================================================================
+       农事建议
+       ================================================================== */
+
+    /**
+     * GET /api/advice —— 农事建议。
+     * 根据数据库实时数据（地块温湿度、阈值、设备在线状态）动态生成建议列表。
+     * 每条：{icon, tag, text, href, action}；href/action 为空串表示无跳转。
+     * 天气类建议因后端无气象数据源暂不生成，其余规则与前端 mock 保持一致。
+     */
+    private static String adviceJson() throws SQLException {
+        BigDecimal[] t = currentThresholds();
+        BigDecimal humidityMin = t[0];
+        BigDecimal tempMax = t[1];
+
+        // 逐地块取最新温湿度，归类干旱 / 高温 / 高湿
+        List<String> dryNames = new ArrayList<>();
+        List<String> hotNames = new ArrayList<>();
+        boolean humid = false;
+        String sql =
+                "SELECT p.name," +
+                "  (SELECT s.value FROM sensor_data s JOIN device d ON d.id=s.device_id" +
+                "    WHERE d.plot_id=p.id AND s.metric='temp' ORDER BY s.collected_at DESC LIMIT 1) AS temp," +
+                "  (SELECT s.value FROM sensor_data s JOIN device d ON d.id=s.device_id" +
+                "    WHERE d.plot_id=p.id AND s.metric='humidity' ORDER BY s.collected_at DESC LIMIT 1) AS humidity" +
+                " FROM plot p ORDER BY p.id";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String name = rs.getString("name");
+                BigDecimal temp = rs.getBigDecimal("temp");
+                BigDecimal hum = rs.getBigDecimal("humidity");
+                if (hum != null && hum.compareTo(humidityMin) < 0) dryNames.add(name);
+                if (temp != null && temp.compareTo(tempMax) > 0) hotNames.add(name);
+                if (hum != null && hum.compareTo(new BigDecimal("70")) > 0) humid = true;
+            }
+        }
+
+        int offline = countOfflineDevices();
+
+        List<String> items = new ArrayList<>();
+        if (!dryNames.isEmpty()) {
+            items.add(adviceItem("💧", "灌溉",
+                    joinNames(dryNames) + " 土壤湿度低于阈值 " + numStr(humidityMin) + "%，建议尽快补水。",
+                    "control.html", "去灌溉"));
+        }
+        if (!hotNames.isEmpty()) {
+            items.add(adviceItem("🌡️", "通风",
+                    joinNames(hotNames) + " 温度超过 " + numStr(tempMax) + "℃，建议加强通风降温。",
+                    "monitoring.html", "看数据"));
+        }
+        if (offline > 0) {
+            items.add(adviceItem("🔌", "设备",
+                    "有 " + offline + " 台设备离线，请检查供电与网络连接。",
+                    "devices.html", "去设备"));
+        }
+        if (humid) {
+            items.add(adviceItem("🐛", "防病",
+                    "近期湿度偏高，注意通风除湿，预防灰霉病等病害。",
+                    "", ""));
+        }
+        if (items.isEmpty()) {
+            items.add(adviceItem("✅", "正常",
+                    "各地块温湿度均在正常范围，请保持当前管理节奏。",
+                    "", ""));
+        }
+
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(items.get(i));
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    /** 组单条建议 JSON：{icon,tag,text,href,action} */
+    private static String adviceItem(String icon, String tag, String text, String href, String action) {
+        return "{\"icon\":" + Json.str(icon)
+                + ",\"tag\":" + Json.str(tag)
+                + ",\"text\":" + Json.str(text)
+                + ",\"href\":" + Json.str(href)
+                + ",\"action\":" + Json.str(action)
+                + "}";
+    }
+
+    /** 用「、」连接地块名列表 */
+    private static String joinNames(List<String> names) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) sb.append('、');
+            sb.append(names.get(i));
+        }
+        return sb.toString();
+    }
+
+    /** 离线设备数量（online=0） */
+    private static int countOfflineDevices() throws SQLException {
+        String sql = "SELECT COUNT(*) FROM device WHERE online = 0";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        }
+    }
+
+    /** 数字转显示串：null → 空串，去尾零（40.00 → 40） */
+    private static String numStr(BigDecimal b) {
+        if (b == null) return "";
+        return b.stripTrailingZeros().toPlainString();
     }
 
     /* ==================================================================
