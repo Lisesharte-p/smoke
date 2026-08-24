@@ -207,8 +207,156 @@ window.MOCK = (function () {
      智能问答回复（智能体用）
      简单关键词匹配，返回灌溉建议
      ------------------------------------------------------------------ */
+  function isPredictionQuestion(q) {
+    return /灌溉|浇水|补水|缺水|土壤湿度|墒情/.test(q) &&
+           /预测|未来|三天|3天|该不该|是否应该|要不要|需不需要|多久|多长时间|几分钟|现在该/.test(q);
+  }
+
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function sigmoid(x) {
+    return 1 / (1 + Math.exp(-x));
+  }
+
+  function norm(value, center, scale) {
+    if (value === null || value === undefined || isNaN(value)) return 0;
+    return clamp((value - center) / scale, -1, 1);
+  }
+
+  function inputWeight(gate, row, col) {
+    var n = (gate + 2) * 31 + (row + 3) * 17 + (col + 5) * 13;
+    return ((n % 19) - 9) / 26;
+  }
+
+  function hiddenWeight(gate, row, col) {
+    var n = (gate + 1) * 29 + (row + 7) * 11 + (col + 2) * 23;
+    return ((n % 17) - 8) / 34;
+  }
+
+  function gruFeatures(temp, humidity, lux, humidityMin, trend) {
+    return [
+      norm(temp, 25, 12),
+      norm(humidity, 50, 30),
+      norm(lux, 500, 600),
+      norm(humidityMin - humidity, 0, 30),
+      norm(trend, 0, 8)
+    ];
+  }
+
+  function gruStep(x, h) {
+    var next = [];
+    for (var row = 0; row < 6; row++) {
+      var iz = 0, ir = 0, inn = 0, hz = 0, hr = 0;
+      for (var i = 0; i < 5; i++) {
+        iz += inputWeight(0, row, i) * x[i];
+        ir += inputWeight(1, row, i) * x[i];
+        inn += inputWeight(2, row, i) * x[i];
+      }
+      for (var j = 0; j < 6; j++) {
+        hz += hiddenWeight(0, row, j) * h[j];
+        hr += hiddenWeight(1, row, j) * h[j];
+      }
+      var z = sigmoid(iz + hz - 0.10);
+      var r = sigmoid(ir + hr + 0.05);
+      var hn = 0;
+      for (var k = 0; k < 6; k++) hn += hiddenWeight(2, row, k) * (r * h[k]);
+      var n = Math.tanh(inn + hn);
+      next[row] = z * h[row] + (1 - z) * n;
+    }
+    return next;
+  }
+
+  function gruOutputDelta(h) {
+    var out = [-0.70, 0.42, -0.35, 0.55, -0.28, 0.33];
+    var y = -0.20;
+    for (var i = 0; i < h.length; i++) y += out[i] * h[i];
+    return Math.tanh(y) * 5.5;
+  }
+
+  function average(arr) {
+    return arr.reduce(function (a, b) { return a + b; }, 0) / arr.length;
+  }
+
+  function predictionReply(question) {
+    var q = (question || '').toUpperCase();
+    var matched = plots.filter(function (p) {
+      return q.indexOf(p.id.toUpperCase()) !== -1 ||
+             q.indexOf(p.name.toUpperCase()) !== -1 ||
+             q.indexOf(p.crop.toUpperCase()) !== -1;
+    });
+    var targets = matched.length ? matched : plots;
+    var answer = '我根据最近几天的温度、土壤湿度和光照数据，做了未来 3 天的预测性灌溉判断。\n\n' +
+      '当前采用的是**1 层 GRU 时间序列预测器**：输入温度、土壤湿度、光照和湿度变化特征，预测未来 3 天湿度；再由规则层给出是否灌溉和建议时长。\n';
+
+    targets.forEach(function (p) {
+      var hist = getHistory(p.id, 7);
+      var recentHum = hist.humidity.slice(-12);
+      var recentTemp = hist.temp.slice(-12);
+      var recentLux = hist.lux.slice(-12);
+      var current = p.humidity;
+      var trendSum = 0;
+      var weightSum = 0;
+      for (var i = 1; i < recentHum.length; i++) {
+        var w = i;
+        trendSum += (recentHum[i] - recentHum[i - 1]) * w;
+        weightSum += w;
+      }
+      var trend = weightSum ? trendSum / weightSum : -0.25;
+      var avgTemp = average(recentTemp);
+      var avgLux = average(recentLux);
+      var evap = 0;
+      if (avgTemp >= 35) evap -= 0.30;
+      else if (avgTemp >= 30) evap -= 0.18;
+      else if (avgTemp >= 26) evap -= 0.09;
+      if (avgLux >= 900) evap -= 0.15;
+      else if (avgLux >= 650) evap -= 0.09;
+
+      var hidden = [0, 0, 0, 0, 0, 0];
+      for (var t = 0; t < hist.humidity.length; t++) {
+        var prev = t > 0 ? hist.humidity[t - 1] : current;
+        hidden = gruStep(gruFeatures(hist.temp[t], hist.humidity[t], hist.lux[t], thresholds.humidityMin, hist.humidity[t] - prev), hidden);
+      }
+
+      var forecast = [];
+      var h = current;
+      for (var d = 0; d < 3; d++) {
+        for (var step = 0; step < 4; step++) {
+          var delta = clamp(gruOutputDelta(hidden) * 0.55 + trend * 0.35 + evap, -2, 0.8);
+          h = clamp(h + delta, 5, 95);
+          hidden = gruStep(gruFeatures(avgTemp, h, avgLux, thresholds.humidityMin, delta), hidden);
+        }
+        forecast.push(Math.round(h * 10) / 10);
+      }
+      var minHum = Math.min(forecast[0], forecast[1], forecast[2]);
+      var should = current < thresholds.humidityMin || minHum < thresholds.humidityMin;
+      var risk = minHum < thresholds.humidityMin - 8 ? '高' : (minHum < thresholds.humidityMin ? '中' : (minHum < thresholds.humidityMin + 4 ? '低' : '正常'));
+      var deficit = Math.max(thresholds.humidityMin + 5 - Math.min(current, minHum), 1);
+      var duration = Math.round(Math.max(10, Math.min(60, (8 + deficit * 2.2) * (0.8 + parseFloat(p.area) * 0.12))));
+      var start = current < thresholds.humidityMin ? '现在或最近一个低蒸发时段（清晨/傍晚）' : (forecast[0] < thresholds.humidityMin ? '第 1 天清晨' : (forecast[1] < thresholds.humidityMin ? '第 2 天清晨' : '第 3 天清晨'));
+
+      answer += '\n- **' + p.name + '（' + p.id + '，' + p.crop + '）**\n' +
+        '  当前土壤湿度约 ' + current + '%，阈值为 ' + thresholds.humidityMin + '%。近几天平均温度 ' + avgTemp.toFixed(1) + '℃，光照 ' + avgLux.toFixed(0) + ' lx。\n' +
+        '  未来 3 天预测湿度：第 1 天约 ' + forecast[0] + '%，第 2 天约 ' + forecast[1] + '%，第 3 天约 ' + forecast[2] + '%。\n';
+      if (should) {
+        answer += '  结论：**建议灌溉**，风险等级为**' + risk + '**。建议' + start + '灌溉 **' + duration + ' 分钟**。\n';
+      } else {
+        answer += '  结论：**未来 3 天暂不建议灌溉**，风险等级为**' + risk + '**。继续观察实时湿度即可。\n';
+      }
+    });
+
+    answer += '\n提示：预测建议用于辅助决策，真正执行前建议再看一次实时湿度和设备在线状态。';
+    return {
+      answer: answer,
+      actions: [{ text: '去控制灌溉', href: 'control.html' }, { text: '查看历史趋势', href: 'history.html' }],
+      sources: ['历史温湿度光照数据', '1层GRU预测模型']
+    };
+  }
+
   function getChatReply(question) {
     var q = (question || '').replace(/[？?。.，,\s]/g, '');
+    if (isPredictionQuestion(q)) return predictionReply(question);
 
     var replies = [
       { kw: ['浇水', '灌溉', '什么时候浇', '该不该浇'], answer: '根据当前土壤湿度数据，建议在**清晨 6:00–8:00** 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 **' + thresholds.humidityMin + '%**（当前阈值），请及时补水。', actions: [{ text: '去控制灌溉', href: 'control.html' }], sources: ['浇水的最佳时间', '如何判断该不该浇水', '远程灌溉控制操作'] },

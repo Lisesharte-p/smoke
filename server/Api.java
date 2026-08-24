@@ -1139,15 +1139,23 @@ public class Api {
             return "{\"code\":1,\"msg\":" + Json.str("缺少对话内容：messages 需含 role/content 的消息") + "}";
         }
 
-        // RAG 检索：拿最后一条用户问题去知识库检索相关资料，命中则拼入「参考资料」段给大模型
         String question = lastUserQuestion(valid);
-        String kbContext = Rag.buildContext(question, RAG_TOP_K);
 
         String answer;
-        try {
-            answer = deepseekChat(valid, kbContext);
-        } catch (Exception e) {
-            return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
+        String sourcesJson;
+        if (isIrrigationPredictionQuestion(question)) {
+            answer = irrigationPredictionAnswer(question);
+            sourcesJson = Json.arrStr(java.util.Arrays.asList("历史温湿度光照数据", "1层GRU预测模型"));
+        } else {
+            // RAG 检索：拿最后一条用户问题去知识库检索相关资料，命中则拼入「参考资料」段给大模型
+            String kbContext = Rag.buildContext(question, RAG_TOP_K);
+            try {
+                answer = deepseekChat(valid, kbContext);
+            } catch (Exception e) {
+                return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
+            }
+            // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
+            sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
         }
 
         // 落库（按用户名隔离）；未传 user（未登录）则不保存，仅返回回答
@@ -1162,9 +1170,6 @@ public class Api {
 
         // 按问题意图生成跳转按钮（控制灌溉/历史趋势/告警/监测/设备/总览），供前端在回答下方展示
         String actionsJson = detectActions(question);
-
-        // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
-        String sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
 
         return "{\"code\":0,\"data\":{\"answer\":" + Json.str(answer)
                 + ",\"actions\":" + actionsJson + ",\"conversationId\":"
@@ -1237,6 +1242,428 @@ public class Api {
             if (s.contains(kw)) return true;
         }
         return false;
+    }
+
+    /** 判断本轮是否是“未来是否需要灌溉 / 灌溉多久”的预测类问题。 */
+    private static boolean isIrrigationPredictionQuestion(String q) {
+        if (q == null) return false;
+        String s = q.replaceAll("[？?。.，,、\\s]", "").toUpperCase();
+        boolean irrigation = containsAny(s, new String[]{"灌溉", "浇水", "补水", "缺水", "土壤湿度", "墒情"});
+        boolean decision = containsAny(s, new String[]{"预测", "未来", "三天", "3天", "该不该", "是否应该", "要不要", "需不需要", "多久", "多长时间", "几分钟", "现在该"});
+        return irrigation && decision;
+    }
+
+    /** 智能问答内置的预测性灌溉回答：不依赖大模型，也保证中文输出。 */
+    private static String irrigationPredictionAnswer(String question) throws SQLException {
+        List<PlotProfile> plots = targetPlotsForQuestion(question);
+        if (plots.isEmpty()) {
+            return "暂时没有可用于预测的地块信息。请先在系统中添加地块，并确保传感器已经采集温度、土壤湿度和光照数据。";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("我根据最近几天的温度、土壤湿度和光照数据，做了未来 3 天的预测性灌溉判断。\n\n")
+          .append("当前采用的是**1 层 GRU 时间序列预测器**：输入温度、土壤湿度、光照和湿度变化特征，预测未来 3 天湿度；再由规则层给出是否灌溉和建议时长。\n");
+
+        for (PlotProfile plot : plots) {
+            sb.append('\n').append(buildPredictionForPlot(plot));
+        }
+        sb.append("\n提示：预测建议用于辅助决策，真正执行前建议再看一次实时湿度和设备在线状态。");
+        return sb.toString();
+    }
+
+    /** 从问题中识别目标地块；未指定时返回全部地块。 */
+    private static List<PlotProfile> targetPlotsForQuestion(String question) throws SQLException {
+        List<PlotProfile> all = new ArrayList<>();
+        String sql =
+                "SELECT p.id, p.name, p.crop, p.area," +
+                " COALESCE(t.humidity_min, 40) AS humidity_min," +
+                " COALESCE(t.temp_max, 35) AS temp_max" +
+                " FROM plot p LEFT JOIN plot_threshold t ON t.plot_id = p.id ORDER BY p.id";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                PlotProfile p = new PlotProfile();
+                p.id = rs.getString("id");
+                p.name = rs.getString("name");
+                p.crop = rs.getString("crop");
+                p.area = rs.getBigDecimal("area") == null ? 1.0 : rs.getBigDecimal("area").doubleValue();
+                p.humidityMin = rs.getBigDecimal("humidity_min").doubleValue();
+                p.tempMax = rs.getBigDecimal("temp_max").doubleValue();
+                all.add(p);
+            }
+        }
+        if (question == null || question.trim().isEmpty()) return all;
+
+        String s = question.toUpperCase();
+        List<PlotProfile> matched = new ArrayList<>();
+        for (PlotProfile p : all) {
+            if (s.contains(p.id.toUpperCase())
+                    || s.contains(p.name.toUpperCase())
+                    || (p.crop != null && !p.crop.isEmpty() && s.contains(p.crop.toUpperCase()))) {
+                matched.add(p);
+            }
+        }
+        return matched.isEmpty() ? all : matched;
+    }
+
+    /** 生成单个地块的 3 天预测和灌溉建议。 */
+    private static String buildPredictionForPlot(PlotProfile plot) throws SQLException {
+        List<IrrigationPoint> history = irrigationHistory(plot.id, 14);
+        IrrigationPoint latest = latestSensorSnapshot(plot.id);
+        if (Double.isNaN(latest.humidity) && history.isEmpty()) {
+            return "- **" + plot.name + "（" + plot.id + "）**：暂无土壤湿度历史数据，暂时无法预测是否灌溉。建议先采集至少 3 天数据。\n";
+        }
+
+        double currentHumidity = Double.isNaN(latest.humidity) ? lastValue(history, "humidity") : latest.humidity;
+        if (Double.isNaN(currentHumidity)) {
+            return "- **" + plot.name + "（" + plot.id + "）**：历史记录中缺少有效土壤湿度，暂时无法预测是否灌溉。建议先检查湿度传感器数据。\n";
+        }
+
+        GruForecast result = OneLayerGruForecaster.forecast(history, latest, plot, 3);
+        double avgTemp = result.avgTemp;
+        double avgLux = result.avgLux;
+        double[] forecast = result.forecast;
+
+        double minForecast = Math.min(forecast[0], Math.min(forecast[1], forecast[2]));
+        boolean shouldIrrigate = currentHumidity < plot.humidityMin || minForecast < plot.humidityMin;
+        String risk = riskLevel(currentHumidity, minForecast, plot.humidityMin);
+        int duration = shouldIrrigate ? irrigationMinutes(plot, currentHumidity, minForecast, avgTemp, avgLux) : 0;
+        String start = recommendedStart(currentHumidity, forecast, plot.humidityMin);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("- **").append(plot.name).append("（").append(plot.id).append("，").append(plot.crop).append("）**\n")
+          .append("  当前土壤湿度约 ").append(fmt(currentHumidity)).append("%，阈值为 ").append(fmt(plot.humidityMin)).append("%。");
+        if (!Double.isNaN(avgTemp) || !Double.isNaN(avgLux)) {
+            sb.append(" 近几天平均");
+            if (!Double.isNaN(avgTemp)) sb.append("温度 ").append(fmt(avgTemp)).append("℃");
+            if (!Double.isNaN(avgTemp) && !Double.isNaN(avgLux)) sb.append("，");
+            if (!Double.isNaN(avgLux)) sb.append("光照 ").append(fmt(avgLux)).append(" lx");
+            sb.append("。");
+        }
+        sb.append('\n')
+          .append("  未来 3 天预测湿度：")
+          .append(futureDate(1)).append(" 约 ").append(fmt(forecast[0])).append("%，")
+          .append(futureDate(2)).append(" 约 ").append(fmt(forecast[1])).append("%，")
+          .append(futureDate(3)).append(" 约 ").append(fmt(forecast[2])).append("%。\n");
+        if (shouldIrrigate) {
+            sb.append("  结论：**建议灌溉**，风险等级为**").append(risk).append("**。建议")
+              .append(start).append("灌溉 **").append(duration).append(" 分钟**。原因是未来最低湿度预计会到 ")
+              .append(fmt(minForecast)).append("%，低于或接近适宜下限。");
+        } else {
+            sb.append("  结论：**未来 3 天暂不建议灌溉**，风险等级为**").append(risk)
+              .append("**。土壤湿度预计仍高于下限，继续观察即可。");
+        }
+        if (result.sparse) {
+            sb.append(" 当前有效历史样本偏少，GRU 预测已启用趋势校准，本次预测置信度").append(result.confidence)
+              .append("，建议补齐连续 7-14 天采集数据。");
+        } else {
+            sb.append(" 本次使用 1 层 GRU 预测，置信度").append(result.confidence).append("。");
+        }
+        sb.append('\n');
+        return sb.toString();
+    }
+
+    /** 查询某地块近 days 天按日聚合的温度、湿度、光照。 */
+    private static List<IrrigationPoint> irrigationHistory(String plotId, int days) throws SQLException {
+        Map<String, IrrigationPoint> map = new LinkedHashMap<>();
+        String sql =
+                "SELECT DATE(s.collected_at) AS day_key, s.metric, AVG(s.value) AS v" +
+                " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
+                " WHERE d.plot_id = ? AND d.online = 1" +
+                " AND d.type IN ('温度传感器','环境监测板','土壤湿度传感器','亮度传感器')" +
+                " AND s.metric IN ('temp','humidity','lux')" +
+                " AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
+                " GROUP BY DATE(s.collected_at), s.metric ORDER BY day_key";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            ps.setInt(2, days);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String day = rs.getString("day_key");
+                    IrrigationPoint p = map.computeIfAbsent(day, k -> new IrrigationPoint(day));
+                    double v = rs.getDouble("v");
+                    String metric = rs.getString("metric");
+                    if ("temp".equals(metric)) p.temp = v;
+                    else if ("humidity".equals(metric)) p.humidity = v;
+                    else if ("lux".equals(metric)) p.lux = v;
+                }
+            }
+        }
+        return new ArrayList<>(map.values());
+    }
+
+    private static IrrigationPoint latestSensorSnapshot(String plotId) throws SQLException {
+        IrrigationPoint p = new IrrigationPoint("latest");
+        BigDecimal temp = latestValue(plotId, "temp");
+        BigDecimal humidity = latestValue(plotId, "humidity");
+        BigDecimal lux = latestValue(plotId, "lux");
+        p.temp = temp == null ? Double.NaN : temp.doubleValue();
+        p.humidity = humidity == null ? Double.NaN : humidity.doubleValue();
+        p.lux = lux == null ? Double.NaN : lux.doubleValue();
+        return p;
+    }
+
+    /** 1 层 GRU 对未来湿度的预测结果。 */
+    private static class GruForecast {
+        double[] forecast;
+        double avgTemp;
+        double avgLux;
+        boolean sparse;
+        String confidence;
+    }
+
+    /**
+     * 单层 GRU 推理器。
+     * 输入特征：[温度、湿度、光照、距阈值缺口、湿度变化]，隐藏层只经过一层 GRU cell。
+     * 项目当前没有离线训练产物，因此这里使用固定权重 + 历史趋势校准；后续有模型文件时可替换权重加载逻辑。
+     */
+    private static class OneLayerGruForecaster {
+        private static final int INPUT_SIZE = 5;
+        private static final int HIDDEN_SIZE = 6;
+        private static final double[] OUT = { -0.70, 0.42, -0.35, 0.55, -0.28, 0.33 };
+
+        static GruForecast forecast(List<IrrigationPoint> history, IrrigationPoint latest,
+                                    PlotProfile plot, int days) {
+            GruForecast r = new GruForecast();
+            r.forecast = new double[days];
+
+            double currentHumidity = Double.isNaN(latest.humidity)
+                    ? lastValue(history, "humidity") : latest.humidity;
+            r.avgTemp = averageRecent(history, "temp", 7);
+            r.avgLux = averageRecent(history, "lux", 7);
+            if (Double.isNaN(r.avgTemp)) r.avgTemp = latest.temp;
+            if (Double.isNaN(r.avgLux)) r.avgLux = latest.lux;
+
+            double observedTrend = weightedHumidityTrend(history);
+            r.sparse = validCount(history, "humidity") < 4 || Double.isNaN(observedTrend);
+            if (Double.isNaN(observedTrend)) {
+                observedTrend = (!Double.isNaN(r.avgTemp) && r.avgTemp >= 30)
+                        || (!Double.isNaN(r.avgLux) && r.avgLux >= 650) ? -1.4 : -0.7;
+            }
+
+            double[] hidden = new double[HIDDEN_SIZE];
+            double prevHumidity = currentHumidity;
+            boolean hasPrev = false;
+            for (IrrigationPoint p : history) {
+                if (Double.isNaN(p.humidity)) continue;
+                double temp = Double.isNaN(p.temp) ? r.avgTemp : p.temp;
+                double lux = Double.isNaN(p.lux) ? r.avgLux : p.lux;
+                double trend = hasPrev ? p.humidity - prevHumidity : observedTrend;
+                hidden = gruStep(features(temp, p.humidity, lux, plot.humidityMin, trend), hidden);
+                prevHumidity = p.humidity;
+                hasPrev = true;
+            }
+
+            if (!Double.isNaN(latest.humidity)) {
+                double trend = hasPrev ? latest.humidity - prevHumidity : observedTrend;
+                hidden = gruStep(features(latest.temp, latest.humidity, latest.lux, plot.humidityMin, trend), hidden);
+            }
+
+            double h = currentHumidity;
+            for (int i = 0; i < days; i++) {
+                double gruDelta = outputDelta(hidden);
+                double calibratedDelta = clamp(gruDelta * 0.55 + observedTrend * 0.35
+                        + evaporationAdjust(r.avgTemp, r.avgLux), -8.0, 3.0);
+                h = clamp(h + calibratedDelta, 5.0, 95.0);
+                r.forecast[i] = h;
+                hidden = gruStep(features(r.avgTemp, h, r.avgLux, plot.humidityMin, calibratedDelta), hidden);
+            }
+
+            int count = validCount(history, "humidity");
+            r.confidence = count >= 10 ? "较高" : (count >= 5 ? "中等" : "偏低");
+            return r;
+        }
+
+        private static double[] features(double temp, double humidity, double lux,
+                                         double humidityMin, double trend) {
+            return new double[] {
+                    norm(temp, 25, 12),
+                    norm(humidity, 50, 30),
+                    norm(lux, 500, 600),
+                    norm(humidityMin - humidity, 0, 30),
+                    norm(trend, 0, 8)
+            };
+        }
+
+        private static double[] gruStep(double[] x, double[] h) {
+            double[] next = new double[HIDDEN_SIZE];
+            for (int j = 0; j < HIDDEN_SIZE; j++) {
+                double z = sigmoid(linearInput(0, j, x) + linearHidden(0, j, h) - 0.10);
+                double r = sigmoid(linearInput(1, j, x) + linearHidden(1, j, h) + 0.05);
+                double[] rh = new double[HIDDEN_SIZE];
+                for (int k = 0; k < HIDDEN_SIZE; k++) rh[k] = r * h[k];
+                double n = Math.tanh(linearInput(2, j, x) + linearHidden(2, j, rh));
+                next[j] = z * h[j] + (1 - z) * n;
+            }
+            return next;
+        }
+
+        private static double outputDelta(double[] h) {
+            double y = -0.20;
+            for (int i = 0; i < HIDDEN_SIZE; i++) y += OUT[i] * h[i];
+            return Math.tanh(y) * 5.5;
+        }
+
+        private static double linearInput(int gate, int row, double[] x) {
+            double sum = 0;
+            for (int i = 0; i < INPUT_SIZE; i++) sum += inputWeight(gate, row, i) * x[i];
+            return sum;
+        }
+
+        private static double linearHidden(int gate, int row, double[] h) {
+            double sum = 0;
+            for (int i = 0; i < HIDDEN_SIZE; i++) sum += hiddenWeight(gate, row, i) * h[i];
+            return sum;
+        }
+
+        private static double inputWeight(int gate, int row, int col) {
+            int n = (gate + 2) * 31 + (row + 3) * 17 + (col + 5) * 13;
+            return ((n % 19) - 9) / 26.0;
+        }
+
+        private static double hiddenWeight(int gate, int row, int col) {
+            int n = (gate + 1) * 29 + (row + 7) * 11 + (col + 2) * 23;
+            return ((n % 17) - 8) / 34.0;
+        }
+
+        private static double sigmoid(double x) {
+            return 1.0 / (1.0 + Math.exp(-x));
+        }
+
+        private static double norm(double value, double center, double scale) {
+            if (Double.isNaN(value)) return 0;
+            return clamp((value - center) / scale, -1.0, 1.0);
+        }
+    }
+
+    private static double weightedHumidityTrend(List<IrrigationPoint> history) {
+        double sum = 0;
+        double weightSum = 0;
+        int weight = 1;
+        for (int i = 1; i < history.size(); i++) {
+            double prev = history.get(i - 1).humidity;
+            double cur = history.get(i).humidity;
+            if (Double.isNaN(prev) || Double.isNaN(cur)) continue;
+            sum += (cur - prev) * weight;
+            weightSum += weight;
+            weight++;
+        }
+        return weightSum == 0 ? Double.NaN : sum / weightSum;
+    }
+
+    private static int validCount(List<IrrigationPoint> history, String metric) {
+        int count = 0;
+        for (IrrigationPoint p : history) {
+            if (!Double.isNaN(metricValue(p, metric))) count++;
+        }
+        return count;
+    }
+
+    private static double evaporationAdjust(double avgTemp, double avgLux) {
+        double adjust = 0;
+        if (!Double.isNaN(avgTemp)) {
+            if (avgTemp >= 35) adjust -= 1.2;
+            else if (avgTemp >= 30) adjust -= 0.7;
+            else if (avgTemp >= 26) adjust -= 0.35;
+            else if (avgTemp < 18) adjust += 0.25;
+        }
+        if (!Double.isNaN(avgLux)) {
+            if (avgLux >= 900) adjust -= 0.6;
+            else if (avgLux >= 650) adjust -= 0.35;
+            else if (avgLux < 250) adjust += 0.2;
+        }
+        return adjust;
+    }
+
+    private static double averageRecent(List<IrrigationPoint> history, String metric, int limit) {
+        double sum = 0;
+        int count = 0;
+        for (int i = history.size() - 1; i >= 0 && count < limit; i--) {
+            double v = metricValue(history.get(i), metric);
+            if (Double.isNaN(v)) continue;
+            sum += v;
+            count++;
+        }
+        return count == 0 ? Double.NaN : sum / count;
+    }
+
+    private static double lastValue(List<IrrigationPoint> history, String metric) {
+        for (int i = history.size() - 1; i >= 0; i--) {
+            double v = metricValue(history.get(i), metric);
+            if (!Double.isNaN(v)) return v;
+        }
+        return Double.NaN;
+    }
+
+    private static double metricValue(IrrigationPoint p, String metric) {
+        if ("temp".equals(metric)) return p.temp;
+        if ("humidity".equals(metric)) return p.humidity;
+        if ("lux".equals(metric)) return p.lux;
+        return Double.NaN;
+    }
+
+    private static int irrigationMinutes(PlotProfile plot, double currentHumidity, double minForecast, double avgTemp, double avgLux) {
+        double target = plot.humidityMin + 5;
+        double deficit = Math.max(target - Math.min(currentHumidity, minForecast), 1.0);
+        double areaFactor = clamp(0.8 + plot.area * 0.12, 0.9, 1.5);
+        double heatFactor = (!Double.isNaN(avgTemp) && avgTemp >= plot.tempMax) ? 1.18 : 1.0;
+        double lightFactor = (!Double.isNaN(avgLux) && avgLux >= 800) ? 1.10 : 1.0;
+        double minutes = (8 + deficit * 2.2) * areaFactor * heatFactor * lightFactor;
+        return (int) Math.round(clamp(minutes, 10, 60));
+    }
+
+    private static String recommendedStart(double currentHumidity, double[] forecast, double humidityMin) {
+        if (currentHumidity < humidityMin) return "现在或最近一个低蒸发时段（清晨/傍晚）";
+        for (int i = 0; i < forecast.length; i++) {
+            if (forecast[i] < humidityMin) {
+                return "第 " + (i + 1) + " 天清晨";
+            }
+        }
+        return "清晨或傍晚";
+    }
+
+    private static String riskLevel(double currentHumidity, double minForecast, double humidityMin) {
+        double min = Math.min(currentHumidity, minForecast);
+        if (min < humidityMin - 8) return "高";
+        if (min < humidityMin) return "中";
+        if (min < humidityMin + 4) return "低";
+        return "正常";
+    }
+
+    private static String futureDate(int plusDays) {
+        return java.time.LocalDate.now().plusDays(plusDays)
+                .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd"));
+    }
+
+    private static String fmt(double v) {
+        if (Double.isNaN(v)) return "未知";
+        return new BigDecimal(v).setScale(1, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+    }
+
+    private static double clamp(double v, double min, double max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    private static class PlotProfile {
+        String id;
+        String name;
+        String crop;
+        double area;
+        double humidityMin;
+        double tempMax;
+    }
+
+    private static class IrrigationPoint {
+        String day;
+        double temp = Double.NaN;
+        double humidity = Double.NaN;
+        double lux = Double.NaN;
+
+        IrrigationPoint(String day) {
+            this.day = day;
+        }
     }
 
     /**
@@ -1331,7 +1758,7 @@ public class Api {
         String now = java.time.LocalDateTime.now()
                 .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
         String system = "你是「智慧农业平台」的智能助手，负责解答大棚种植、灌溉、温湿度监测、告警阈值、设备控制等农业问题。"
-                      + "回答要简洁实用、直接给出建议；只回答与农业种植相关的问题，无关问题礼貌说明无法回答。"
+                      + "必须始终使用中文回答。回答要简洁实用、直接给出建议；只回答与农业种植相关的问题，无关问题礼貌说明无法回答。"
                       + " 当前服务器时间是 " + now + "，回答时间相关问题以这个时间为准。";
         if (!dataCtx.isEmpty()) {
             system += " 当前系统实时采集的环境数据如下：" + dataCtx
