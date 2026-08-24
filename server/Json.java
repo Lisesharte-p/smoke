@@ -37,6 +37,18 @@ public class Json {
         return n == null ? "null" : String.valueOf(n);
     }
 
+    /** 字符串列表转 JSON 数组字面量，如 ["a","b"]；null/空列表 → [] */
+    public static String arrStr(List<String> list) {
+        StringBuilder sb = new StringBuilder("[");
+        if (list != null) {
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append(str(list.get(i)));
+            }
+        }
+        return sb.append(']').toString();
+    }
+
     /**
      * 解析 JSON 对象 {"a":"x","b":123,"c":true,"d":null} → Map<key, 原始值>。
      * 字符串值会去引号转义；数字/布尔保持原文。支持值里有逗号（引号感知）。

@@ -1078,6 +1078,8 @@ public class Api {
     private static final String DEEPSEEK_MODEL = "deepseek-chat";
     /** 多轮对话最多带上多少条历史（防止上下文过长、超 token 上限） */
     private static final int MAX_CHAT_HISTORY = 20;
+    /** RAG 知识库检索返回的最相关知识块条数 */
+    private static final int RAG_TOP_K = 3;
 
     /**
      * POST /api/assistant/chat —— 智能问答（DeepSeek 大模型，支持多轮对话）。
@@ -1116,9 +1118,13 @@ public class Api {
             return "{\"code\":1,\"msg\":" + Json.str("缺少对话内容：messages 需含 role/content 的消息") + "}";
         }
 
+        // RAG 检索：拿最后一条用户问题去知识库检索相关资料，命中则拼入「参考资料」段给大模型
+        String question = lastUserQuestion(valid);
+        String kbContext = Rag.buildContext(question, RAG_TOP_K);
+
         String answer;
         try {
-            answer = deepseekChat(valid);
+            answer = deepseekChat(valid, kbContext);
         } catch (Exception e) {
             return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
         }
@@ -1135,13 +1141,17 @@ public class Api {
 
         // 用户想看实时数据 → 附带跳转监测页的按钮
         String actionJson = "null";
-        if (wantsRealtime(lastUserQuestion(valid))) {
+        if (wantsRealtime(question)) {
             actionJson = "{\"text\":\"查看实时数据\",\"href\":\"monitoring.html\"}";
         }
 
+        // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
+        String sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
+
         return "{\"code\":0,\"data\":{\"answer\":" + Json.str(answer)
                 + ",\"action\":" + actionJson + ",\"conversationId\":"
-                + (conversationId == null ? "null" : conversationId) + "}}";
+                + (conversationId == null ? "null" : conversationId)
+                + ",\"sources\":" + sourcesJson + "}}";
     }
 
     /** 取对话里最后一条用户消息（用于判断本轮问题意图） */
@@ -1242,8 +1252,11 @@ public class Api {
         }
     }
 
-    /** 调 DeepSeek 的 OpenAI 兼容接口：系统提示（含实时数据）+ 对话历史 → 返回模型回答 */
-    private static String deepseekChat(List<Map<String, String>> msgs) throws Exception {
+    /**
+     * 调 DeepSeek 的 OpenAI 兼容接口：系统提示（含实时数据 + 地块信息 + RAG 知识库资料）+ 对话历史 → 返回模型回答。
+     * @param kbContext RAG 检索到的知识库参考资料段（空串表示未命中，不加该段）
+     */
+    private static String deepseekChat(List<Map<String, String>> msgs, String kbContext) throws Exception {
         // 未配置 key 时给出明确提示（启动前需 set DEEPSEEK_API_KEY=sk-xxx）
         if (DEEPSEEK_API_KEY == null || DEEPSEEK_API_KEY.isEmpty()) {
             throw new IOException("未配置环境变量 DEEPSEEK_API_KEY");
@@ -1262,6 +1275,10 @@ public class Api {
         }
         if (!plotCtx.isEmpty()) {
             system += " " + plotCtx;
+        }
+        // RAG：命中知识库时把参考资料段追加进系统提示，让模型优先据此回答
+        if (kbContext != null && !kbContext.isEmpty()) {
+            system += " " + kbContext;
         }
 
         StringBuilder req = new StringBuilder();

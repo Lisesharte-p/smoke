@@ -116,6 +116,16 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    /* 在回答气泡下方追加一行「📚 参考：…」，展示 RAG 命中的知识库来源 */
+    function addSourcesLine(sources) {
+      if (!sources || !sources.length) return;
+      var line = document.createElement('div');
+      line.className = 'msg-sources';
+      line.textContent = '📚 参考：' + sources.join('、');
+      messagesEl.appendChild(line);
+      scrollBottom();
+    }
+
     /* ---------- 发送消息 ---------- */
     function send(question) {
       question = (question || '').trim();
@@ -133,6 +143,7 @@
           chatHistory.push({ role: 'assistant', content: answer });
           if (res.data.conversationId) activeConvId = res.data.conversationId;
           addMessage('bot', answer, res.data.action, true);
+          addSourcesLine(res.data.sources);   // RAG 命中的知识库参考来源
           renderConvs(activeConvId);   // 刷新历史列表并高亮当前会话
         } else {
           addMessage('bot', '😅 ' + (res.msg || '大模型暂时不可用，请稍后再试。'));

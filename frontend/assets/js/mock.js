@@ -143,10 +143,10 @@ window.MOCK = (function () {
     var q = (question || '').replace(/[？?。.，,\s]/g, '');
 
     var replies = [
-      { kw: ['浇水', '灌溉', '什么时候浇', '该不该浇'], answer: '根据当前土壤湿度数据，建议在清晨 6:00–8:00 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 ' + thresholds.humidityMin + '%（当前阈值），请及时补水。', action: { text: '去控制灌溉', href: 'control.html' } },
-      { kw: ['太干', '干旱', '缺水', '湿度低'], answer: '当前部分地块土壤湿度偏低，存在缺水风险。建议开启灌溉设备补水 20–30 分钟，并关注告警记录，避免作物因缺水萎蔫。', action: { text: '查看告警', href: 'alarm.html' } },
-      { kw: ['阈值', '告警条件', '设置'], answer: '您可以在「告警管理」页设置土壤湿度下限和温度上限。当实测值越过阈值时，系统会自动触发告警并通知您。', action: { text: '去设置阈值', href: 'alarm.html' } },
-      { kw: ['温度', '太热', '高温'], answer: '若大棚温度超过 ' + thresholds.tempMax + '℃（当前阈值），建议及时通风或开启遮阳。温度过高会影响作物生长，请留意实时温度曲线。', action: { text: '查看实时数据', href: 'monitoring.html' } }
+      { kw: ['浇水', '灌溉', '什么时候浇', '该不该浇'], answer: '根据当前土壤湿度数据，建议在清晨 6:00–8:00 或傍晚 18:00–20:00 灌溉，此时蒸发量小、水分利用率高。若土壤湿度低于 ' + thresholds.humidityMin + '%（当前阈值），请及时补水。', action: { text: '去控制灌溉', href: 'control.html' }, sources: ['浇水的最佳时间', '如何判断该不该浇水', '远程灌溉控制操作'] },
+      { kw: ['太干', '干旱', '缺水', '湿度低'], answer: '当前部分地块土壤湿度偏低，存在缺水风险。建议开启灌溉设备补水 20–30 分钟，并关注告警记录，避免作物因缺水萎蔫。', action: { text: '查看告警', href: 'alarm.html' }, sources: ['土壤太干怎么办', '土壤湿度的适宜范围'] },
+      { kw: ['阈值', '告警条件', '设置'], answer: '您可以在「告警管理」页设置土壤湿度下限和温度上限。当实测值越过阈值时，系统会自动触发告警并通知您。', action: { text: '去设置阈值', href: 'alarm.html' }, sources: ['告警阈值如何设置', '如何避免告警误报'] },
+      { kw: ['温度', '太热', '高温'], answer: '若大棚温度超过 ' + thresholds.tempMax + '℃（当前阈值），建议及时通风或开启遮阳。温度过高会影响作物生长，请留意实时温度曲线。', action: { text: '查看实时数据', href: 'monitoring.html' }, sources: ['温度太高怎么降温', '大棚温度的适宜范围'] }
     ];
 
     for (var i = 0; i < replies.length; i++) {
@@ -158,7 +158,8 @@ window.MOCK = (function () {
     }
     return {
       answer: '我是智慧农业助手，可以为您提供灌溉建议和农事指导。您可以试试问我：「现在该浇水吗？」「土壤太干怎么办？」「如何设置告警阈值？」',
-      action: null
+      action: null,
+      sources: []
     };
   }
 

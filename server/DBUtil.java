@@ -95,4 +95,35 @@ public class DBUtil {
             System.out.println("[DBUtil] 建对话历史表失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 建智能问答知识库表（CREATE TABLE IF NOT EXISTS，幂等），服务器启动时调用一次。
+     * knowledge_chunk 存 RAG 检索用的知识块（标题+正文+关键词），种子数据见 08_知识库种子数据.sql。
+     */
+    public static void ensureKnowledgeTables() {
+        String[] ddl = {
+            "CREATE TABLE IF NOT EXISTS knowledge_chunk (" +
+            "  id BIGINT NOT NULL AUTO_INCREMENT," +
+            "  title VARCHAR(200) NOT NULL COMMENT '知识块标题'," +
+            "  category VARCHAR(50) NOT NULL COMMENT '分类：浇水灌溉/土壤湿度/温度光照/告警阈值/作物种植/病虫害防治/施肥/平台使用等'," +
+            "  content TEXT NOT NULL COMMENT '知识正文（供大模型参考的完整描述）'," +
+            "  keywords VARCHAR(500) DEFAULT NULL COMMENT '检索关键词，逗号分隔（辅助词法检索）'," +
+            "  source VARCHAR(100) DEFAULT NULL COMMENT '来源说明（文档/整理人）'," +
+            "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP," +
+            "  PRIMARY KEY (id)," +
+            "  UNIQUE KEY uk_title (title)," +
+            "  KEY idx_category (category)" +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='智能问答知识库（RAG 检索）'"
+        };
+        try (Connection conn = getConnection()) {
+            for (String sql : ddl) {
+                try (Statement st = conn.createStatement()) {
+                    st.execute(sql);
+                }
+            }
+            System.out.println("[DBUtil] 知识库表已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 建知识库表失败: " + e.getMessage());
+        }
+    }
 }
