@@ -52,6 +52,35 @@
     var inputEl = document.getElementById('chatInput');
     var sendBtn = document.getElementById('sendBtn');
 
+    /* ---------- 轻量 markdown 渲染 ----------
+       支持：**加粗** / *斜体* / `行内代码` / [链接](url) / 换行 */
+    function renderMarkdown(text) {
+      var esc = String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      // 先把行内代码抽离为占位符，避免其内容被后续规则误处理
+      var codeStore = [];
+      esc = esc.replace(/`([^`]+)`/g, function (m, c) {
+        codeStore.push('<code>' + c + '</code>');
+        return '' + (codeStore.length - 1) + '';
+      });
+
+      esc = esc
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+        .replace(/\n/g, '<br>');
+
+      // 还原行内代码
+      esc = esc.replace(/(\d+)/g, function (m, i) {
+        return codeStore[+i];
+      });
+
+      return esc;
+    }
+
     /* ---------- 添加一条消息 ---------- */
     function addMessage(role, text, action, typew) {
       var msg = document.createElement('div');
@@ -65,12 +94,12 @@
         ? '<div class="msg-action"><a class="btn btn-sm btn-primary" href="' + action.href + '">' + action.text + '</a></div>'
         : '';
 
-      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : text) + actionHtml + '</div>';
+      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : renderMarkdown(text)) + actionHtml + '</div>';
       msg.innerHTML = avatar + bubble;
       messagesEl.appendChild(msg);
 
       if (typew) {
-        Animate.typewrite(msg.querySelector('.type-text'), text, { onTick: scrollBottom, onDone: scrollBottom });
+        Animate.typewrite(msg.querySelector('.type-text'), text, { render: renderMarkdown, onTick: scrollBottom, onDone: scrollBottom });
       }
       scrollBottom();
       return msg;

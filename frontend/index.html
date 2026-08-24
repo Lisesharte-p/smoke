@@ -377,24 +377,27 @@
       document.getElementById('weatherForecast').innerHTML = fcHtml;
     }
 
-    /* ---------- 渲染农事建议（模拟数据） ---------- */
+    /* ---------- 渲染农事建议（根据数据库数据动态生成） ---------- */
     function renderAdvice() {
-      var html = '<div class="advice-list">';
-      MOCK.advice.forEach(function (a) {
-        var actionHtml = a.href
-          ? '<a class="ai-action" href="' + a.href + '">' + a.action + ' →</a>'
-          : '';
-        html +=
-          '<div class="advice-item">' +
-            '<span class="ai-icon">' + a.icon + '</span>' +
-            '<div class="ai-body">' +
-              '<div class="ai-top"><span class="ai-tag">' + a.tag + '</span>' + actionHtml + '</div>' +
-              '<div class="ai-text">' + a.text + '</div>' +
-            '</div>' +
-          '</div>';
+      API.getAdvice().then(function (res) {
+        var advice = res.data || [];
+        var html = '<div class="advice-list">';
+        advice.forEach(function (a) {
+          var actionHtml = a.href
+            ? '<a class="ai-action" href="' + a.href + '">' + a.action + ' →</a>'
+            : '';
+          html +=
+            '<div class="advice-item">' +
+              '<span class="ai-icon">' + a.icon + '</span>' +
+              '<div class="ai-body">' +
+                '<div class="ai-top"><span class="ai-tag">' + a.tag + '</span>' + actionHtml + '</div>' +
+                '<div class="ai-text">' + a.text + '</div>' +
+              '</div>' +
+            '</div>';
+        });
+        html += '</div>';
+        document.getElementById('adviceList').innerHTML = html;
       });
-      html += '</div>';
-      document.getElementById('adviceList').innerHTML = html;
     }
 
     /* ---------- 渲染设备状态环形图（模拟数据） ---------- */

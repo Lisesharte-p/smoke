@@ -106,11 +106,21 @@ window.Animate = (function () {
     var speed = opts.speed || 28;
     var onDone = opts.onDone || null;
     var onTick = opts.onTick || null;
+    var render = opts.render || null; // 可选：把每帧文本渲染为 HTML（如 markdown）
     var i = 0;
-    el.textContent = '';
+    if (render) {
+      el.innerHTML = '';
+    } else {
+      el.textContent = '';
+    }
     function tick() {
       if (i <= text.length) {
-        el.textContent = text.slice(0, i);
+        var partial = text.slice(0, i);
+        if (render) {
+          el.innerHTML = render(partial);
+        } else {
+          el.textContent = partial;
+        }
         if (onTick) onTick();
         i++;
         setTimeout(tick, speed);
