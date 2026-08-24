@@ -57,6 +57,11 @@ window.API = (function () {
     });
   }
 
+  /* 当前角色：前端从 Layout 读取（登录后写入 localStorage）；管理类操作（增删地块）需 admin/sysadmin */
+  function currentRole() {
+    return (window.Layout && typeof Layout.getRole === 'function') ? Layout.getRole() : 'farmer';
+  }
+
   /* ==================================================================
      登录
      ================================================================== */
@@ -119,7 +124,9 @@ window.API = (function () {
       });
       return mockDelay({ code: 0, data: plot }, 300);
     }
-    return request(config.endpoints.plots, { method: 'POST', data: data });
+    var payload = data || {};
+    payload.role = currentRole();   // 权限：仅管理员/系统管理员可新增地块
+    return request(config.endpoints.plots, { method: 'POST', data: payload });
   }
 
   /* 删除地块（后端级联删除其设备与关联数据） */
@@ -132,7 +139,7 @@ window.API = (function () {
       window.MOCK.devices = window.MOCK.devices.filter(function (d) { return d.plotId !== plotId; });
       return mockDelay({ code: 0 }, 300);
     }
-    return request(config.endpoints.plot.replace('{plotId}', plotId), { method: 'DELETE' });
+    return request(config.endpoints.plot.replace('{plotId}', plotId) + '?role=' + encodeURIComponent(currentRole()), { method: 'DELETE' });
   }
 
   /* ==================================================================

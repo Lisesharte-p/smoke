@@ -66,7 +66,7 @@
           <div class="card-header">
             <div>
               <div class="card-title">实时趋势</div>
-              <div class="card-sub">近 7 天温湿度变化（温度 / 湿度分图显示）</div>
+              <div class="card-sub">近 7 天温湿度与亮度变化（温度 / 湿度 / 亮度分图显示）</div>
             </div>
             <div class="flex gap-8">
               <select class="form-control" id="trendPlot" style="width:180px"></select>
@@ -75,6 +75,7 @@
           </div>
           <div id="chartTemp" style="height:230px"></div>
           <div id="chartHum" style="height:230px;margin-top:8px"></div>
+          <div id="chartLux" style="height:230px;margin-top:8px"></div>
         </div>
       </main>
     </div>
@@ -122,8 +123,19 @@
     var alarms = [];
     var charts = {};
 
+    /* 是否可管理地块（添加/删除）：仅 农场管理员 admin / 系统管理员 sysadmin */
+    function canManagePlot() {
+      var role = Layout.getRole();
+      return role === 'admin' || role === 'sysadmin';
+    }
+    if (!canManagePlot()) {
+      var addPlotBtn = document.getElementById('openAddPlot');
+      if (addPlotBtn) addPlotBtn.style.display = 'none';
+    }
+
     var COLOR_TEMP = '#f59e0b';  // 温度：暖橙
     var COLOR_HUM  = '#3b82f6';  // 湿度：水蓝
+    var COLOR_LUX  = '#10b981';  // 亮度：翠绿
 
     /* ---------- 颜色工具：hex 转 rgba / 面积渐变 ---------- */
     function hexToRgba(hex, a) {
@@ -221,6 +233,7 @@
       var grid = document.getElementById('plotGrid');
       grid.innerHTML = '';
 
+      var canManage = canManagePlot();   // 仅管理员/系统管理员可删除地块
       plots.forEach(function (p) {
         var devs = devices.filter(function (d) { return d.plotId === p.id; });
         var online = devs.filter(function (d) { return d.online; }).length;
@@ -241,7 +254,7 @@
             '</div>' +
             '<div class="flex gap-8">' +
               '<span class="badge badge-online"><span class="dot"></span>' + online + '/' + devs.length + ' 在线</span>' +
-              '<button class="btn btn-danger btn-sm plot-del">删除</button>' +
+              (canManage ? '<button class="btn btn-danger btn-sm plot-del">删除</button>' : '') +
             '</div>' +
           '</div>' +
           '<div class="plot-metrics">' +
@@ -250,9 +263,11 @@
             '<div class="plot-metric"><div class="v">' + devs.length + '</div><div class="l">设备</div></div>' +
           '</div>';
         grid.appendChild(card);
-        card.querySelector('.plot-del').addEventListener('click', function () {
-          handleDeletePlot(p);
-        });
+        if (canManage) {
+          card.querySelector('.plot-del').addEventListener('click', function () {
+            handleDeletePlot(p);
+          });
+        }
       });
       Animate.staggerIn(grid, { selector: '.plot-card' });
     }
@@ -275,6 +290,7 @@
         var d = res.data;
         renderChart('chartTemp', lineOption('温度（℃）', '℃', COLOR_TEMP, d.dates, d.temp));
         renderChart('chartHum', lineOption('土壤湿度（%）', '%', COLOR_HUM, d.dates, d.humidity));
+        renderChart('chartLux', lineOption('亮度（lux）', ' lux', COLOR_LUX, d.dates, d.lux));
       });
     }
 

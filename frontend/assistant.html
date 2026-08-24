@@ -71,8 +71,18 @@
       return u.username || u.name || 'guest';
     }
 
+    /* 把动作按钮数组渲染成 HTML（可多个，如去控制灌溉 / 查看历史趋势） */
+    function actionsHtml(actions) {
+      if (!actions || !actions.length) return '';
+      var html = '<div class="msg-action">';
+      actions.forEach(function (a) {
+        html += '<a class="btn btn-sm btn-primary" href="' + a.href + '">' + a.text + '</a>';
+      });
+      return html + '</div>';
+    }
+
     /* ---------- 添加一条消息 ---------- */
-    function addMessage(role, text, action, typew) {
+    function addMessage(role, text, actions, typew) {
       var msg = document.createElement('div');
       msg.className = 'msg ' + role;
 
@@ -80,11 +90,7 @@
         ? '<div class="avatar-sm">🤖</div>'
         : '<div class="avatar-sm" style="background:var(--primary);color:#fff">👤</div>';
 
-      var actionHtml = action
-        ? '<div class="msg-action"><a class="btn btn-sm btn-primary" href="' + action.href + '">' + action.text + '</a></div>'
-        : '';
-
-      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : text) + actionHtml + '</div>';
+      var bubble = '<div class="bubble">' + (typew ? '<span class="type-text"></span>' : text) + actionsHtml(actions) + '</div>';
       msg.innerHTML = avatar + bubble;
       messagesEl.appendChild(msg);
 
@@ -142,7 +148,7 @@
           var answer = res.data.answer;
           chatHistory.push({ role: 'assistant', content: answer });
           if (res.data.conversationId) activeConvId = res.data.conversationId;
-          addMessage('bot', answer, res.data.action, true);
+          addMessage('bot', answer, res.data.actions, true);
           addSourcesLine(res.data.sources);   // RAG 命中的知识库参考来源
           renderConvs(activeConvId);   // 刷新历史列表并高亮当前会话
         } else {

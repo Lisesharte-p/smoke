@@ -22,6 +22,7 @@ import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -51,7 +52,8 @@ public class Api {
                 return true;
             }
             if ("DELETE".equals(method) && path.matches("/api/plots/[^/]+")) {
-                ok(ex, deletePlotJson(path.substring("/api/plots/".length())));
+                ok(ex, deletePlotJson(path.substring("/api/plots/".length()),
+                        ex.getRequestURI().getQuery()));
                 return true;
             }
 
@@ -279,6 +281,10 @@ public class Api {
     private static String addPlotJson(HttpExchange ex) throws IOException, SQLException {
         String raw = readBody(ex);
         Map<String, String> body = Json.parseObject(raw);
+        // 权限：仅农场管理员/系统管理员可添加地块
+        if (!isAdminRole(body.get("role"))) {
+            return "{\"code\":1,\"msg\":" + Json.str("无权限：只有农场管理员或系统管理员可以添加地块") + "}";
+        }
         String name = body.get("name");
         String crop = body.get("crop");
         String area = body.get("area");
@@ -385,7 +391,11 @@ public class Api {
      * 级联删除该地块下的所有关联数据（同一事务，要么全删要么全不删）：
      *   device（及其 sensor_data / control_log）→ alarm → plot_threshold → plot
      */
-    private static String deletePlotJson(String plotId) throws SQLException {
+    private static String deletePlotJson(String plotId, String query) throws SQLException {
+        // 权限：仅农场管理员/系统管理员可删除地块
+        if (!isAdminRole(queryParam(query, "role"))) {
+            return "{\"code\":1,\"msg\":" + Json.str("无权限：只有农场管理员或系统管理员可以删除地块") + "}";
+        }
         try (Connection conn = DBUtil.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -424,6 +434,11 @@ public class Api {
             ps.setString(1, param);
             ps.executeUpdate();
         }
+    }
+
+    /** 是否有地块管理权限（添加/删除等）：仅 admin / sysadmin */
+    private static boolean isAdminRole(String role) {
+        return "admin".equals(role) || "sysadmin".equals(role);
     }
 
     /* ==================================================================
@@ -705,45 +720,51 @@ public class Api {
                   " GROUP BY x, s.metric ORDER BY x";
         }
 
-        StringBuilder dates = new StringBuilder();
-        StringBuilder temp = new StringBuilder();
-        StringBuilder hum = new StringBuilder();
+        // 按时间标签聚合 temp/humidity/lux 三指标，保证三个序列与 dates 一一对齐（缺失值输出 null，前端画图显示断点）
+        Map<String, double[]> series = new LinkedHashMap<>(); // x -> [temp, humidity, lux]
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, plotId);
             if (window == null || intervalSql == null) {
                 ps.setInt(2, days);
             }
-            // 同一时间标签只记一次日期，保证 dates 与 temp/humidity 一一对齐
-            String lastX = null;
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String x = rs.getString("x");
-                    double v = rs.getDouble("v");
                     String metric = rs.getString("metric");
-                    // 只有 temp/humidity 进温湿度趋势；lux 等其它指标不进
-                    if ("temp".equals(metric) || "humidity".equals(metric)) {
-                        if (!x.equals(lastX)) {
-                            if (dates.length() > 0) dates.append(',');
-                            dates.append(Json.str(x));
-                            lastX = x;
-                        }
-                        if ("temp".equals(metric)) {
-                            if (temp.length() > 0) temp.append(',');
-                            temp.append(v);
-                        } else {
-                            if (hum.length() > 0) hum.append(',');
-                            hum.append(v);
-                        }
-                    }
+                    if (!"temp".equals(metric) && !"humidity".equals(metric) && !"lux".equals(metric)) continue;
+                    double v = rs.getDouble("v");
+                    double[] row = series.computeIfAbsent(x, k -> new double[]{ -1, -1, -1 });
+                    if ("temp".equals(metric)) row[0] = v;
+                    else if ("humidity".equals(metric)) row[1] = v;
+                    else row[2] = v;
                 }
             }
+        }
+        StringBuilder dates = new StringBuilder();
+        StringBuilder temp = new StringBuilder();
+        StringBuilder hum = new StringBuilder();
+        StringBuilder lux = new StringBuilder();
+        for (Map.Entry<String, double[]> e : series.entrySet()) {
+            if (dates.length() > 0) dates.append(',');
+            dates.append(Json.str(e.getKey()));
+            double[] row = e.getValue();
+            appendNum(temp, row[0]);
+            appendNum(hum, row[1]);
+            appendNum(lux, row[2]);
         }
         return "{\"code\":0,\"data\":{"
                 + "\"dates\":[" + dates + "]"
                 + ",\"temp\":[" + temp + "]"
-                + ",\"humidity\":[" + hum + "]}"
+                + ",\"humidity\":[" + hum + "]"
+                + ",\"lux\":[" + lux + "]}"
                 + "}";
+    }
+
+    /** 把数值追加到逗号分隔序列里：缺失（<0，哨兵值）输出 null，让前端画图显示断点 */
+    private static void appendNum(StringBuilder sb, double v) {
+        if (sb.length() > 0) sb.append(',');
+        sb.append(v < 0 ? "null" : String.valueOf(v));
     }
 
     /** 各指标由哪些设备类型提供（数据查询只统计对应类型设备，避免灌溉设备等的板子数据混入） */
@@ -1139,17 +1160,14 @@ public class Api {
             }
         }
 
-        // 用户想看实时数据 → 附带跳转监测页的按钮
-        String actionJson = "null";
-        if (wantsRealtime(question)) {
-            actionJson = "{\"text\":\"查看实时数据\",\"href\":\"monitoring.html\"}";
-        }
+        // 按问题意图生成跳转按钮（控制灌溉/历史趋势/告警/监测/设备/总览），供前端在回答下方展示
+        String actionsJson = detectActions(question);
 
         // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
         String sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
 
         return "{\"code\":0,\"data\":{\"answer\":" + Json.str(answer)
-                + ",\"action\":" + actionJson + ",\"conversationId\":"
+                + ",\"actions\":" + actionsJson + ",\"conversationId\":"
                 + (conversationId == null ? "null" : conversationId)
                 + ",\"sources\":" + sourcesJson + "}}";
     }
@@ -1162,13 +1180,59 @@ public class Api {
         return "";
     }
 
-    /** 判断用户是否想查看实时数据（命中关键词则回答附带跳转监测页的按钮） */
-    private static boolean wantsRealtime(String q) {
-        if (q == null || q.isEmpty()) return false;
+    /**
+     * 按问题关键词检测用户意图，返回可点击的跳转按钮 JSON 数组（最多 3 个、按 href 去重）。
+     * 例：问"我想控制灌溉" → 去设备控制页；问"看下历史趋势" → 去历史趋势页；问"现在该浇水吗" → 去控制灌溉页。
+     */
+    private static String detectActions(String q) {
+        if (q == null || q.isEmpty()) return "[]";
         String s = q.replaceAll("[？?。.，,、\\s]", "");
-        String[] kws = {"实时", "监测", "温湿度", "查看数据", "看下数据", "看数据", "现在多少", "当前多少",
-                        "现在温度", "当前温度", "现在湿度", "当前湿度", "现在光照", "当前光照",
-                        "打开监测", "进入监测", "数据多少", "多少度", "多少湿度"};
+        List<String[]> list = new ArrayList<>();
+
+        // 控制灌溉
+        if (containsAny(s, new String[]{"灌溉", "浇水", "控制设备", "电磁阀", "开灌", "关灌", "开水", "关水", "开闸", "关闸"})) {
+            list.add(new String[]{"去控制灌溉", "control.html"});
+        }
+        // 历史趋势
+        if (containsAny(s, new String[]{"历史趋势", "历史数据", "历史记录", "看趋势", "历史"})) {
+            list.add(new String[]{"查看历史趋势", "history.html"});
+        }
+        // 告警 / 阈值
+        if (containsAny(s, new String[]{"告警", "警报", "报警", "预警", "阈值"})) {
+            list.add(new String[]{"查看告警", "alarm.html"});
+        }
+        // 实时数据 / 监测
+        if (containsAny(s, new String[]{"实时", "监测", "温湿度", "数据监测", "查看数据", "看下数据", "看数据",
+                "打开监测", "进入监测", "现在温度", "当前温度", "现在湿度", "当前湿度",
+                "现在光照", "当前光照", "多少度", "多少湿度"})) {
+            list.add(new String[]{"查看实时数据", "monitoring.html"});
+        }
+        // 设备管理
+        if (containsAny(s, new String[]{"设备管理", "绑定设备", "新增设备", "解绑", "设备列表"})) {
+            list.add(new String[]{"去设备管理", "devices.html"});
+        }
+        // 数据总览
+        if (containsAny(s, new String[]{"数据总览", "总览", "概况"})) {
+            list.add(new String[]{"查看数据总览", "index.html"});
+        }
+
+        // 按 href 去重，最多返回 3 个按钮
+        StringBuilder sb = new StringBuilder("[");
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        int n = 0;
+        for (String[] b : list) {
+            if (n >= 3) break;
+            if (!seen.add(b[1])) continue;
+            if (n > 0) sb.append(',');
+            sb.append("{\"text\":").append(Json.str(b[0]))
+              .append(",\"href\":").append(Json.str(b[1])).append('}');
+            n++;
+        }
+        return sb.append(']').toString();
+    }
+
+    /** 判断字符串 s 是否包含关键词数组里的任意一个 */
+    private static boolean containsAny(String s, String[] kws) {
         for (String kw : kws) {
             if (s.contains(kw)) return true;
         }
