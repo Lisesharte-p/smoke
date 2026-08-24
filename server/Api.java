@@ -6,7 +6,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
@@ -27,6 +31,18 @@ import java.util.Map;
  * 每个接口独立一个方法，路由在 handle() 里分发；以后新增接口加一行即可。
  */
 public class Api {
+
+    /* ==================================================================
+       和风天气接入配置（天气预报）
+       后端队友只需两步：
+         1. 去和风天气控制台 console.qweather.com 创建应用，复制 API Key 填到 QW_API_KEY；
+         2. 把 QW_LOCATION 改成基地的 LocationID（城市 ID）或经纬度 "经度,纬度"。
+       填好后数据总览的「天气预报」即显示真实天气；未填 Key 时接口返回 code=1，
+       前端自动降级为本地模拟数据，不影响页面展示。
+       ================================================================== */
+    private static final String QW_API_KEY = "";              // TODO: 填和风天气 API Key
+    private static final String QW_LOCATION = "101010100";    // 基地 LocationID（示例：北京），或 "116.41,39.92"
+    private static final String QW_HOST = "https://devapi.qweather.com"; // 免费订阅用 devapi，付费版用 api.qweather.com
 
     /** 处理 /api/* 请求，返回 true 表示已处理（false 交给 WebServer 走静态页面） */
     public static boolean handle(HttpExchange ex) throws IOException {
@@ -141,6 +157,12 @@ public class Api {
             /* ---------- 农事建议 ---------- */
             if ("GET".equals(method) && path.equals("/api/advice")) {
                 ok(ex, adviceJson());
+                return true;
+            }
+
+            /* ---------- 天气预报 ---------- */
+            if ("GET".equals(method) && path.equals("/api/weather")) {
+                ok(ex, weatherJson());
                 return true;
             }
 
@@ -844,6 +866,125 @@ public class Api {
     private static String numStr(BigDecimal b) {
         if (b == null) return "";
         return b.stripTrailingZeros().toPlainString();
+    }
+
+    /* ==================================================================
+       天气预报（和风天气）
+       返回前端数据总览「天气预报」板块所需形状：
+       {code:0, data:{now:{icon,text,temp,humidity,wind}, forecast:[{day,icon,text,high,low}]}}
+       未配 Key 或调用失败时返回 code=1，前端自动降级为模拟数据。
+       ================================================================== */
+
+    private static String weatherJson() {
+        if (QW_API_KEY == null || QW_API_KEY.trim().isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("天气接口未配置：请在 Api.java 填写和风天气 QW_API_KEY") + "}";
+        }
+        try {
+            Map<String, String> now = fetchQWeatherNow();
+            List<Map<String, String>> daily = fetchQWeatherDaily();
+
+            String nowJson = "{\"icon\":" + Json.str(iconEmoji(now.get("icon")))
+                    + ",\"text\":" + Json.str(now.get("text"))
+                    + ",\"temp\":" + Json.str(now.get("temp") + "℃")
+                    + ",\"humidity\":" + Json.str(now.get("humidity") + "%")
+                    + ",\"wind\":" + Json.str(windText(now))
+                    + "}";
+
+            StringBuilder fc = new StringBuilder("[");
+            for (int i = 0; i < daily.size(); i++) {
+                if (i > 0) fc.append(',');
+                Map<String, String> d = daily.get(i);
+                fc.append("{\"day\":").append(Json.str(dayLabel(i, d.get("fxDate"))))
+                  .append(",\"icon\":").append(Json.str(iconEmoji(d.get("iconDay"))))
+                  .append(",\"text\":").append(Json.str(d.get("textDay")))
+                  .append(",\"high\":").append(qwNum(d.get("tempMax")))
+                  .append(",\"low\":").append(qwNum(d.get("tempMin")))
+                  .append('}');
+            }
+            fc.append(']');
+
+            return "{\"code\":0,\"data\":{\"now\":" + nowJson + ",\"forecast\":" + fc + "}}";
+        } catch (Exception e) {
+            return "{\"code\":1,\"msg\":" + Json.str("天气获取失败: " + e.getMessage()) + "}";
+        }
+    }
+
+    /** 实时天气：请求 /v7/weather/now，返回 now 对象 */
+    private static Map<String, String> fetchQWeatherNow() throws IOException {
+        String body = httpGet(QW_HOST + "/v7/weather/now?location=" + QW_LOCATION + "&key=" + QW_API_KEY);
+        Map<String, String> root = Json.parseObject(body);
+        if (!"200".equals(root.get("code"))) {
+            throw new IOException("和风天气返回 code=" + root.get("code"));
+        }
+        return Json.parseObject(root.get("now"));
+    }
+
+    /** 3 天预报：请求 /v7/weather/3d，返回 daily 数组 */
+    private static List<Map<String, String>> fetchQWeatherDaily() throws IOException {
+        String body = httpGet(QW_HOST + "/v7/weather/3d?location=" + QW_LOCATION + "&key=" + QW_API_KEY);
+        Map<String, String> root = Json.parseObject(body);
+        if (!"200".equals(root.get("code"))) {
+            throw new IOException("和风天气返回 code=" + root.get("code"));
+        }
+        return Json.parseArray(root.get("daily"));
+    }
+
+    /** 简易 HTTP GET，返回响应体（UTF-8） */
+    private static String httpGet(String urlStr) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.setRequestProperty("Accept", "application/json");
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            return sb.toString();
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    /** 和风天气图标代码 → emoji（前端用 emoji 展示） */
+    private static String iconEmoji(String code) {
+        if (code == null) return "🌤️";
+        int c;
+        try { c = Integer.parseInt(code.trim()); } catch (NumberFormatException e) { return "🌤️"; }
+        if (c == 100) return "☀️";                     // 晴
+        if (c == 101 || c == 102 || c == 103) return "⛅"; // 多云 / 少云 / 晴间多云
+        if (c == 104) return "☁️";                     // 阴
+        if (c >= 300 && c <= 399) return "🌧️";         // 雨
+        if (c >= 400 && c <= 499) return "❄️";         // 雪
+        if (c >= 500 && c <= 515) return "🌫️";         // 雾 / 霾
+        return "🌤️";
+    }
+
+    /** 风向 + 风级文本 */
+    private static String windText(Map<String, String> now) {
+        String dir = now.get("windDir");
+        String scale = now.get("windScale");
+        if (dir == null || dir.isEmpty()) dir = "无风";
+        return dir + (scale == null || scale.isEmpty() ? "" : " " + scale + " 级");
+    }
+
+    /** 预报日期标签：今天 / 明天 / 后天 / M/d */
+    private static String dayLabel(int i, String fxDate) {
+        if (i == 0) return "今天";
+        if (i == 1) return "明天";
+        if (i == 2) return "后天";
+        if (fxDate != null && fxDate.length() >= 10) {
+            return fxDate.substring(5, 7) + "/" + fxDate.substring(8, 10);
+        }
+        return "第" + (i + 1) + "天";
+    }
+
+    /** 和风温度字符串转数字字面量（"28"→28，null/空→0） */
+    private static String qwNum(String s) {
+        if (s == null || s.trim().isEmpty()) return "0";
+        try { return new BigDecimal(s.trim()).stripTrailingZeros().toPlainString(); }
+        catch (NumberFormatException e) { return "0"; }
     }
 
     /* ==================================================================

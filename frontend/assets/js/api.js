@@ -27,6 +27,7 @@ window.API = (function () {
       boardRefresh:'/api/board/refresh',
       registerRequests: '/api/register-requests',
       advice:     '/api/advice',
+      weather:    '/api/weather',
       chat:       '/api/assistant/chat'
     }
   };
@@ -235,6 +236,18 @@ window.API = (function () {
   }
 
   /* ==================================================================
+     天气预报（后端接和风天气；未配 Key 或调用失败时降级为 mock）
+     ================================================================== */
+  function getWeather() {
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.weather }, 300);
+    return request(config.endpoints.weather).then(function (res) {
+      // 后端未配置 / 调用失败时回退到本地模拟天气，保证板块始终有内容
+      if (res && res.code === 0 && res.data) return res;
+      return { code: 0, data: window.MOCK.weather };
+    });
+  }
+
+  /* ==================================================================
      智能问答
      ================================================================== */
   function getChatReply(question) {
@@ -265,6 +278,7 @@ window.API = (function () {
     getControlLogs: getControlLogs,
     refreshBoard: refreshBoard,
     getAdvice: getAdvice,
+    getWeather: getWeather,
     getChatReply: getChatReply
   };
 })();

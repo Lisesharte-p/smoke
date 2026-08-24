@@ -87,6 +87,51 @@ public class Json {
         return map;
     }
 
+    /**
+     * 解析 JSON 数组 [{"a":1},{"b":2}] → List<Map<key, 原始值>>。
+     * 切分顶层元素后逐个交给 parseObject 解析（天气预报接口用）。
+     */
+    public static List<Map<String, String>> parseArray(String json) {
+        List<Map<String, String>> list = new ArrayList<>();
+        if (json == null) return list;
+        String s = json.trim();
+        if (s.startsWith("[")) s = s.substring(1);
+        if (s.endsWith("]")) s = s.substring(0, s.length() - 1);
+
+        List<String> items = new ArrayList<>();
+        boolean inStr = false;
+        int depth = 0;
+        StringBuilder cur = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inStr) {
+                cur.append(c);
+                if (c == '\\') { if (i + 1 < s.length()) cur.append(s.charAt(++i)); }
+                else if (c == '"') inStr = false;
+            } else if (c == '"') {
+                inStr = true;
+                cur.append(c);
+            } else if (c == '{' || c == '[') {
+                depth++;
+                cur.append(c);
+            } else if (c == '}' || c == ']') {
+                depth--;
+                cur.append(c);
+            } else if (c == ',' && depth == 0) {
+                items.add(cur.toString());
+                cur.setLength(0);
+            } else {
+                cur.append(c);
+            }
+        }
+        if (cur.length() > 0) items.add(cur.toString());
+
+        for (String item : items) {
+            list.add(parseObject(item));
+        }
+        return list;
+    }
+
     /** 去掉首尾引号并反转义（仅处理字符串值） */
     private static String unquote(String s) {
         if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {
