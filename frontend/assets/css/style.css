@@ -1651,6 +1651,181 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   word-break: break-all;
 }
 
+.detection-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.switch-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #22c55e;
+}
+
+.detection-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.detection-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.detection-form span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.camera-records {
+  margin-top: 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, .16);
+  background: rgba(15, 23, 42, .72);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+}
+
+.camera-records .card-header {
+  margin-bottom: 14px;
+}
+
+.camera-records input[type="date"] {
+  width: 160px;
+}
+
+.detection-record-list {
+  display: grid;
+  gap: 10px;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px dashed rgba(148, 163, 184, .2);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.detection-record {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .14);
+  background: rgba(2, 6, 23, .28);
+}
+
+.record-thumb {
+  position: relative;
+  width: 148px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgba(34, 211, 238, .24);
+  border-radius: 8px;
+  background: #020617;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.record-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.record-thumb span {
+  position: absolute;
+  inset: auto 8px 8px auto;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(2, 6, 23, .72);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.record-main {
+  min-width: 0;
+}
+
+.record-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-meta {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.record-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.detection-modal {
+  max-width: min(960px, calc(100vw - 32px));
+}
+
+.detection-modal .modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.detection-modal .modal-title {
+  margin-bottom: 4px;
+}
+
+.modal-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.modal-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .72);
+  color: var(--text);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.detection-modal video {
+  width: 100%;
+  max-height: 70vh;
+  display: block;
+  border-radius: 8px;
+  background: #020617;
+}
+
 @media (max-width: 1080px) {
   .camera-layout {
     grid-template-columns: 1fr;
@@ -1669,6 +1844,19 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
     justify-content: flex-start;
   }
   .camera-actions select {
+    width: 100%;
+  }
+  .detection-record {
+    grid-template-columns: 1fr;
+  }
+  .record-thumb {
+    width: 100%;
+  }
+  .camera-records .card-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .camera-records input[type="date"] {
     width: 100%;
   }
 }

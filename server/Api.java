@@ -11,16 +11,21 @@ import java.net.HttpURLConnection;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -73,6 +78,15 @@ public class Api {
     private static final String QW_LOCATION = env("QWEATHER_LOCATION", "106.565952,29.642614"); // 重庆两江新区，和风格式：经度,纬度
     private static final String QW_HOST = trimTrailingSlash(env("QWEATHER_HOST", "https://ma5rk8cjh3.re.qweatherapi.com"));
 
+    /* ==================================================================
+       YOLO 人体识别配置
+       DETECTION_STORAGE_DIR：识别截图和回放视频保存目录，默认 data/detections
+       DETECTION_WORKER_TOKEN：worker 调内部接口的令牌；为空时仅允许本机访问内部接口
+       ================================================================== */
+    private static final Path DETECTION_STORAGE = Paths.get(env("DETECTION_STORAGE_DIR", "data/detections"))
+            .toAbsolutePath().normalize();
+    private static final String DETECTION_WORKER_TOKEN = env("DETECTION_WORKER_TOKEN", "");
+
     /** 处理 /api/* 请求，返回 true 表示已处理（false 交给 WebServer 走静态页面） */
     public static boolean handle(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
@@ -112,6 +126,44 @@ public class Api {
             /* ---------- 摄像头画面（MJPEG/HTTP 代理，供浏览器同源播放） ---------- */
             if ("GET".equals(method) && path.equals("/api/camera/mjpeg")) {
                 streamCameraMjpeg(ex);
+                return true;
+            }
+            if ("GET".equals(method) && path.equals("/api/camera/detection-records")) {
+                ok(ex, detectionRecordsJson(ex.getRequestURI().getQuery()));
+                return true;
+            }
+            if ("GET".equals(method) && path.matches("/api/camera/detection-records/[0-9]+/video")) {
+                streamDetectionFile(ex, path.substring("/api/camera/detection-records/".length(),
+                        path.length() - "/video".length()), true);
+                return true;
+            }
+            if ("GET".equals(method) && path.matches("/api/camera/detection-records/[0-9]+/snapshot")) {
+                streamDetectionFile(ex, path.substring("/api/camera/detection-records/".length(),
+                        path.length() - "/snapshot".length()), false);
+                return true;
+            }
+            if ("GET".equals(method) && path.matches("/api/camera/detection-records/[0-9]+")) {
+                ok(ex, detectionRecordDetailJson(path.substring("/api/camera/detection-records/".length())));
+                return true;
+            }
+            if ("GET".equals(method) && path.equals("/api/camera/detection/status")) {
+                ok(ex, detectionStatusJson(ex.getRequestURI().getQuery()));
+                return true;
+            }
+            if ("POST".equals(method) && path.equals("/api/camera/detection/settings")) {
+                ok(ex, saveDetectionSettingsJson(ex));
+                return true;
+            }
+            if ("GET".equals(method) && path.equals("/api/internal/camera-configs")) {
+                ok(ex, internalCameraConfigsJson(ex));
+                return true;
+            }
+            if ("POST".equals(method) && path.equals("/api/internal/detection-records")) {
+                ok(ex, internalCreateDetectionRecordJson(ex));
+                return true;
+            }
+            if ("POST".equals(method) && path.equals("/api/internal/detection-status")) {
+                ok(ex, internalDetectionStatusUpdateJson(ex));
                 return true;
             }
 
@@ -831,6 +883,492 @@ public class Api {
         }
     }
 
+    /** GET /api/camera/detection-records?deviceId=&date= —— 人体识别记录列表。 */
+    private static String detectionRecordsJson(String query) throws SQLException {
+        String deviceId = trimToNull(queryParam(query, "deviceId"));
+        String date = trimToNull(queryParam(query, "date"));
+        StringBuilder sql = new StringBuilder(
+                "SELECT r.id, r.device_id, d.name AS deviceName, r.plot_id, p.name AS plotName," +
+                " r.started_at, r.ended_at, r.confidence, r.snapshot_path, r.video_path," +
+                " r.alarm_id, r.status, r.created_at" +
+                " FROM human_detection_record r" +
+                " LEFT JOIN device d ON d.id = r.device_id" +
+                " LEFT JOIN plot p ON p.id = r.plot_id WHERE 1=1");
+        List<String> params = new ArrayList<>();
+        if (deviceId != null) {
+            sql.append(" AND r.device_id = ?");
+            params.add(deviceId);
+        }
+        if (date != null) {
+            sql.append(" AND DATE(r.started_at) = ?");
+            params.add(date);
+        }
+        sql.append(" ORDER BY r.started_at DESC, r.id DESC LIMIT 100");
+
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) ps.setString(i + 1, params.get(i));
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean first = true;
+                while (rs.next()) {
+                    if (!first) sb.append(',');
+                    first = false;
+                    sb.append(detectionRecordJson(rs));
+                }
+            }
+        }
+        return sb.append("]}").toString();
+    }
+
+    /** GET /api/camera/detection-records/{id} —— 人体识别记录详情。 */
+    private static String detectionRecordDetailJson(String idStr) throws SQLException {
+        long id;
+        try {
+            id = Long.parseLong(idStr);
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+        }
+        String sql =
+                "SELECT r.id, r.device_id, d.name AS deviceName, r.plot_id, p.name AS plotName," +
+                " r.started_at, r.ended_at, r.confidence, r.snapshot_path, r.video_path," +
+                " r.alarm_id, r.status, r.created_at" +
+                " FROM human_detection_record r" +
+                " LEFT JOIN device d ON d.id = r.device_id" +
+                " LEFT JOIN plot p ON p.id = r.plot_id WHERE r.id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "{\"code\":1,\"msg\":" + Json.str("识别记录不存在: " + idStr) + "}";
+                return "{\"code\":0,\"data\":" + detectionRecordJson(rs) + "}";
+            }
+        }
+    }
+
+    private static String detectionRecordJson(ResultSet rs) throws SQLException {
+        long id = rs.getLong("id");
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        Timestamp started = rs.getTimestamp("started_at");
+        Timestamp ended = rs.getTimestamp("ended_at");
+        Timestamp created = rs.getTimestamp("created_at");
+        Object alarm = rs.getObject("alarm_id");
+        return "{"
+                + "\"id\":" + id
+                + ",\"deviceId\":" + Json.str(rs.getString("device_id"))
+                + ",\"deviceName\":" + Json.str(rs.getString("deviceName"))
+                + ",\"plotId\":" + Json.str(rs.getString("plot_id"))
+                + ",\"plotName\":" + Json.str(rs.getString("plotName"))
+                + ",\"startedAt\":" + Json.str(started == null ? "" : fmt.format(started))
+                + ",\"endedAt\":" + Json.str(ended == null ? "" : fmt.format(ended))
+                + ",\"confidence\":" + Json.num(rs.getBigDecimal("confidence"))
+                + ",\"snapshotUrl\":" + Json.str("/api/camera/detection-records/" + id + "/snapshot")
+                + ",\"videoUrl\":" + Json.str("/api/camera/detection-records/" + id + "/video")
+                + ",\"alarmId\":" + (alarm == null ? "null" : String.valueOf(alarm))
+                + ",\"status\":" + Json.str(rs.getString("status"))
+                + ",\"createdAt\":" + Json.str(created == null ? "" : fmt.format(created))
+                + "}";
+    }
+
+    /** GET /api/camera/detection-records/{id}/video|snapshot —— 回放或截图。 */
+    private static void streamDetectionFile(HttpExchange ex, String idStr, boolean video) throws IOException, SQLException {
+        long id;
+        try {
+            id = Long.parseLong(idStr);
+        } catch (NumberFormatException e) {
+            send(ex, 400, "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}");
+            return;
+        }
+        String column = video ? "video_path" : "snapshot_path";
+        String rel = null;
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT " + column + " FROM human_detection_record WHERE id = ?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) rel = rs.getString(1);
+            }
+        }
+        if (rel == null || rel.trim().isEmpty()) {
+            send(ex, 404, "{\"code\":1,\"msg\":" + Json.str(video ? "回放视频不存在" : "识别截图不存在") + "}");
+            return;
+        }
+        Path file = resolveDetectionFile(rel);
+        if (video) {
+            Path webFile = webPlaybackFile(file);
+            if (webFile != null && Files.isRegularFile(webFile)) file = webFile;
+        }
+        if (file == null || !Files.isRegularFile(file)) {
+            send(ex, 404, "{\"code\":1,\"msg\":" + Json.str("文件不存在: " + rel) + "}");
+            return;
+        }
+        streamFileRange(ex, file, video ? "video/mp4" : imageMime(file));
+    }
+
+    private static Path resolveDetectionFile(String storedPath) {
+        String p = storedPath.replace('\\', '/').trim();
+        Path file = Paths.get(p);
+        if (!file.isAbsolute()) file = DETECTION_STORAGE.resolve(p);
+        file = file.toAbsolutePath().normalize();
+        return file.startsWith(DETECTION_STORAGE) ? file : null;
+    }
+
+    private static Path webPlaybackFile(Path file) {
+        if (file == null) return null;
+        String name = file.getFileName().toString();
+        if (!name.toLowerCase().endsWith(".mp4")) return null;
+        String webName = name.substring(0, name.length() - 4) + ".web.mp4";
+        Path webFile = file.getParent().resolve(webName).toAbsolutePath().normalize();
+        return webFile.startsWith(DETECTION_STORAGE) ? webFile : null;
+    }
+
+    private static String imageMime(Path file) {
+        String name = file.getFileName().toString().toLowerCase();
+        if (name.endsWith(".png")) return "image/png";
+        if (name.endsWith(".webp")) return "image/webp";
+        return "image/jpeg";
+    }
+
+    private static void streamFileRange(HttpExchange ex, Path file, String contentType) throws IOException {
+        long size = Files.size(file);
+        long start = 0;
+        long end = size - 1;
+        int status = 200;
+        String range = ex.getRequestHeaders().getFirst("Range");
+        if (range != null && range.startsWith("bytes=")) {
+            String spec = range.substring("bytes=".length());
+            int dash = spec.indexOf('-');
+            try {
+                if (dash >= 0) {
+                    String a = spec.substring(0, dash).trim();
+                    String b = spec.substring(dash + 1).trim();
+                    if (!a.isEmpty()) start = Long.parseLong(a);
+                    if (!b.isEmpty()) end = Long.parseLong(b);
+                } else {
+                    start = Long.parseLong(spec.trim());
+                }
+                if (start < 0 || start >= size) start = 0;
+                if (end < start || end >= size) end = size - 1;
+                status = 206;
+                ex.getResponseHeaders().set("Content-Range", "bytes " + start + "-" + end + "/" + size);
+            } catch (NumberFormatException ignore) {
+                start = 0;
+                end = size - 1;
+            }
+        }
+        long len = end - start + 1;
+        ex.getResponseHeaders().set("Content-Type", contentType);
+        ex.getResponseHeaders().set("Accept-Ranges", "bytes");
+        ex.getResponseHeaders().set("Cache-Control", "no-cache");
+        ex.sendResponseHeaders(status, len);
+        try (InputStream in = Files.newInputStream(file);
+             OutputStream out = ex.getResponseBody()) {
+            long skipped = 0;
+            while (skipped < start) {
+                long n = in.skip(start - skipped);
+                if (n <= 0) break;
+                skipped += n;
+            }
+            byte[] buf = new byte[8192];
+            long remaining = len;
+            while (remaining > 0) {
+                int n = in.read(buf, 0, (int) Math.min(buf.length, remaining));
+                if (n == -1) break;
+                out.write(buf, 0, n);
+                remaining -= n;
+            }
+        }
+    }
+
+    /** GET /api/camera/detection/status?deviceId= —— 摄像头人体识别状态。 */
+    private static String detectionStatusJson(String query) throws SQLException {
+        String deviceId = trimToNull(queryParam(query, "deviceId"));
+        DetectionSetting s = detectionSetting(deviceId);
+        String lastTime = null;
+        String lastId = null;
+        String workerStatus = "unknown";
+        String workerMessage = null;
+        String workerLastSeen = null;
+        boolean workerOnline = false;
+        String sql = "SELECT id, started_at FROM human_detection_record" +
+                (deviceId == null ? "" : " WHERE device_id = ?") +
+                " ORDER BY started_at DESC, id DESC LIMIT 1";
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (deviceId != null) ps.setString(1, deviceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    lastId = String.valueOf(rs.getLong("id"));
+                    Timestamp ts = rs.getTimestamp("started_at");
+                    lastTime = ts == null ? "" : fmt.format(ts);
+                }
+            }
+        }
+        if (deviceId != null) {
+            String runtimeSql = "SELECT worker_status, message, last_seen, last_seen >= DATE_SUB(NOW(), INTERVAL 60 SECOND) AS online" +
+                    " FROM camera_detection_runtime WHERE device_id = ?";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(runtimeSql)) {
+                ps.setString(1, deviceId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        workerStatus = rs.getString("worker_status");
+                        workerMessage = rs.getString("message");
+                        Timestamp ts = rs.getTimestamp("last_seen");
+                        workerLastSeen = ts == null ? "" : fmt.format(ts);
+                        workerOnline = rs.getInt("online") == 1 && "running".equals(workerStatus);
+                    }
+                }
+            }
+        }
+        return "{\"code\":0,\"data\":{"
+                + "\"deviceId\":" + Json.str(deviceId)
+                + ",\"enabled\":" + s.enabled
+                + ",\"confidenceThreshold\":" + Json.num(s.confidenceThreshold)
+                + ",\"cooldownSeconds\":" + s.cooldownSeconds
+                + ",\"preSeconds\":" + s.preSeconds
+                + ",\"postSeconds\":" + s.postSeconds
+                + ",\"workerOnline\":" + workerOnline
+                + ",\"workerStatus\":" + Json.str(workerStatus)
+                + ",\"workerMessage\":" + Json.str(workerMessage)
+                + ",\"workerLastSeen\":" + Json.str(workerLastSeen)
+                + ",\"lastRecordId\":" + (lastId == null ? "null" : lastId)
+                + ",\"lastRecordAt\":" + Json.str(lastTime)
+                + "}}";
+    }
+
+    /** POST /api/camera/detection/settings —— 保存摄像头人体识别开关/参数。 */
+    private static String saveDetectionSettingsJson(HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String deviceId = trimToNull(body.get("deviceId"));
+        if (deviceId == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少参数：deviceId 必填") + "}";
+        }
+        DetectionSetting old = detectionSetting(deviceId);
+        Boolean enabled = parseBooleanBox(body.get("enabled"));
+        BigDecimal confidence = nullableDecimal(body.get("confidenceThreshold"), old.confidenceThreshold);
+        int cooldown = nullableInt(body.get("cooldownSeconds"), old.cooldownSeconds);
+        int pre = nullableInt(body.get("preSeconds"), old.preSeconds);
+        int post = nullableInt(body.get("postSeconds"), old.postSeconds);
+        if (confidence.compareTo(new BigDecimal("0.01")) < 0 || confidence.compareTo(new BigDecimal("0.99")) > 0) {
+            return "{\"code\":1,\"msg\":" + Json.str("置信度阈值需在 0.01-0.99 之间") + "}";
+        }
+        if (cooldown < 0 || pre < 0 || post < 1 || pre > 60 || post > 120) {
+            return "{\"code\":1,\"msg\":" + Json.str("录像参数超出范围") + "}";
+        }
+        String sql = "INSERT INTO camera_detection_setting(device_id, enabled, confidence_threshold, cooldown_seconds, pre_seconds, post_seconds)" +
+                " VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled)," +
+                " confidence_threshold=VALUES(confidence_threshold), cooldown_seconds=VALUES(cooldown_seconds)," +
+                " pre_seconds=VALUES(pre_seconds), post_seconds=VALUES(post_seconds)";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            ps.setInt(2, enabled == null ? (old.enabled ? 1 : 0) : (enabled ? 1 : 0));
+            ps.setBigDecimal(3, confidence);
+            ps.setInt(4, cooldown);
+            ps.setInt(5, pre);
+            ps.setInt(6, post);
+            ps.executeUpdate();
+        }
+        return detectionStatusJson("deviceId=" + deviceId);
+    }
+
+    private static class DetectionSetting {
+        boolean enabled = true;
+        BigDecimal confidenceThreshold = new BigDecimal("0.50");
+        int cooldownSeconds = 30;
+        int preSeconds = 5;
+        int postSeconds = 10;
+    }
+
+    private static DetectionSetting detectionSetting(String deviceId) throws SQLException {
+        DetectionSetting s = new DetectionSetting();
+        if (deviceId == null) return s;
+        String sql = "SELECT enabled, confidence_threshold, cooldown_seconds, pre_seconds, post_seconds" +
+                " FROM camera_detection_setting WHERE device_id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    s.enabled = rs.getInt("enabled") == 1;
+                    if (rs.getBigDecimal("confidence_threshold") != null) s.confidenceThreshold = rs.getBigDecimal("confidence_threshold");
+                    s.cooldownSeconds = rs.getInt("cooldown_seconds");
+                    s.preSeconds = rs.getInt("pre_seconds");
+                    s.postSeconds = rs.getInt("post_seconds");
+                }
+            }
+        }
+        return s;
+    }
+
+    private static BigDecimal nullableDecimal(String raw, BigDecimal def) {
+        String v = trimToNull(raw);
+        return v == null || "null".equalsIgnoreCase(v) ? def : new BigDecimal(v);
+    }
+
+    private static int nullableInt(String raw, int def) {
+        String v = trimToNull(raw);
+        return v == null || "null".equalsIgnoreCase(v) ? def : Integer.parseInt(v);
+    }
+
+    private static Boolean parseBooleanBox(String raw) {
+        String v = trimToNull(raw);
+        if (v == null || "null".equalsIgnoreCase(v)) return null;
+        return "true".equalsIgnoreCase(v) || "1".equals(v) || "on".equalsIgnoreCase(v);
+    }
+
+    /** GET /api/internal/camera-configs —— worker 拉取摄像头配置。 */
+    private static String internalCameraConfigsJson(HttpExchange ex) throws SQLException {
+        if (!allowInternalWorker(ex)) {
+            return "{\"code\":1,\"msg\":" + Json.str("未授权的识别 worker 请求") + "}";
+        }
+        String sql =
+                "SELECT d.id, d.name, d.plot_id, p.name AS plotName, d.ip, d.port, d.protocol, d.username, d.password," +
+                " COALESCE(s.enabled, 1) AS enabled, COALESCE(s.confidence_threshold, 0.50) AS confidence_threshold," +
+                " COALESCE(s.cooldown_seconds, 30) AS cooldown_seconds, COALESCE(s.pre_seconds, 5) AS pre_seconds," +
+                " COALESCE(s.post_seconds, 10) AS post_seconds" +
+                " FROM device d LEFT JOIN plot p ON p.id = d.plot_id" +
+                " LEFT JOIN camera_detection_setting s ON s.device_id = d.id" +
+                " WHERE d.type = '摄像头' ORDER BY d.id";
+        StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            boolean first = true;
+            while (rs.next()) {
+                if (!first) sb.append(',');
+                first = false;
+                sb.append('{')
+                  .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
+                  .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
+                  .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
+                  .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
+                  .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
+                  .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
+                  .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
+                  .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
+                  .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
+                  .append("\"enabled\":").append(rs.getInt("enabled") == 1).append(',')
+                  .append("\"confidenceThreshold\":").append(Json.num(rs.getBigDecimal("confidence_threshold"))).append(',')
+                  .append("\"cooldownSeconds\":").append(rs.getInt("cooldown_seconds")).append(',')
+                  .append("\"preSeconds\":").append(rs.getInt("pre_seconds")).append(',')
+                  .append("\"postSeconds\":").append(rs.getInt("post_seconds"))
+                  .append('}');
+            }
+        }
+        return sb.append("]}").toString();
+    }
+
+    /** POST /api/internal/detection-records —— worker 上报一次人体识别事件并生成告警。 */
+    private static String internalCreateDetectionRecordJson(HttpExchange ex) throws IOException, SQLException {
+        if (!allowInternalWorker(ex)) {
+            return "{\"code\":1,\"msg\":" + Json.str("未授权的识别 worker 请求") + "}";
+        }
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String deviceId = trimToNull(body.get("deviceId"));
+        String startedAt = trimToNull(body.get("startedAt"));
+        String endedAt = trimToNull(body.get("endedAt"));
+        String videoPath = trimToNull(body.get("videoPath"));
+        String snapshotPath = trimToNull(body.get("snapshotPath"));
+        BigDecimal confidence = nullableDecimal(body.get("confidence"), null);
+        if (deviceId == null || startedAt == null || endedAt == null || videoPath == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：deviceId/startedAt/endedAt/videoPath 必填") + "}";
+        }
+        String plotId = null;
+        String deviceName = null;
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT plot_id, name FROM device WHERE id = ? AND type = '摄像头'")) {
+            ps.setString(1, deviceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "{\"code\":1,\"msg\":" + Json.str("摄像头设备不存在: " + deviceId) + "}";
+                plotId = rs.getString("plot_id");
+                deviceName = rs.getString("name");
+            }
+        }
+        long recordId;
+        long alarmId;
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO alarm(plot_id, device_id, alarm_type, value, level, status) VALUES (?, ?, ?, ?, ?, '未处理')",
+                        Statement.RETURN_GENERATED_KEYS)) {
+                    ps.setString(1, plotId);
+                    ps.setString(2, deviceId);
+                    ps.setString(3, "人体入侵");
+                    ps.setString(4, confidence == null ? deviceName : "置信度 " + confidence.stripTrailingZeros().toPlainString());
+                    ps.setString(5, "严重");
+                    ps.executeUpdate();
+                    try (ResultSet keys = ps.getGeneratedKeys()) {
+                        keys.next();
+                        alarmId = keys.getLong(1);
+                    }
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO human_detection_record(device_id, plot_id, started_at, ended_at, confidence, snapshot_path, video_path, alarm_id, status)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, '未处理')",
+                        Statement.RETURN_GENERATED_KEYS)) {
+                    ps.setString(1, deviceId);
+                    ps.setString(2, plotId);
+                    ps.setTimestamp(3, Timestamp.valueOf(startedAt));
+                    ps.setTimestamp(4, Timestamp.valueOf(endedAt));
+                    ps.setBigDecimal(5, confidence);
+                    ps.setString(6, snapshotPath);
+                    ps.setString(7, videoPath);
+                    ps.setLong(8, alarmId);
+                    ps.executeUpdate();
+                    try (ResultSet keys = ps.getGeneratedKeys()) {
+                        keys.next();
+                        recordId = keys.getLong(1);
+                    }
+                }
+                conn.commit();
+            } catch (SQLException | RuntimeException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
+        return "{\"code\":0,\"data\":{\"id\":" + recordId + ",\"alarmId\":" + alarmId + "}}";
+    }
+
+    /** POST /api/internal/detection-status —— worker 上报运行心跳。 */
+    private static String internalDetectionStatusUpdateJson(HttpExchange ex) throws IOException, SQLException {
+        if (!allowInternalWorker(ex)) {
+            return "{\"code\":1,\"msg\":" + Json.str("未授权的识别 worker 请求") + "}";
+        }
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String deviceId = trimToNull(body.get("deviceId"));
+        String status = trimToNull(body.get("status"));
+        String message = trimToNull(body.get("message"));
+        if (deviceId == null || status == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：deviceId/status 必填") + "}";
+        }
+        if (message != null && message.length() > 255) message = message.substring(0, 255);
+        String sql = "INSERT INTO camera_detection_runtime(device_id, worker_status, message, last_seen) VALUES (?, ?, ?, NOW())" +
+                " ON DUPLICATE KEY UPDATE worker_status=VALUES(worker_status), message=VALUES(message), last_seen=NOW()";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, deviceId);
+            ps.setString(2, status);
+            ps.setString(3, message);
+            ps.executeUpdate();
+        }
+        return "{\"code\":0}";
+    }
+
+    private static boolean allowInternalWorker(HttpExchange ex) {
+        String token = ex.getRequestHeaders().getFirst("X-Detection-Token");
+        if (DETECTION_WORKER_TOKEN != null && !DETECTION_WORKER_TOKEN.isEmpty()) {
+            return DETECTION_WORKER_TOKEN.equals(token);
+        }
+        return ex.getRemoteAddress() != null
+                && ex.getRemoteAddress().getAddress() != null
+                && ex.getRemoteAddress().getAddress().isLoopbackAddress();
+    }
+
     /* ==================================================================
        实时 / 历史数据
        ================================================================== */
@@ -1484,7 +2022,9 @@ public class Api {
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at," +
+                " r.id AS detectionRecordId," +
                 " p.name AS plotName FROM alarm a LEFT JOIN plot p ON p.id = a.plot_id" +
+                " LEFT JOIN human_detection_record r ON r.alarm_id = a.id" +
                 " ORDER BY a.created_at DESC, a.id DESC";
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
         try (Connection conn = DBUtil.getConnection();
@@ -1504,7 +2044,8 @@ public class Api {
                   .append("\"type\":").append(Json.str(rs.getString("alarm_type"))).append(',')
                   .append("\"value\":").append(Json.str(rs.getString("value"))).append(',')
                   .append("\"level\":").append(Json.str(rs.getString("level"))).append(',')
-                  .append("\"status\":").append(Json.str(rs.getString("status")))
+                  .append("\"status\":").append(Json.str(rs.getString("status"))).append(',')
+                  .append("\"detectionRecordId\":").append(rs.getObject("detectionRecordId") == null ? "null" : rs.getLong("detectionRecordId"))
                   .append('}');
             }
         }
@@ -1532,6 +2073,11 @@ public class Api {
             ps.setLong(3, Long.parseLong(id));
             if (ps.executeUpdate() == 0) {
                 return "{\"code\":1,\"msg\":" + Json.str("告警不存在: " + id) + "}";
+            }
+            try (PreparedStatement ps2 = conn.prepareStatement("UPDATE human_detection_record SET status = ? WHERE alarm_id = ?")) {
+                ps2.setString(1, status);
+                ps2.setLong(2, Long.parseLong(id));
+                ps2.executeUpdate();
             }
         } catch (NumberFormatException e) {
             return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
@@ -2416,10 +2962,18 @@ public class Api {
     private static String queryParam(String query, String key) {
         if (query == null) return null;
         for (String kv : query.split("&")) {
-            String[] p = kv.split("=");
-            if (p.length == 2 && key.equals(p[0])) return p[1];
+            String[] p = kv.split("=", 2);
+            if (p.length == 2 && key.equals(urlDecode(p[0]))) return urlDecode(p[1]);
         }
         return null;
+    }
+
+    private static String urlDecode(String s) {
+        try {
+            return URLDecoder.decode(s, StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     /**

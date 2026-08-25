@@ -223,10 +223,38 @@ public class Json {
     /** 去掉首尾引号并反转义（仅处理字符串值） */
     private static String unquote(String s) {
         if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {
-            return s.substring(1, s.length() - 1)
-                    .replace("\\\"", "\"").replace("\\\\", "\\")
-                    .replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t");
+            return unescape(s.substring(1, s.length() - 1));
         }
         return s;
+    }
+
+    private static String unescape(String s) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != '\\' || i + 1 >= s.length()) {
+                out.append(c);
+                continue;
+            }
+            char n = s.charAt(++i);
+            if (n == '"') out.append('"');
+            else if (n == '\\') out.append('\\');
+            else if (n == 'n') out.append('\n');
+            else if (n == 'r') out.append('\r');
+            else if (n == 't') out.append('\t');
+            else if (n == 'u' && i + 4 < s.length()) {
+                String hex = s.substring(i + 1, i + 5);
+                try {
+                    out.append((char) Integer.parseInt(hex, 16));
+                    i += 4;
+                } catch (NumberFormatException e) {
+                    out.append("\\u").append(hex);
+                    i += 4;
+                }
+            } else {
+                out.append(n);
+            }
+        }
+        return out.toString();
     }
 }

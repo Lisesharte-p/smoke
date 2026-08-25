@@ -29,6 +29,9 @@ window.API = (function () {
       registerRequests: '/api/register-requests',
       advice:     '/api/advice',
       weather:    '/api/weather',
+      detectionRecords: '/api/camera/detection-records',
+      detectionStatus:  '/api/camera/detection/status',
+      detectionSettings:'/api/camera/detection/settings',
       chat:       '/api/assistant/chat',
       conversations: '/api/conversations',
       conversation:   '/api/conversations/{id}'
@@ -298,6 +301,43 @@ window.API = (function () {
   }
 
   /* ==================================================================
+     摄像头人体识别
+     ================================================================== */
+  function getDetectionRecords(filter) {
+    filter = filter || {};
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.detectionRecords || [] }, 300);
+    var qs = [];
+    if (filter.deviceId) qs.push('deviceId=' + encodeURIComponent(filter.deviceId));
+    if (filter.date) qs.push('date=' + encodeURIComponent(filter.date));
+    return request(config.endpoints.detectionRecords + (qs.length ? '?' + qs.join('&') : ''));
+  }
+
+  function getDetectionRecord(id) {
+    if (config.useMock) {
+      var list = window.MOCK.detectionRecords || [];
+      var found = null;
+      for (var i = 0; i < list.length; i++) {
+        if (String(list[i].id) === String(id)) { found = list[i]; break; }
+      }
+      return mockDelay({ code: found ? 0 : 1, data: found, msg: found ? 'ok' : '识别记录不存在' }, 200);
+    }
+    return request(config.endpoints.detectionRecords + '/' + encodeURIComponent(id));
+  }
+
+  function getDetectionStatus(deviceId) {
+    if (config.useMock) {
+      return mockDelay({ code: 0, data: { deviceId: deviceId, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30, preSeconds: 5, postSeconds: 10 } }, 200);
+    }
+    var url = config.endpoints.detectionStatus + (deviceId ? '?deviceId=' + encodeURIComponent(deviceId) : '');
+    return request(url);
+  }
+
+  function saveDetectionSettings(data) {
+    if (config.useMock) return mockDelay({ code: 0, data: data }, 250);
+    return request(config.endpoints.detectionSettings, { method: 'POST', data: data });
+  }
+
+  /* ==================================================================
      农事建议（根据实时数据动态生成）
      ================================================================== */
   function getAdvice() {
@@ -387,6 +427,10 @@ window.API = (function () {
     reviewRegisterRequest: reviewRegisterRequest,
     getControlLogs: getControlLogs,
     refreshBoard: refreshBoard,
+    getDetectionRecords: getDetectionRecords,
+    getDetectionRecord: getDetectionRecord,
+    getDetectionStatus: getDetectionStatus,
+    saveDetectionSettings: saveDetectionSettings,
     getAdvice: getAdvice,
     getWeather: getWeather,
     getChatReply: getChatReply,

@@ -23,6 +23,7 @@
           <div class="camera-actions">
             <select class="form-control" id="cameraSelect"></select>
             <button class="btn btn-outline btn-sm" id="reloadCamera" type="button">刷新画面</button>
+            <button class="btn btn-outline btn-sm" id="reloadDetection" type="button">刷新识别</button>
             <a class="btn btn-outline btn-sm" href="devices.html">设备管理</a>
           </div>
         </div>
@@ -63,9 +64,59 @@
                 MJPEG/HTTP 摄像头可直接播放；RTSP 摄像头需要 ffmpeg 或流媒体服务转成浏览器支持的格式。
               </div>
             </div>
+            <div class="camera-panel">
+              <div class="panel-kicker">YOLO</div>
+              <div class="detection-settings">
+                <label class="switch-row">
+                  <input type="checkbox" id="detectionEnabled">
+                  <span>人体识别</span>
+                </label>
+                <div class="detection-form">
+                  <label>
+                    <span>置信度</span>
+                    <input class="form-control" id="confidenceThreshold" type="number" min="0.01" max="0.99" step="0.01">
+                  </label>
+                  <label>
+                    <span>冷却秒数</span>
+                    <input class="form-control" id="cooldownSeconds" type="number" min="0" max="600" step="1">
+                  </label>
+                </div>
+                <button class="btn btn-primary btn-sm" id="saveDetectionSettings" type="button">保存识别设置</button>
+                <div class="panel-text" id="detectionStatus">识别状态加载中</div>
+              </div>
+            </div>
           </aside>
         </div>
+
+        <section class="camera-records">
+          <div class="card-header">
+            <div>
+              <div class="card-title">人体识别记录</div>
+              <div class="card-sub">YOLO 检测到人体时自动保存事件片段，可直接回放</div>
+            </div>
+            <div class="flex gap-8">
+              <input class="form-control" id="recordDate" type="date">
+              <button class="btn btn-outline btn-sm" id="clearRecordDate" type="button">全部日期</button>
+            </div>
+          </div>
+          <div class="detection-record-list" id="detectionRecordList">
+            <div class="empty-state">正在加载识别记录</div>
+          </div>
+        </section>
       </main>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="detectionModal" style="display:none;">
+    <div class="modal detection-modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="detectionModalTitle">识别回放</div>
+          <div class="modal-sub" id="detectionModalSub">--</div>
+        </div>
+        <button class="modal-close" id="closeDetectionModal" type="button">×</button>
+      </div>
+      <video id="detectionVideo" controls playsinline></video>
     </div>
   </div>
 
@@ -78,6 +129,8 @@
 
     var cameras = [];
     var selectedCamera = null;
+    var detectionRecords = [];
+    var initialRecordId = new URLSearchParams(location.search).get('recordId');
 
     function esc(s) {
       return String(s == null ? '' : s)
@@ -115,6 +168,8 @@
     function playCamera(cam) {
       selectedCamera = cam || null;
       renderCameraInfo(selectedCamera);
+      loadDetectionStatus();
+      loadDetectionRecords();
       var img = document.getElementById('cameraImg');
       img.removeAttribute('src');
 
@@ -135,6 +190,155 @@
         setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');
       };
       img.src = cameraUrl(selectedCamera);
+    }
+
+    function loadDetectionStatus() {
+      var text = document.getElementById('detectionStatus');
+      if (!selectedCamera) {
+        text.textContent = '暂无摄像头，人体识别不可用';
+        setDetectionForm({ enabled: false, confidenceThreshold: 0.5, cooldownSeconds: 30 });
+        return;
+      }
+      text.textContent = '正在读取识别设置';
+      API.getDetectionStatus(selectedCamera.id).then(function (res) {
+        if (!res || res.code !== 0) {
+          text.textContent = (res && res.msg) || '识别状态读取失败';
+          return;
+        }
+        setDetectionForm(res.data || {});
+        var d = res.data || {};
+        var state = d.enabled
+          ? (d.workerOnline ? 'worker 在线' : 'worker 未连接')
+          : '识别已关闭';
+        if (d.workerStatus === 'error') state = 'worker 异常';
+        text.textContent = state + (d.workerMessage ? ' · ' + d.workerMessage : '') +
+          (d.lastRecordAt ? (' · 最近识别：' + d.lastRecordAt) : ' · 暂无人体识别记录');
+      }).catch(function (e) {
+        text.textContent = e.message || '识别状态读取失败';
+      });
+    }
+
+    function setDetectionForm(data) {
+      document.getElementById('detectionEnabled').checked = !!data.enabled;
+      document.getElementById('confidenceThreshold').value = data.confidenceThreshold == null ? 0.5 : data.confidenceThreshold;
+      document.getElementById('cooldownSeconds').value = data.cooldownSeconds == null ? 30 : data.cooldownSeconds;
+    }
+
+    function saveDetectionSettings() {
+      if (!selectedCamera) {
+        Toast.error('请先选择摄像头');
+        return;
+      }
+      var confidence = Number(document.getElementById('confidenceThreshold').value);
+      var cooldown = Number(document.getElementById('cooldownSeconds').value);
+      if (isNaN(confidence) || confidence < 0.01 || confidence > 0.99) {
+        Toast.error('置信度阈值需在 0.01-0.99 之间');
+        return;
+      }
+      if (isNaN(cooldown) || cooldown < 0) {
+        Toast.error('冷却秒数必须为非负数字');
+        return;
+      }
+      API.saveDetectionSettings({
+        deviceId: selectedCamera.id,
+        enabled: document.getElementById('detectionEnabled').checked,
+        confidenceThreshold: confidence,
+        cooldownSeconds: Math.round(cooldown)
+      }).then(function (res) {
+        if (!res || res.code !== 0) {
+          Toast.error((res && res.msg) || '保存失败');
+          return;
+        }
+        Toast.success('人体识别设置已保存');
+        loadDetectionStatus();
+      }).catch(function (e) {
+        Toast.error(e.message || '保存失败');
+      });
+    }
+
+    function loadDetectionRecords() {
+      var box = document.getElementById('detectionRecordList');
+      if (!selectedCamera) {
+        box.innerHTML = '<div class="empty-state">暂无摄像头设备</div>';
+        return;
+      }
+      box.innerHTML = '<div class="empty-state">正在加载识别记录</div>';
+      API.getDetectionRecords({
+        deviceId: selectedCamera.id,
+        date: document.getElementById('recordDate').value
+      }).then(function (res) {
+        if (!res || res.code !== 0) {
+          box.innerHTML = '<div class="empty-state">' + esc((res && res.msg) || '识别记录加载失败') + '</div>';
+          return;
+        }
+        detectionRecords = res.data || [];
+        renderDetectionRecords();
+      }).catch(function (e) {
+        box.innerHTML = '<div class="empty-state">' + esc(e.message || '识别记录加载失败') + '</div>';
+      });
+    }
+
+    function renderDetectionRecords() {
+      var box = document.getElementById('detectionRecordList');
+      if (!detectionRecords.length) {
+        box.innerHTML = '<div class="empty-state">暂无人体识别记录</div>';
+        return;
+      }
+      box.innerHTML = detectionRecords.map(function (r) {
+        var confidence = r.confidence == null ? '--' : Math.round(Number(r.confidence) * 100) + '%';
+        return '<article class="detection-record">' +
+          '<button class="record-thumb" data-play="' + esc(r.id) + '" type="button">' +
+            '<img src="' + esc(r.snapshotUrl) + '" alt="人体识别截图" onerror="this.remove()">' +
+            '<span>播放</span>' +
+          '</button>' +
+          '<div class="record-main">' +
+            '<div class="record-title">' + esc(r.deviceName || r.deviceId) + ' · ' + esc(r.plotName || '-') + '</div>' +
+            '<div class="record-meta">' + esc(r.startedAt) + ' - ' + esc(r.endedAt) + '</div>' +
+            '<div class="record-tags">' +
+              '<span class="badge badge-alarm">人体</span>' +
+              '<span class="badge badge-warning">置信度 ' + confidence + '</span>' +
+              '<span class="badge badge-normal">' + esc(r.status || '未处理') + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<button class="btn btn-primary btn-sm" data-play="' + esc(r.id) + '" type="button">回放</button>' +
+        '</article>';
+      }).join('');
+      box.querySelectorAll('[data-play]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          openDetectionModal(btn.getAttribute('data-play'));
+        });
+      });
+    }
+
+    function openDetectionModal(id) {
+      var rec = detectionRecords.filter(function (r) { return String(r.id) === String(id); })[0];
+      if (!rec) {
+        API.getDetectionRecord(id).then(function (res) {
+          if (!res || res.code !== 0 || !res.data) {
+            Toast.error((res && res.msg) || '识别记录不存在');
+            return;
+          }
+          showDetectionModal(res.data);
+        });
+        return;
+      }
+      showDetectionModal(rec);
+    }
+
+    function showDetectionModal(rec) {
+      document.getElementById('detectionModalTitle').textContent = '人体识别回放 #' + rec.id;
+      document.getElementById('detectionModalSub').textContent = (rec.plotName || '-') + ' · ' + rec.startedAt + ' · 置信度 ' + (rec.confidence == null ? '--' : Math.round(Number(rec.confidence) * 100) + '%');
+      var video = document.getElementById('detectionVideo');
+      video.src = rec.videoUrl;
+      document.getElementById('detectionModal').style.display = 'grid';
+    }
+
+    function closeDetectionModal() {
+      var video = document.getElementById('detectionVideo');
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      document.getElementById('detectionModal').style.display = 'none';
     }
 
     function fillCameraSelect() {
@@ -159,6 +363,10 @@
         cameras = (res.data || []).filter(function (d) { return d.type === '摄像头'; });
         fillCameraSelect();
         playCamera(cameras[0]);
+        if (initialRecordId) {
+          openDetectionModal(initialRecordId);
+          initialRecordId = null;
+        }
       }).catch(function (e) {
         setPlaceholder('加载摄像头失败', e.message || '设备接口请求失败');
       });
@@ -170,6 +378,20 @@
     });
     document.getElementById('reloadCamera').addEventListener('click', function () {
       playCamera(selectedCamera);
+    });
+    document.getElementById('reloadDetection').addEventListener('click', function () {
+      loadDetectionStatus();
+      loadDetectionRecords();
+    });
+    document.getElementById('saveDetectionSettings').addEventListener('click', saveDetectionSettings);
+    document.getElementById('recordDate').addEventListener('change', loadDetectionRecords);
+    document.getElementById('clearRecordDate').addEventListener('click', function () {
+      document.getElementById('recordDate').value = '';
+      loadDetectionRecords();
+    });
+    document.getElementById('closeDetectionModal').addEventListener('click', closeDetectionModal);
+    document.getElementById('detectionModal').addEventListener('click', function (e) {
+      if (e.target === this) closeDetectionModal();
     });
 
     loadCameras();

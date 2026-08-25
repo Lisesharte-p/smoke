@@ -45,3 +45,10 @@ server.out
 server.run.err
 server.run.out
 server.run.out.log
+
+### YOLO 人体识别本地运行文件 ###
+.venv-detection/
+__pycache__/
+data/detections/
+tools/ffmpeg*/
+*.pt

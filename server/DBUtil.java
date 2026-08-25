@@ -170,6 +170,56 @@ public class DBUtil {
         }
     }
 
+    /** 确保人体识别记录和识别设置表存在。 */
+    public static void ensureDetectionTables() {
+        String[] ddl = {
+            "CREATE TABLE IF NOT EXISTS human_detection_record (" +
+            "  id BIGINT NOT NULL AUTO_INCREMENT," +
+            "  device_id VARCHAR(16) NOT NULL COMMENT '摄像头设备编号'," +
+            "  plot_id VARCHAR(16) DEFAULT NULL COMMENT '摄像头所属地块'," +
+            "  started_at DATETIME NOT NULL COMMENT '片段开始时间'," +
+            "  ended_at DATETIME NOT NULL COMMENT '片段结束时间'," +
+            "  confidence DECIMAL(6,4) DEFAULT NULL COMMENT '最高人体识别置信度'," +
+            "  snapshot_path VARCHAR(500) DEFAULT NULL COMMENT '截图相对路径'," +
+            "  video_path VARCHAR(500) NOT NULL COMMENT '回放视频相对路径'," +
+            "  alarm_id BIGINT DEFAULT NULL COMMENT '关联告警编号'," +
+            "  status VARCHAR(10) DEFAULT '未处理' COMMENT '处理状态：未处理/已处理'," +
+            "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP," +
+            "  PRIMARY KEY (id)," +
+            "  KEY idx_device_time (device_id, started_at)," +
+            "  KEY idx_alarm (alarm_id)" +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='YOLO人体识别记录'",
+            "CREATE TABLE IF NOT EXISTS camera_detection_setting (" +
+            "  device_id VARCHAR(16) NOT NULL," +
+            "  enabled TINYINT DEFAULT 1 COMMENT '是否启用人体识别'," +
+            "  confidence_threshold DECIMAL(4,2) DEFAULT 0.50 COMMENT '置信度阈值'," +
+            "  cooldown_seconds INT DEFAULT 30 COMMENT '同摄像头事件冷却秒数'," +
+            "  pre_seconds INT DEFAULT 5 COMMENT '检测前录像秒数'," +
+            "  post_seconds INT DEFAULT 10 COMMENT '检测后录像秒数'," +
+            "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+            "  PRIMARY KEY (device_id)" +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='摄像头人体识别设置'",
+            "CREATE TABLE IF NOT EXISTS camera_detection_runtime (" +
+            "  device_id VARCHAR(16) NOT NULL," +
+            "  worker_status VARCHAR(20) DEFAULT 'unknown' COMMENT 'worker状态：running/disabled/error'," +
+            "  message VARCHAR(255) DEFAULT NULL COMMENT '状态说明'," +
+            "  last_seen DATETIME DEFAULT NULL COMMENT '最近心跳时间'," +
+            "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+            "  PRIMARY KEY (device_id)" +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='摄像头人体识别运行状态'"
+        };
+        try (Connection conn = getConnection()) {
+            for (String sql : ddl) {
+                try (Statement st = conn.createStatement()) {
+                    st.execute(sql);
+                }
+            }
+            System.out.println("[DBUtil] 人体识别表已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 建人体识别表失败: " + e.getMessage());
+        }
+    }
+
     private static boolean columnExists(Connection conn, String table, String column) throws SQLException {
         DatabaseMetaData meta = conn.getMetaData();
         try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, table, column)) {

@@ -125,6 +125,14 @@
         var action = a.status === '未处理'
           ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
           : '<span class="text-muted">—</span>';
+        if (a.detectionRecordId) {
+          action = '<div class="flex gap-8">' +
+            '<a class="btn btn-sm btn-outline" href="camera.html?recordId=' + encodeURIComponent(a.detectionRecordId) + '">查看回放</a>' +
+            (a.status === '未处理'
+              ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
+              : '') +
+            '</div>';
+        }
 
         var tr = document.createElement('tr');
         tr.innerHTML =
@@ -164,6 +172,7 @@
     function handleAlarm(id) {
       API.updateAlarmStatus(id, '已处理').then(function () {
         var a = alarms.filter(function (x) { return x.id === id; })[0];
+        if (a) a.status = '已处理';
         Toast.success('告警「' + (a ? a.type : id) + '」已标记为已处理');
         renderAlarms();
       });
