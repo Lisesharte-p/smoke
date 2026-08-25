@@ -8,8 +8,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.http.HttpClient;
@@ -299,6 +301,7 @@ public class Api {
      * temp/humidity 取该地块最新一条传感器读数；deviceCount/onlineCount 由 device 聚合。
      */
     private static String plotsJson() throws SQLException {
+        refreshCameraOnlineStates();
         StringBuilder sb = new StringBuilder();
         sb.append("{\"code\":0,\"data\":[");
         String sql =
@@ -561,6 +564,7 @@ public class Api {
      * plotName 由 join plot 得出；controllable 由 type=='灌溉设备' 推出。
      */
     private static String devicesJson() throws SQLException {
+        refreshCameraOnlineStates();
         Map<String, Map<String, BigDecimal>> latest = latestByDevice();
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
@@ -854,9 +858,11 @@ public class Api {
             }
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) {
+                updateDeviceOnlineQuietly(c.id, false);
                 send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头返回 HTTP " + code) + "}");
                 return;
             }
+            updateDeviceOnlineQuietly(c.id, true);
 
             String contentType = conn.getContentType();
             if (contentType == null || contentType.trim().isEmpty()) {
@@ -878,8 +884,85 @@ public class Api {
             } catch (IOException clientClosed) {
                 // 浏览器切换页面或刷新时会关闭长连接，静默结束即可。
             }
+        } catch (IOException e) {
+            updateDeviceOnlineQuietly(c.id, false);
+            throw e;
         } finally {
             if (conn != null) conn.disconnect();
+        }
+    }
+
+    /** 刷新摄像头设备在线状态；HTTP/MJPEG 看 /video 是否可连接，RTSP 先做 TCP 端口探测。 */
+    private static void refreshCameraOnlineStates() throws SQLException {
+        List<CameraConfig> cameras = new ArrayList<>();
+        String sql = "SELECT id, name, ip, port, protocol, username, password FROM device WHERE type='摄像头'";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                CameraConfig c = new CameraConfig();
+                c.id = rs.getString("id");
+                c.name = rs.getString("name");
+                c.ip = rs.getString("ip");
+                Object portObj = rs.getObject("port");
+                c.port = portObj == null ? 0 : rs.getInt("port");
+                c.protocol = rs.getString("protocol");
+                c.username = rs.getString("username");
+                c.password = rs.getString("password");
+                cameras.add(c);
+            }
+        }
+        for (CameraConfig c : cameras) {
+            updateDeviceOnline(c.id, probeCamera(c));
+        }
+    }
+
+    private static boolean probeCamera(CameraConfig c) {
+        if (c == null || c.ip == null || c.ip.trim().isEmpty() || c.port <= 0) return false;
+        String protocol = c.protocol == null ? "mjpeg" : c.protocol.toLowerCase();
+        if ("rtsp".equals(protocol)) {
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(c.ip.trim(), c.port), 900);
+                return true;
+            } catch (IOException e) {
+                return false;
+            }
+        }
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(900);
+            conn.setReadTimeout(1200);
+            conn.setRequestProperty("User-Agent", "SmartAgriCameraHealthCheck");
+            if (c.username != null && !c.username.isEmpty()) {
+                String pass = c.password == null ? "" : c.password;
+                String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
+                conn.setRequestProperty("Authorization", "Basic " + token);
+            }
+            int code = conn.getResponseCode();
+            return code >= 200 && code < 400;
+        } catch (IOException e) {
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static void updateDeviceOnline(String deviceId, boolean online) throws SQLException {
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement("UPDATE device SET online = ? WHERE id = ?")) {
+            ps.setInt(1, online ? 1 : 0);
+            ps.setString(2, deviceId);
+            ps.executeUpdate();
+        }
+    }
+
+    private static void updateDeviceOnlineQuietly(String deviceId, boolean online) {
+        try {
+            updateDeviceOnline(deviceId, online);
+        } catch (SQLException ignore) {
+            // 在线状态只是展示辅助，失败时不影响摄像头流响应。
         }
     }
 
@@ -1355,6 +1438,11 @@ public class Api {
             ps.setString(2, status);
             ps.setString(3, message);
             ps.executeUpdate();
+        }
+        if ("running".equals(status)) {
+            updateDeviceOnline(deviceId, true);
+        } else if ("error".equals(status) || "unknown".equals(status)) {
+            updateDeviceOnline(deviceId, false);
         }
         return "{\"code\":0}";
     }
