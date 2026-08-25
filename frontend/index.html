@@ -409,31 +409,33 @@
       });
     }
 
-    /* ---------- 渲染天气预报（模拟数据） ---------- */
+    /* ---------- 渲染天气预报（走后端 /api/weather，失败自动回退模拟数据） ---------- */
     function renderWeather() {
-      var w = MOCK.weather;
-      document.getElementById('weatherNow').innerHTML =
-        '<div class="weather-now">' +
-          '<span class="w-icon">' + w.now.icon + '</span>' +
-          '<div class="w-now-info">' +
-            '<div class="w-now-temp">' + w.now.temp +
-              '<span class="w-now-text">' + w.now.text + '</span></div>' +
-            '<div class="w-now-meta">湿度 ' + w.now.humidity + ' · ' + w.now.wind + '</div>' +
-          '</div>' +
-        '</div>';
-
-      var fcHtml = '<div class="weather-forecast">';
-      w.forecast.forEach(function (d) {
-        fcHtml +=
-          '<div class="weather-day">' +
-            '<div class="wd-day">' + d.day + '</div>' +
-            '<div class="wd-icon">' + d.icon + '</div>' +
-            '<div class="wd-text">' + d.text + '</div>' +
-            '<div class="wd-temp">' + d.low + '~' + d.high + '℃</div>' +
+      API.getWeather().then(function (res) {
+        var w = res.data;
+        document.getElementById('weatherNow').innerHTML =
+          '<div class="weather-now">' +
+            '<span class="w-icon">' + w.now.icon + '</span>' +
+            '<div class="w-now-info">' +
+              '<div class="w-now-temp">' + w.now.temp +
+                '<span class="w-now-text">' + w.now.text + '</span></div>' +
+              '<div class="w-now-meta">湿度 ' + w.now.humidity + ' · ' + w.now.wind + '</div>' +
+            '</div>' +
           '</div>';
+
+        var fcHtml = '<div class="weather-forecast">';
+        w.forecast.forEach(function (d) {
+          fcHtml +=
+            '<div class="weather-day">' +
+              '<div class="wd-day">' + d.day + '</div>' +
+              '<div class="wd-icon">' + d.icon + '</div>' +
+              '<div class="wd-text">' + d.text + '</div>' +
+              '<div class="wd-temp">' + d.low + '~' + d.high + '℃</div>' +
+            '</div>';
+        });
+        fcHtml += '</div>';
+        document.getElementById('weatherForecast').innerHTML = fcHtml;
       });
-      fcHtml += '</div>';
-      document.getElementById('weatherForecast').innerHTML = fcHtml;
     }
 
     /* ---------- 渲染农事建议（根据数据库数据动态生成） ---------- */

@@ -28,6 +28,7 @@ window.API = (function () {
       boardRefresh:'/api/board/refresh',
       registerRequests: '/api/register-requests',
       advice:     '/api/advice',
+      weather:    '/api/weather',
       chat:       '/api/assistant/chat',
       conversations: '/api/conversations',
       conversation:   '/api/conversations/{id}'
@@ -365,6 +366,7 @@ window.API = (function () {
     getControlLogs: getControlLogs,
     refreshBoard: refreshBoard,
     getAdvice: getAdvice,
+    getWeather: getWeather,
     getChatReply: getChatReply,
     getConversations: getConversations,
     getConversationMessages: getConversationMessages,

@@ -175,6 +175,14 @@ public class Json {
     }
 
     /**
+     * 解析 JSON 数组 [{"a":1},{"b":2}] -> List<Map<String,String>>。
+     * 和 parseObjectArray 语义相同，保留给天气接口这类外部 JSON 响应使用。
+     */
+    public static List<Map<String, String>> parseArray(String json) {
+        return parseObjectArray(json);
+    }
+
+    /**
      * 从 JSON 里取某个 key 的字符串值（如 "content":"..." 里的 ...）。
      * 取最后一个匹配（大模型响应里 content 通常只有一处），自动去引号反转义。
      * 找不到返回 null。
