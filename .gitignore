@@ -40,3 +40,7 @@ devtools/
 
 .jdk/
 jdk-17.0.2/
+server.err
+server.out
+server.run.err
+server.run.out
