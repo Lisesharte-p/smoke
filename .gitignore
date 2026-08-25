@@ -44,3 +44,4 @@ server.err
 server.out
 server.run.err
 server.run.out
+server.run.out.log
