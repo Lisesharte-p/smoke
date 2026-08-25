@@ -2,6 +2,7 @@ package server;
 
 import com.sun.net.httpserver.HttpExchange;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,6 +26,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
 /**
  * 业务 API：/api/* 路由 + 数据库交互。
@@ -43,9 +45,9 @@ public class Api {
        填好后数据总览的「天气预报」即显示真实天气；未填 Key 时接口返回 code=1，
        前端自动降级为本地模拟数据，不影响页面展示。
        ================================================================== */
-    private static final String QW_API_KEY = "";              // TODO: 填和风天气 API Key
-    private static final String QW_LOCATION = "101010100";    // 基地 LocationID（示例：北京），或 "116.41,39.92"
-    private static final String QW_HOST = "https://devapi.qweather.com"; // 免费订阅用 devapi，付费版用 api.qweather.com
+    private static final String QW_API_KEY = "d40c5034375a4e1aa7b28f5ccd401af3";
+    private static final String QW_LOCATION = "106.565952,29.642614"; // 重庆两江新区（金渝大道 66 号附近），和风格式：经度,纬度
+    private static final String QW_HOST = "https://ma5rk8cjh3.re.qweatherapi.com";
 
     /** 处理 /api/* 请求，返回 true 表示已处理（false 交给 WebServer 走静态页面） */
     public static boolean handle(HttpExchange ex) throws IOException {
@@ -1109,13 +1111,21 @@ public class Api {
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(5))
                 .header("Accept", "application/json")
+                .header("Accept-Encoding", "identity")
                 .GET()
                 .build();
-        HttpResponse<String> res = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        HttpResponse<byte[]> res = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofByteArray());
         if (res.statusCode() < 200 || res.statusCode() >= 300) {
             throw new IOException("HTTP " + res.statusCode());
         }
-        return res.body();
+        byte[] body = res.body();
+        String encoding = res.headers().firstValue("Content-Encoding").orElse("");
+        if ("gzip".equalsIgnoreCase(encoding)) {
+            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(body))) {
+                body = gzip.readAllBytes();
+            }
+        }
+        return new String(body, StandardCharsets.UTF_8);
     }
 
     /** 和风天气图标代码 -> emoji（前端用 emoji 展示） */
