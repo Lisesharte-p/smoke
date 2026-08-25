@@ -729,10 +729,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   font-family: var(--font-mono, 'Consolas', 'Monaco', monospace);
   font-size: .9em;
 }
-.msg .bubble a { color: var(--primary); text-decoration: underline; }
-.msg .bubble a:hover { color: #34d399; }
+.msg .bubble a:not(.btn) { color: var(--primary); text-decoration: underline; }
+.msg .bubble a:not(.btn):hover { color: #34d399; }
 .msg.user .bubble code { background: rgba(4, 40, 28, .16); }
-.msg.user .bubble a { color: #04281c; text-decoration: underline; }
+.msg.user .bubble a:not(.btn) { color: #04281c; text-decoration: underline; }
 
 .msg.bot .bubble { background: rgba(15, 23, 42, .6); border: 1px solid var(--border); color: var(--text); border-top-left-radius: 4px; }
 .msg.user .bubble { background: linear-gradient(135deg, #34d399, #10b981); color: #04281c; border-top-right-radius: 4px; }
