@@ -46,6 +46,7 @@ public class WebServer {
         PAGES.put("/monitoring.html", "monitoring.html"); // 数据监测
         PAGES.put("/history.html", "history.html"); // 历史趋势
         PAGES.put("/map.html", "map.html"); // 重庆巡田地图
+        PAGES.put("/camera.html", "camera.html"); // 视频监控
         PAGES.put("/control.html", "control.html"); // 设备控制
         PAGES.put("/alarm.html", "alarm.html");     // 告警管理
         PAGES.put("/assistant.html", "assistant.html"); // 智能问答

@@ -7,8 +7,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -26,6 +28,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -103,6 +106,12 @@ public class Api {
             }
             if ("DELETE".equals(method) && path.matches("/api/devices/[^/]+")) {
                 ok(ex, deleteDeviceJson(path.substring("/api/devices/".length())));
+                return true;
+            }
+
+            /* ---------- 摄像头画面（MJPEG/HTTP 代理，供浏览器同源播放） ---------- */
+            if ("GET".equals(method) && path.equals("/api/camera/mjpeg")) {
+                streamCameraMjpeg(ex);
                 return true;
             }
 
@@ -723,6 +732,103 @@ public class Api {
         if (s == null) return null;
         String v = s.trim();
         return v.isEmpty() ? null : v;
+    }
+
+    private static class CameraConfig {
+        String id;
+        String name;
+        String ip;
+        int port;
+        String protocol;
+        String username;
+        String password;
+    }
+
+    /** 查询摄像头配置；未传 deviceId 时取第一台摄像头。 */
+    private static CameraConfig cameraConfig(String deviceId) throws SQLException {
+        String sql = "SELECT id, name, ip, port, protocol, username, password FROM device WHERE type='摄像头'";
+        if (deviceId != null && !deviceId.trim().isEmpty()) sql += " AND id=?";
+        sql += " ORDER BY id LIMIT 1";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (deviceId != null && !deviceId.trim().isEmpty()) ps.setString(1, deviceId.trim());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                CameraConfig c = new CameraConfig();
+                c.id = rs.getString("id");
+                c.name = rs.getString("name");
+                c.ip = rs.getString("ip");
+                Object portObj = rs.getObject("port");
+                c.port = portObj == null ? 0 : rs.getInt("port");
+                c.protocol = rs.getString("protocol");
+                c.username = rs.getString("username");
+                c.password = rs.getString("password");
+                return c;
+            }
+        }
+    }
+
+    /**
+     * GET /api/camera/mjpeg?deviceId=D007
+     * 把摄像头 MJPEG/HTTP 流代理为同源响应，避免浏览器拦截 URL 内账号密码。
+     */
+    private static void streamCameraMjpeg(HttpExchange ex) throws IOException, SQLException {
+        CameraConfig c = cameraConfig(queryParam(ex.getRequestURI().getQuery(), "deviceId"));
+        if (c == null) {
+            send(ex, 404, "{\"code\":1,\"msg\":" + Json.str("未找到摄像头设备") + "}");
+            return;
+        }
+        String protocol = c.protocol == null ? "mjpeg" : c.protocol.toLowerCase();
+        if (!"mjpeg".equals(protocol) && !"http".equals(protocol)) {
+            send(ex, 400, "{\"code\":1,\"msg\":" + Json.str("当前页面暂只支持 MJPEG/HTTP 摄像头，RTSP 需转码") + "}");
+            return;
+        }
+        if (c.ip == null || c.ip.trim().isEmpty() || c.port <= 0) {
+            send(ex, 400, "{\"code\":1,\"msg\":" + Json.str("摄像头 IP/端口未配置") + "}");
+            return;
+        }
+
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("User-Agent", "SmartAgriCameraProxy");
+            if (c.username != null && !c.username.isEmpty()) {
+                String pass = c.password == null ? "" : c.password;
+                String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
+                conn.setRequestProperty("Authorization", "Basic " + token);
+            }
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头返回 HTTP " + code) + "}");
+                return;
+            }
+
+            String contentType = conn.getContentType();
+            if (contentType == null || contentType.trim().isEmpty()) {
+                contentType = "multipart/x-mixed-replace; boundary=--BoundaryString";
+            }
+            ex.getResponseHeaders().set("Content-Type", contentType);
+            ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
+            ex.getResponseHeaders().set("Pragma", "no-cache");
+            ex.sendResponseHeaders(200, 0);
+
+            try (InputStream in = conn.getInputStream();
+                 OutputStream out = ex.getResponseBody()) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                    out.flush();
+                }
+            } catch (IOException clientClosed) {
+                // 浏览器切换页面或刷新时会关闭长连接，静默结束即可。
+            }
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
     /* ==================================================================

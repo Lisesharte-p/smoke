@@ -1481,6 +1481,199 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 .weather-day .wd-temp { font-size: 12px; font-weight: 600; color: var(--text); margin-top: 2px; }
 
 /* ==========================================================================
+   视频监控
+   ========================================================================== */
+.camera-page {
+  max-width: 1760px;
+}
+
+.camera-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.camera-sub {
+  margin-top: -8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.camera-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.camera-actions select {
+  width: min(420px, 48vw);
+}
+
+.camera-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+}
+
+.camera-view,
+.camera-panel {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, .16);
+  background:
+    linear-gradient(180deg, rgba(34, 211, 238, .06), transparent 42%),
+    rgba(15, 23, 42, .72);
+  box-shadow: var(--shadow-sm);
+}
+
+.camera-view {
+  padding: 14px;
+}
+
+.camera-screen {
+  position: relative;
+  min-height: 620px;
+  height: calc(100vh - 220px);
+  overflow: hidden;
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(148, 163, 184, .05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, .05) 1px, transparent 1px),
+    #020617;
+  background-size: 40px 40px;
+}
+
+.camera-screen img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #020617;
+}
+
+.camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(34, 211, 238, .12), transparent 34%),
+    rgba(2, 6, 23, .88);
+}
+
+.placeholder-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.placeholder-sub {
+  max-width: 460px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.camera-hud {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, .28);
+  background: rgba(2, 6, 23, .62);
+  color: #d8fff0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 12px rgba(239, 68, 68, .9);
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+
+.camera-side {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.camera-panel {
+  padding: 16px;
+}
+
+.camera-info-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.camera-info-grid div {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .13);
+  background: rgba(15, 23, 42, .62);
+}
+
+.camera-info-grid span,
+.camera-info-grid b {
+  display: block;
+}
+
+.camera-info-grid span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.camera-info-grid b {
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+@media (max-width: 1080px) {
+  .camera-layout {
+    grid-template-columns: 1fr;
+  }
+  .camera-screen {
+    min-height: 460px;
+  }
+}
+
+@media (max-width: 760px) {
+  .camera-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .camera-actions {
+    justify-content: flex-start;
+  }
+  .camera-actions select {
+    width: 100%;
+  }
+}
+
+/* ==========================================================================
    重庆巡田地图
    ========================================================================== */
 .map-page {

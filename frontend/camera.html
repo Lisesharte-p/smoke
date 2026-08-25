@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>视频监控 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="camera">
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content camera-page">
+        <div class="camera-head">
+          <div>
+            <div class="section-title">视频监控</div>
+            <div class="camera-sub">摄像头实时画面 · 同源代理播放 MJPEG/HTTP 流</div>
+          </div>
+          <div class="camera-actions">
+            <select class="form-control" id="cameraSelect"></select>
+            <button class="btn btn-outline btn-sm" id="reloadCamera" type="button">刷新画面</button>
+            <a class="btn btn-outline btn-sm" href="devices.html">设备管理</a>
+          </div>
+        </div>
+
+        <div class="camera-layout">
+          <section class="camera-view">
+            <div class="camera-screen" id="cameraScreen">
+              <img id="cameraImg" alt="摄像头实时画面">
+              <div class="camera-placeholder" id="cameraPlaceholder">
+                <div class="placeholder-title">正在加载摄像头</div>
+                <div class="placeholder-sub">请确认摄像头设备已在设备管理中配置协议、IP、端口和账号密码。</div>
+              </div>
+              <div class="camera-hud">
+                <span class="live-dot"></span>
+                <span id="liveText">LIVE</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="camera-side">
+            <div class="camera-panel">
+              <div class="panel-kicker">CAMERA</div>
+              <div class="panel-title" id="cameraName">--</div>
+              <div class="panel-text" id="cameraMeta">--</div>
+            </div>
+            <div class="camera-panel">
+              <div class="panel-kicker">STREAM</div>
+              <div class="camera-info-grid">
+                <div><span>协议</span><b id="cameraProtocol">--</b></div>
+                <div><span>地址</span><b id="cameraAddress">--</b></div>
+                <div><span>地块</span><b id="cameraPlot">--</b></div>
+                <div><span>状态</span><b id="cameraOnline">--</b></div>
+              </div>
+            </div>
+            <div class="camera-panel">
+              <div class="panel-kicker">NOTE</div>
+              <div class="panel-text" id="cameraNote">
+                MJPEG/HTTP 摄像头可直接播放；RTSP 摄像头需要 ffmpeg 或流媒体服务转成浏览器支持的格式。
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
+  <script>
+    Layout.init();
+
+    var cameras = [];
+    var selectedCamera = null;
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function cameraUrl(cam) {
+      return 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+    }
+
+    function setPlaceholder(title, sub) {
+      var p = document.getElementById('cameraPlaceholder');
+      p.style.display = 'grid';
+      p.innerHTML =
+        '<div class="placeholder-title">' + esc(title) + '</div>' +
+        '<div class="placeholder-sub">' + esc(sub || '') + '</div>';
+    }
+
+    function hidePlaceholder() {
+      document.getElementById('cameraPlaceholder').style.display = 'none';
+    }
+
+    function renderCameraInfo(cam) {
+      document.getElementById('cameraName').textContent = cam ? cam.name : '--';
+      document.getElementById('cameraMeta').textContent = cam ? ((cam.username ? cam.username + '@' : '') + cam.ip + ':' + cam.port) : '--';
+      document.getElementById('cameraProtocol').textContent = cam ? String(cam.protocol || 'mjpeg').toUpperCase() : '--';
+      document.getElementById('cameraAddress').textContent = cam ? (cam.ip + ':' + cam.port) : '--';
+      document.getElementById('cameraPlot').textContent = cam ? (cam.plotName || '-') : '--';
+      document.getElementById('cameraOnline').textContent = cam ? (cam.online ? '在线' : '离线') : '--';
+    }
+
+    function playCamera(cam) {
+      selectedCamera = cam || null;
+      renderCameraInfo(selectedCamera);
+      var img = document.getElementById('cameraImg');
+      img.removeAttribute('src');
+
+      if (!selectedCamera) {
+        setPlaceholder('暂无摄像头设备', '请先在设备管理中添加摄像头类型设备。');
+        return;
+      }
+
+      var protocol = String(selectedCamera.protocol || 'mjpeg').toLowerCase();
+      if (protocol === 'rtsp') {
+        setPlaceholder('RTSP 暂需转码', '该摄像头是 RTSP 协议，需要 ffmpeg 中转为 HLS/WebRTC/HTTP-FLV 后播放。');
+        return;
+      }
+
+      setPlaceholder('正在连接摄像头', selectedCamera.ip + ':' + selectedCamera.port);
+      img.onload = hidePlaceholder;
+      img.onerror = function () {
+        setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');
+      };
+      img.src = cameraUrl(selectedCamera);
+    }
+
+    function fillCameraSelect() {
+      var sel = document.getElementById('cameraSelect');
+      sel.innerHTML = '';
+      cameras.forEach(function (cam) {
+        var opt = document.createElement('option');
+        opt.value = cam.id;
+        opt.textContent = cam.name + '（' + (cam.protocol || 'mjpeg').toUpperCase() + ' · ' + cam.ip + ':' + cam.port + '）';
+        sel.appendChild(opt);
+      });
+      if (!cameras.length) {
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '暂无摄像头设备';
+        sel.appendChild(opt);
+      }
+    }
+
+    function loadCameras() {
+      API.getDevices().then(function (res) {
+        cameras = (res.data || []).filter(function (d) { return d.type === '摄像头'; });
+        fillCameraSelect();
+        playCamera(cameras[0]);
+      }).catch(function (e) {
+        setPlaceholder('加载摄像头失败', e.message || '设备接口请求失败');
+      });
+    }
+
+    document.getElementById('cameraSelect').addEventListener('change', function () {
+      var id = this.value;
+      playCamera(cameras.filter(function (c) { return c.id === id; })[0]);
+    });
+    document.getElementById('reloadCamera').addEventListener('click', function () {
+      playCamera(selectedCamera);
+    });
+
+    loadCameras();
+  </script>
+</body>
+</html>

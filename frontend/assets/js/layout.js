@@ -26,7 +26,8 @@ window.Layout = (function () {
       items: [
         { key: 'monitoring', label: '数据监测', icon: '📡', href: 'monitoring.html' },
         { key: 'history',    label: '历史趋势', icon: '📈', href: 'history.html' },
-        { key: 'map',        label: '重庆巡田', icon: '🛸', href: 'map.html' }
+        { key: 'map',        label: '重庆巡田', icon: '🛸', href: 'map.html' },
+        { key: 'camera',     label: '视频监控', icon: '🎥', href: 'camera.html' }
       ]
     },
     {
@@ -52,6 +53,7 @@ window.Layout = (function () {
     monitoring: '数据监测',
     history:    '历史趋势',
     map:        '重庆巡田',
+    camera:     '视频监控',
     control:    '设备控制',
     alarm:      '告警管理',
     assistant:  '智能问答',
@@ -61,9 +63,9 @@ window.Layout = (function () {
 
   /* ---------- 角色权限配置：每个角色可访问的导航项 key ---------- */
   var ROLE_NAV = {
-    farmer:   ['dashboard', 'monitoring', 'history', 'map', 'control', 'alarm', 'assistant'],
-    admin:    ['dashboard', 'monitoring', 'history', 'map', 'control', 'alarm', 'assistant', 'devices', 'review'],
-    sysadmin: ['dashboard', 'monitoring', 'history', 'map', 'control', 'alarm', 'assistant', 'devices', 'review']
+    farmer:   ['dashboard', 'monitoring', 'history', 'map', 'camera', 'control', 'alarm', 'assistant'],
+    admin:    ['dashboard', 'monitoring', 'history', 'map', 'camera', 'control', 'alarm', 'assistant', 'devices', 'review'],
+    sysadmin: ['dashboard', 'monitoring', 'history', 'map', 'camera', 'control', 'alarm', 'assistant', 'devices', 'review']
   };
 
   /* 文件名 → 页面 key，用于隐藏当前角色无权限访问的页内跳转链接 */
