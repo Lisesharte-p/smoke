@@ -151,6 +151,25 @@ public class DBUtil {
         }
     }
 
+    /** 确保设备表包含摄像头接入配置字段（旧库自动补列）。 */
+    public static void ensureDeviceCameraColumns() {
+        try (Connection conn = getConnection();
+             Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "device", "protocol")) {
+                st.execute("ALTER TABLE device ADD COLUMN protocol VARCHAR(20) DEFAULT NULL COMMENT '设备协议：tcp/rtsp/mjpeg/http' AFTER port");
+            }
+            if (!columnExists(conn, "device", "username")) {
+                st.execute("ALTER TABLE device ADD COLUMN username VARCHAR(50) DEFAULT NULL COMMENT '设备访问用户名' AFTER protocol");
+            }
+            if (!columnExists(conn, "device", "password")) {
+                st.execute("ALTER TABLE device ADD COLUMN password VARCHAR(100) DEFAULT NULL COMMENT '设备访问密码' AFTER username");
+            }
+            System.out.println("[DBUtil] 设备摄像头接入字段已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 检查设备摄像头接入字段失败: " + e.getMessage());
+        }
+    }
+
     private static boolean columnExists(Connection conn, String table, String column) throws SQLException {
         DatabaseMetaData meta = conn.getMetaData();
         try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, table, column)) {

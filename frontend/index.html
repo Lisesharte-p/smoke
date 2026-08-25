@@ -581,11 +581,42 @@
         '<select class="form-control dev-type" style="flex:1.2">' +
           '<option>土壤湿度</option>' +
           '<option>温度</option>' +
+          '<option>亮度</option>' +
+          '<option>环境监测板</option>' +
           '<option>灌溉设备</option>' +
+          '<option>摄像头</option>' +
         '</select>' +
         '<input type="text" class="form-control dev-ip" style="flex:2" placeholder="设备 IP" value="' + (dev.ip || '') + '">' +
         '<input type="number" class="form-control dev-port" style="flex:1" min="1" max="65535" placeholder="端口" value="' + (dev.port || '') + '">' +
         '<button class="btn btn-danger btn-sm dev-del" type="button">✕</button>';
+      var cameraBox = document.createElement('div');
+      cameraBox.className = 'camera-fields mt-8';
+      cameraBox.innerHTML =
+        '<div class="form-row">' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">摄像头协议</label>' +
+            '<select class="form-control dev-protocol">' +
+              '<option value="mjpeg">MJPEG / HTTP</option>' +
+              '<option value="rtsp">RTSP</option>' +
+              '<option value="http">HTTP</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">用户名</label>' +
+            '<input type="text" class="form-control dev-username" placeholder="如 admin" value="' + (dev.username || '') + '">' +
+          '</div>' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">密码</label>' +
+            '<input type="password" class="form-control dev-password" placeholder="如 admin" value="' + (dev.password || '') + '">' +
+          '</div>' +
+        '</div>';
+      row.appendChild(cameraBox);
+      row.querySelector('.dev-protocol').value = dev.protocol || 'mjpeg';
+      function syncCameraFields() {
+        cameraBox.style.display = row.querySelector('.dev-type').value === '摄像头' ? 'block' : 'none';
+      }
+      row.querySelector('.dev-type').addEventListener('change', syncCameraFields);
+      syncCameraFields();
       row.querySelector('.dev-del').addEventListener('click', function () { row.remove(); });
       document.getElementById('devRows').appendChild(row);
     }
@@ -624,7 +655,10 @@
           name: row.querySelector('.dev-name').value.trim(),
           type: row.querySelector('.dev-type').value,
           ip: row.querySelector('.dev-ip').value.trim(),
-          port: parseInt(row.querySelector('.dev-port').value.trim(), 10)
+          port: parseInt(row.querySelector('.dev-port').value.trim(), 10),
+          protocol: row.querySelector('.dev-type').value === '摄像头' ? row.querySelector('.dev-protocol').value : null,
+          username: row.querySelector('.dev-type').value === '摄像头' ? row.querySelector('.dev-username').value.trim() : null,
+          password: row.querySelector('.dev-type').value === '摄像头' ? row.querySelector('.dev-password').value.trim() : null
         });
       });
       for (var i = 0; i < newDevices.length; i++) {

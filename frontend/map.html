@@ -650,6 +650,7 @@
               '<option>亮度</option>' +
               '<option>环境监测板</option>' +
               '<option>灌溉设备</option>' +
+              '<option>摄像头</option>' +
             '</select>' +
           '</div>' +
         '</div>' +
@@ -669,6 +670,34 @@
         '</div>';
       wrap.appendChild(row);
       row.querySelector('.dev-type').value = data.type || '灌溉设备';
+      var cameraBox = document.createElement('div');
+      cameraBox.className = 'camera-fields map-camera-fields';
+      cameraBox.innerHTML =
+        '<div class="form-row">' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">摄像头协议</label>' +
+            '<select class="form-control dev-protocol">' +
+              '<option value="mjpeg">MJPEG / HTTP</option>' +
+              '<option value="rtsp">RTSP</option>' +
+              '<option value="http">HTTP</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">用户名</label>' +
+            '<input type="text" class="form-control dev-username" placeholder="如 admin" value="' + esc(data.username || '') + '">' +
+          '</div>' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">密码</label>' +
+            '<input type="password" class="form-control dev-password" placeholder="如 admin" value="' + esc(data.password || '') + '">' +
+          '</div>' +
+        '</div>';
+      row.appendChild(cameraBox);
+      row.querySelector('.dev-protocol').value = data.protocol || 'mjpeg';
+      function syncCameraFields() {
+        cameraBox.style.display = row.querySelector('.dev-type').value === '摄像头' ? 'block' : 'none';
+      }
+      row.querySelector('.dev-type').addEventListener('change', syncCameraFields);
+      syncCameraFields();
       row.querySelector('.remove-dev-row').addEventListener('click', function () {
         row.remove();
       });
@@ -683,6 +712,9 @@
         var type = row.querySelector('.dev-type').value;
         var ip = row.querySelector('.dev-ip').value.trim();
         var portRaw = row.querySelector('.dev-port').value.trim();
+        var protocol = row.querySelector('.dev-protocol').value;
+        var username = row.querySelector('.dev-username').value.trim();
+        var password = row.querySelector('.dev-password').value.trim();
         var empty = !name && !ip && !portRaw;
         if (empty) continue;
         if (!name) throw new Error('请填写第 ' + (i + 1) + ' 个设备名称');
@@ -691,7 +723,15 @@
         if (isNaN(port) || port < 1 || port > 65535) {
           throw new Error('设备「' + name + '」端口需在 1-65535 之间');
         }
-        devices.push({ name: name, type: type, ip: ip, port: port });
+        devices.push({
+          name: name,
+          type: type,
+          ip: ip,
+          port: port,
+          protocol: type === '摄像头' ? protocol : null,
+          username: type === '摄像头' ? username : null,
+          password: type === '摄像头' ? password : null
+        });
       }
       return devices;
     }

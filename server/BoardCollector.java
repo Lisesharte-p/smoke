@@ -141,11 +141,12 @@ public class BoardCollector {
         return null;
     }
 
-    /** 从 device 表加载采集目标：所有 ip/port 不为空的设备 */
+    /** 从 device 表加载采集目标：所有 ip/port 不为空的非摄像头设备 */
     private static List<String[]> loadTargets() throws SQLException {
         List<String[]> list = new ArrayList<>();
         String sql = "SELECT id, ip, port FROM device" +
-                     " WHERE ip IS NOT NULL AND TRIM(ip) <> '' AND port IS NOT NULL ORDER BY id";
+                     " WHERE ip IS NOT NULL AND TRIM(ip) <> '' AND port IS NOT NULL" +
+                     " AND type <> '摄像头' ORDER BY id";
         try (Connection c = DBUtil.getConnection();
              PreparedStatement ps = c.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {

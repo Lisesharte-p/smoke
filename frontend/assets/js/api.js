@@ -119,6 +119,9 @@ window.API = (function () {
           plotName: data.name,
           ip: d.ip,
           port: d.port,
+          protocol: d.protocol || null,
+          username: d.username || null,
+          password: d.password || null,
           online: true,
           controllable: d.type === '灌溉设备',
           running: false
@@ -162,6 +165,9 @@ window.API = (function () {
         plotName: data.plotName,
         ip: data.ip,
         port: data.port,
+        protocol: data.protocol || null,
+        username: data.username || null,
+        password: data.password || null,
         online: true,
         controllable: data.type === '灌溉设备',
         running: false

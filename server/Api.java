@@ -396,11 +396,10 @@ public class Api {
                         conn.rollback();
                         return "{\"code\":1,\"msg\":" + Json.str("设备「" + devName + "」端口需在 1-65535 之间") + "}";
                     }
-                    // 前端类型契约 → 入库类型（与 addDeviceJson 同一套映射）
-                    String devType = type;
-                    if ("土壤湿度".equals(type)) devType = "土壤湿度传感器";
-                    else if ("温度".equals(type)) devType = "温度传感器";
-                    else if ("亮度".equals(type)) devType = "亮度传感器";
+                    String devType = dbDeviceType(type);
+                    String protocol = normalizeProtocol(d.get("protocol"), devType);
+                    String username = trimToNull(d.get("username"));
+                    String password = trimToNull(d.get("password"));
                     // 名称查重（库内 + 本次请求内）
                     String trimmedName = devName.trim();
                     if (deviceNameExists(trimmedName) || !reqNames.add(trimmedName)) {
@@ -414,13 +413,16 @@ public class Api {
                         return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备：设备「" + trimmedName + "」") + "}";
                     }
                     try (PreparedStatement ps = conn.prepareStatement(
-                            "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)")) {
+                            "INSERT INTO device(id, plot_id, name, type, ip, port, protocol, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                         ps.setString(1, nextDeviceId(conn));
                         ps.setString(2, plotId);
                         ps.setString(3, devName.trim());
                         ps.setString(4, devType);
                         ps.setString(5, ip.trim());
                         ps.setInt(6, port);
+                        ps.setString(7, protocol);
+                        ps.setString(8, username);
+                        ps.setString(9, password);
                         ps.executeUpdate();
                     }
                 }
@@ -501,7 +503,7 @@ public class Api {
         Map<String, Map<String, BigDecimal>> latest = latestByDevice();
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port" +
+                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port, d.protocol, d.username, d.password" +
                 " FROM device d LEFT JOIN plot p ON p.id = d.plot_id ORDER BY d.id";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -520,6 +522,9 @@ public class Api {
                   .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
                   .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
                   .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
+                  .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
+                  .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
+                  .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
                   .append("\"online\":").append(rs.getInt("online") == 1).append(',')
                   .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
                   .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
@@ -570,6 +575,9 @@ public class Api {
         String plotId = body.get("plotId");
         String ip = body.get("ip");
         String portStr = body.get("port");
+        String protocol = body.get("protocol");
+        String username = body.get("username");
+        String password = body.get("password");
         if (name == null || name.isEmpty() || type == null || plotId == null
                 || ip == null || ip.trim().isEmpty() || portStr == null || portStr.trim().isEmpty()) {
             return "{\"code\":1,\"msg\":" + Json.str("参数不完整：name/type/plotId/ip/port 必填") + "}";
@@ -583,10 +591,10 @@ public class Api {
         if (port < 1 || port > 65535) {
             return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 需在 1-65535 之间") + "}";
         }
-        // 前端类型契约 → 入库类型（typeMap 反向映射）
-        if ("土壤湿度".equals(type)) type = "土壤湿度传感器";
-        else if ("温度".equals(type)) type = "温度传感器";
-        else if ("亮度".equals(type)) type = "亮度传感器";
+        type = dbDeviceType(type);
+        protocol = normalizeProtocol(protocol, type);
+        username = trimToNull(username);
+        password = trimToNull(password);
         // 名称查重：全局唯一
         if (deviceNameExists(name.trim())) {
             return "{\"code\":1,\"msg\":" + Json.str("设备名称已存在：" + name.trim()) + "}";
@@ -596,7 +604,7 @@ public class Api {
             return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换类型或地址") + "}";
         }
         String id = nextDeviceId();
-        String sql = "INSERT INTO device(id, plot_id, name, type, ip, port) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO device(id, plot_id, name, type, ip, port, protocol, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -605,6 +613,9 @@ public class Api {
             ps.setString(4, type);
             ps.setString(5, ip.trim());
             ps.setInt(6, port);
+            ps.setString(7, protocol);
+            ps.setString(8, username);
+            ps.setString(9, password);
             ps.executeUpdate();
         }
         return "{\"code\":0,\"data\":" + deviceJson(id) + "}";
@@ -654,7 +665,7 @@ public class Api {
     /** 按设备编号查单个设备 JSON（含 plotName / controllable / running / ip / port）；不存在返回 null */
     private static String deviceJson(String id) throws SQLException {
         String sql =
-                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port" +
+                "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port, d.protocol, d.username, d.password" +
                 " FROM device d LEFT JOIN plot p ON p.id = d.plot_id WHERE d.id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -669,6 +680,9 @@ public class Api {
                         + ",\"plotName\":" + Json.str(rs.getString("plotName"))
                         + ",\"ip\":" + Json.str(rs.getString("ip"))
                         + ",\"port\":" + Json.num(rs.getObject("port"))
+                        + ",\"protocol\":" + Json.str(rs.getString("protocol"))
+                        + ",\"username\":" + Json.str(rs.getString("username"))
+                        + ",\"password\":" + Json.str(rs.getString("password"))
                         + ",\"online\":" + (rs.getInt("online") == 1)
                         + ",\"temp\":" + numOrNull(vals, "temp")
                         + ",\"humidity\":" + numOrNull(vals, "humidity")
@@ -686,7 +700,29 @@ public class Api {
         if ("温度传感器".equals(type)) return "温度";
         if ("亮度传感器".equals(type)) return "亮度";
         if ("环境监测板".equals(type)) return "环境监测板";
+        if ("摄像头".equals(type)) return "摄像头";
         return "土壤湿度"; // 土壤湿度传感器等统一归为土壤湿度
+    }
+
+    /** 前端设备类型契约 → 数据库设备类型。 */
+    private static String dbDeviceType(String type) {
+        if ("土壤湿度".equals(type)) return "土壤湿度传感器";
+        if ("温度".equals(type)) return "温度传感器";
+        if ("亮度".equals(type)) return "亮度传感器";
+        if ("摄像头".equals(type)) return "摄像头";
+        return type;
+    }
+
+    private static String normalizeProtocol(String protocol, String dbType) {
+        String p = trimToNull(protocol);
+        if (p == null && "摄像头".equals(dbType)) return "mjpeg";
+        return p == null ? null : p.toLowerCase();
+    }
+
+    private static String trimToNull(String s) {
+        if (s == null) return null;
+        String v = s.trim();
+        return v.isEmpty() ? null : v;
     }
 
     /* ==================================================================

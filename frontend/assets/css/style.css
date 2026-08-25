@@ -540,6 +540,23 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
+.camera-fields {
+  display: none;
+  padding: 12px;
+  margin-bottom: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .14);
+  background: rgba(15, 23, 42, .45);
+}
+
+.device-row {
+  flex-wrap: wrap;
+}
+
+.device-row .camera-fields {
+  flex: 0 0 100%;
+}
+
 /* ==========================================================================
    开关组件（设备控制用）
    ========================================================================== */

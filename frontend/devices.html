@@ -66,7 +66,28 @@
           <option>亮度</option>
           <option>环境监测板</option>
           <option>灌溉设备</option>
+          <option>摄像头</option>
         </select>
+      </div>
+      <div class="camera-fields" id="cameraFields">
+        <div class="form-group">
+          <label class="form-label">摄像头协议</label>
+          <select class="form-control" id="devProtocol">
+            <option value="mjpeg">MJPEG / HTTP</option>
+            <option value="rtsp">RTSP</option>
+            <option value="http">HTTP</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">用户名</label>
+            <input type="text" class="form-control" id="devUsername" placeholder="如 admin">
+          </div>
+          <div class="form-group">
+            <label class="form-label">密码</label>
+            <input type="password" class="form-control" id="devPassword" placeholder="如 admin">
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">绑定地块</label>
@@ -103,7 +124,15 @@
       if (type === '温度')       return '<span class="badge badge-warning">温度</span>';
       if (type === '亮度')       return '<span class="badge badge-info">亮度</span>';
       if (type === '环境监测板') return '<span class="badge badge-info">环境监测板</span>';
+      if (type === '摄像头')     return '<span class="badge badge-info">摄像头</span>';
       return '<span class="badge badge-online">土壤湿度</span>';
+    }
+
+    function protocolLabel(dev) {
+      if (dev.type !== '摄像头') return dev.ip && dev.port ? dev.ip + ':' + dev.port : '—';
+      var proto = dev.protocol || 'mjpeg';
+      var user = dev.username ? dev.username + '@' : '';
+      return proto.toUpperCase() + ' · ' + user + (dev.ip || '-') + (dev.port ? ':' + dev.port : '');
     }
 
     /* ---------- 渲染设备列表 ---------- */
@@ -126,7 +155,7 @@
           '<td>' + dev.name + '</td>' +
           '<td>' + typeBadge(dev.type) + '</td>' +
           '<td>' + dev.plotName + '</td>' +
-          '<td>' + (dev.ip && dev.port ? dev.ip + ':' + dev.port : '—') + '</td>' +
+          '<td>' + protocolLabel(dev) + '</td>' +
           '<td>' + status + '</td>' +
           '<td><div class="flex gap-8">' + controlBtn +
           '<button class="btn btn-sm btn-danger" data-id="' + dev.id + '">解绑</button></div></td>';
@@ -167,10 +196,20 @@
 
     /* ---------- 弹窗控制 ---------- */
     var modal = document.getElementById('addModal');
+    function toggleCameraFields() {
+      var isCamera = document.getElementById('devType').value === '摄像头';
+      document.getElementById('cameraFields').style.display = isCamera ? 'block' : 'none';
+    }
+    document.getElementById('devType').addEventListener('change', toggleCameraFields);
     document.getElementById('openAdd').addEventListener('click', function () {
       document.getElementById('devName').value = '';
+      document.getElementById('devType').value = '土壤湿度';
       document.getElementById('devIp').value = '';
       document.getElementById('devPort').value = '';
+      document.getElementById('devProtocol').value = 'mjpeg';
+      document.getElementById('devUsername').value = '';
+      document.getElementById('devPassword').value = '';
+      toggleCameraFields();
       modal.classList.add('show');
     });
     document.getElementById('cancelAdd').addEventListener('click', function () {
@@ -184,13 +223,26 @@
       var plotId = document.getElementById('devPlot').value;
       var ip = document.getElementById('devIp').value.trim();
       var port = parseInt(document.getElementById('devPort').value.trim(), 10);
+      var protocol = document.getElementById('devProtocol').value;
+      var username = document.getElementById('devUsername').value.trim();
+      var password = document.getElementById('devPassword').value.trim();
       var plot = plots.filter(function (p) { return p.id === plotId; })[0];
 
       if (!name) { Toast.error('请输入设备名称'); return; }
       if (!ip) { Toast.error('请输入设备 IP'); return; }
       if (isNaN(port) || port < 1 || port > 65535) { Toast.error('请输入 1-65535 之间的端口'); return; }
 
-      API.addDevice({ name: name, type: type, plotId: plotId, plotName: plot ? plot.name : '-', ip: ip, port: port }).then(function (res) {
+      API.addDevice({
+        name: name,
+        type: type,
+        plotId: plotId,
+        plotName: plot ? plot.name : '-',
+        ip: ip,
+        port: port,
+        protocol: type === '摄像头' ? protocol : null,
+        username: type === '摄像头' ? username : null,
+        password: type === '摄像头' ? password : null
+      }).then(function (res) {
         if (res.code !== 0) { Toast.error(res.msg || '添加失败'); return; }
         devices.push(res.data);
         renderDevices();
