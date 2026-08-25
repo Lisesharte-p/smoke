@@ -37,17 +37,38 @@ import java.util.zip.GZIPInputStream;
  */
 public class Api {
 
+    /** 读取环境变量，为空时使用默认值。 */
+    private static String env(String key, String def) {
+        String v = System.getenv(key);
+        return (v == null || v.trim().isEmpty()) ? def : v.trim();
+    }
+
+    /** 按顺序读取多个环境变量，返回第一个非空值。 */
+    private static String envFirst(String... keys) {
+        for (String key : keys) {
+            String v = System.getenv(key);
+            if (v != null && !v.trim().isEmpty()) return v.trim();
+        }
+        return "";
+    }
+
+    private static String trimTrailingSlash(String s) {
+        if (s == null) return "";
+        while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        return s;
+    }
+
     /* ==================================================================
        和风天气接入配置（天气预报）
-       后端队友只需两步：
-         1. 去和风天气控制台 console.qweather.com 创建应用，复制 API Key 填到 QW_API_KEY；
-         2. 把 QW_LOCATION 改成基地的 LocationID（城市 ID）或经纬度 "经度,纬度"。
-       填好后数据总览的「天气预报」即显示真实天气；未填 Key 时接口返回 code=1，
-       前端自动降级为本地模拟数据，不影响页面展示。
+       使用环境变量配置，避免把 API Key 提交到 Git：
+         QWEATHER_API_KEY / WEATHER_API_KEY：和风天气 Key
+         QWEATHER_LOCATION：LocationID 或经纬度 "经度,纬度"
+         QWEATHER_HOST：和风天气 API Host
+       填好后数据总览的「天气预报」即显示真实天气；未填 Key 时接口返回 code=1。
        ================================================================== */
-    private static final String QW_API_KEY = "d40c5034375a4e1aa7b28f5ccd401af3";
-    private static final String QW_LOCATION = "106.565952,29.642614"; // 重庆两江新区（金渝大道 66 号附近），和风格式：经度,纬度
-    private static final String QW_HOST = "https://ma5rk8cjh3.re.qweatherapi.com";
+    private static final String QW_API_KEY = envFirst("QWEATHER_API_KEY", "WEATHER_API_KEY");
+    private static final String QW_LOCATION = env("QWEATHER_LOCATION", "106.565952,29.642614"); // 重庆两江新区，和风格式：经度,纬度
+    private static final String QW_HOST = trimTrailingSlash(env("QWEATHER_HOST", "https://ma5rk8cjh3.re.qweatherapi.com"));
 
     /** 处理 /api/* 请求，返回 true 表示已处理（false 交给 WebServer 走静态页面） */
     public static boolean handle(HttpExchange ex) throws IOException {
@@ -1063,7 +1084,7 @@ public class Api {
 
     private static String weatherJson() {
         if (QW_API_KEY == null || QW_API_KEY.trim().isEmpty()) {
-            return "{\"code\":1,\"msg\":" + Json.str("天气接口未配置：请在 Api.java 填写和风天气 QW_API_KEY") + "}";
+            return "{\"code\":1,\"msg\":" + Json.str("天气接口未配置：请设置环境变量 QWEATHER_API_KEY") + "}";
         }
         try {
             Map<String, String> now = fetchQWeatherNow();
@@ -1439,10 +1460,10 @@ public class Api {
        智能问答（DeepSeek 大模型）
        ================================================================== */
 
-    /** DeepSeek API Key：必须从环境变量 DEEPSEEK_API_KEY 读取，勿硬编码（避免随代码提交泄露） */
-    private static final String DEEPSEEK_API_KEY = System.getenv("DEEPSEEK_API_KEY");
-    private static final String DEEPSEEK_URL   = "https://api.deepseek.com/chat/completions";
-    private static final String DEEPSEEK_MODEL = "deepseek-chat";
+    /** 智能问答 API Key：从环境变量读取，勿硬编码（避免随代码提交泄露）。 */
+    private static final String SMART_QA_API_KEY = envFirst("SMART_QA_API_KEY", "DEEPSEEK_API_KEY");
+    private static final String SMART_QA_URL   = env("SMART_QA_API_URL", "https://api.deepseek.com/chat/completions");
+    private static final String SMART_QA_MODEL = env("SMART_QA_MODEL", "deepseek-chat");
     /** 多轮对话最多带上多少条历史（防止上下文过长、超 token 上限） */
     private static final int MAX_CHAT_HISTORY = 20;
     /** RAG 知识库检索返回的最相关知识块条数 */
@@ -2090,13 +2111,12 @@ public class Api {
     }
 
     /**
-     * 调 DeepSeek 的 OpenAI 兼容接口：系统提示（含实时数据 + 地块信息 + RAG 知识库资料）+ 对话历史 → 返回模型回答。
+     * 调智能问答大模型的 OpenAI 兼容接口：系统提示（含实时数据 + 地块信息 + RAG 知识库资料）+ 对话历史 → 返回模型回答。
      * @param kbContext RAG 检索到的知识库参考资料段（空串表示未命中，不加该段）
      */
     private static String deepseekChat(List<Map<String, String>> msgs, String kbContext) throws Exception {
-        // 未配置 key 时给出明确提示（启动前需 set DEEPSEEK_API_KEY=sk-xxx）
-        if (DEEPSEEK_API_KEY == null || DEEPSEEK_API_KEY.isEmpty()) {
-            throw new IOException("未配置环境变量 DEEPSEEK_API_KEY");
+        if (SMART_QA_API_KEY == null || SMART_QA_API_KEY.isEmpty()) {
+            throw new IOException("未配置环境变量 SMART_QA_API_KEY");
         }
         // 系统提示：基础角色 + 当前时间 + 实时数据 + 地块/灌溉历史（让回答结合实时数据）
         String dataCtx = latestReadingsContext();
@@ -2119,7 +2139,7 @@ public class Api {
         }
 
         StringBuilder req = new StringBuilder();
-        req.append("{\"model\":\"").append(DEEPSEEK_MODEL)
+        req.append("{\"model\":\"").append(SMART_QA_MODEL)
            .append("\",\"temperature\":0.7,\"messages\":[");
         req.append("{\"role\":\"system\",\"content\":")
            .append(Json.str(system))
@@ -2134,10 +2154,10 @@ public class Api {
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(DEEPSEEK_URL))
+                .uri(URI.create(SMART_QA_URL))
                 .timeout(Duration.ofSeconds(15))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + DEEPSEEK_API_KEY)
+                .header("Authorization", "Bearer " + SMART_QA_API_KEY)
                 .POST(HttpRequest.BodyPublishers.ofString(req.toString(), StandardCharsets.UTF_8))
                 .build();
 
