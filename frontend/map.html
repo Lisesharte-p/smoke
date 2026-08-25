@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>重庆巡田 - 智慧农业平台</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="map">
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="main">
+      <header class="topbar" id="topbar"></header>
+
+      <main class="content map-page">
+        <div class="map-ops">
+          <div>
+            <div class="section-title">重庆智慧巡田地图</div>
+            <div class="map-page-sub">两江新区示范区 · 地块感知 · 无人机自主巡护</div>
+          </div>
+          <div class="map-actions">
+            <button class="icon-toggle active" id="droneToggle" type="button" title="开关无人机巡航">
+              <span class="toggle-dot"></span>
+              <span id="droneToggleText">无人机巡航中</span>
+            </button>
+            <button class="btn btn-outline btn-sm" id="refreshMap" type="button">刷新数据</button>
+            <button class="btn btn-primary btn-sm" id="openMapAdd" type="button">添加地块</button>
+          </div>
+        </div>
+
+        <div class="map-workspace">
+          <section class="cq-map-shell">
+            <div class="cq-map" id="cqMap">
+              <svg class="cq-terrain" viewBox="0 0 1000 640" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="landGlow" x1="0" x2="1" y1="0" y2="1">
+                    <stop offset="0" stop-color="#16301f"/>
+                    <stop offset=".48" stop-color="#0f2b35"/>
+                    <stop offset="1" stop-color="#123421"/>
+                  </linearGradient>
+                  <linearGradient id="riverGlow" x1="0" x2="1" y1="0" y2="0">
+                    <stop offset="0" stop-color="#0ea5e9"/>
+                    <stop offset=".5" stop-color="#67e8f9"/>
+                    <stop offset="1" stop-color="#22d3ee"/>
+                  </linearGradient>
+                </defs>
+                <path class="cq-boundary" d="M101,356 C89,260 147,165 256,126 C346,91 437,113 507,80 C604,35 707,63 788,130 C878,203 927,321 894,426 C862,529 746,582 619,560 C530,545 458,592 354,562 C244,530 118,470 101,356 Z" />
+                <path class="cq-ridge ridge-a" d="M172 214 C279 166 360 189 446 148 C540 102 654 112 760 176" />
+                <path class="cq-ridge ridge-b" d="M154 445 C250 390 347 420 437 374 C545 320 652 337 828 278" />
+                <path class="cq-river river-a" d="M60 378 C168 350 225 294 326 302 C464 314 516 407 650 398 C775 390 843 324 960 312" />
+                <path class="cq-river river-b" d="M222 70 C268 169 315 246 423 291 C505 326 547 389 579 525" />
+                <path class="cq-road" d="M135 316 C253 265 401 253 520 285 C643 318 721 386 870 395" />
+                <path class="cq-road road-b" d="M290 520 C346 415 433 365 551 336 C637 315 717 242 823 193" />
+              </svg>
+
+              <div class="map-grid-lines"></div>
+              <div class="map-label city-a">嘉陵江</div>
+              <div class="map-label city-b">长江</div>
+              <div class="map-label city-c">两江新区</div>
+              <div class="map-scan"></div>
+              <div class="add-slot-layer" id="slotLayer"></div>
+              <div class="field-layer" id="fieldLayer"></div>
+
+              <div class="drone active" id="drone" aria-hidden="true">
+                <span class="rotor rotor-nw"></span>
+                <span class="rotor rotor-ne"></span>
+                <span class="rotor rotor-sw"></span>
+                <span class="rotor rotor-se"></span>
+                <span class="drone-body">
+                  <span class="drone-eye"></span>
+                </span>
+                <span class="drone-beam"></span>
+              </div>
+
+              <div class="map-empty" id="mapEmpty">
+                <div class="empty-title">暂无地块接入巡田地图</div>
+                <div class="empty-sub">添加地块后将在重庆地图上生成作物田垄和巡护点位</div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="map-side">
+            <div class="map-panel">
+              <div class="panel-kicker">DRONE STATUS</div>
+              <div class="panel-title" id="droneStateTitle">巡航待命</div>
+              <div class="panel-text" id="droneStateText">正在读取地块与传感器数据。</div>
+              <div class="drone-meter">
+                <span id="droneBattery"></span>
+              </div>
+            </div>
+
+            <div class="map-panel selected-panel" id="selectedPanel">
+              <div class="panel-kicker">PLOT DETAIL</div>
+              <div class="panel-title">选择一个地块</div>
+              <div class="panel-text">点击地图上的作物地块查看温度、土壤湿度、亮度和阈值状态。</div>
+            </div>
+
+            <div class="map-panel">
+              <div class="panel-kicker">AUTO IRRIGATION</div>
+              <div class="flight-log" id="flightLog"></div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="mapAddModal">
+    <div class="modal map-modal">
+      <div class="modal-title">添加巡田地块</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">地块名称</label>
+          <input type="text" class="form-control" id="mapPlotName" placeholder="如：山地番茄示范田">
+        </div>
+        <div class="form-group">
+          <label class="form-label">种植作物</label>
+          <input type="text" class="form-control" id="mapPlotCrop" placeholder="如：番茄">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">面积（亩）</label>
+          <input type="number" class="form-control" id="mapPlotArea" min="0.1" step="0.1" placeholder="如：2.4">
+        </div>
+        <div class="form-group">
+          <label class="form-label">地图点位</label>
+          <select class="form-control" id="mapSlotSelect"></select>
+        </div>
+      </div>
+      <div class="form-group mb-0">
+        <label class="form-label">作物形态</label>
+        <select class="form-control" id="mapCropStyle">
+          <option value="auto">按作物自动匹配</option>
+          <option value="leaf">叶菜田垄</option>
+          <option value="fruit">果蔬架栽</option>
+          <option value="grain">谷物条带</option>
+          <option value="vine">藤蔓作物</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelMapAdd" type="button">取消</button>
+        <button class="btn btn-primary" id="confirmMapAdd" type="button">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/mock.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/layout.js"></script>
+  <script src="assets/js/animate.js"></script>
+  <script>
+    Layout.init();
+
+    var slots = [
+      { id: 'cq-01', name: '金渝东坡', x: 66, y: 31, w: 12, h: 8 },
+      { id: 'cq-02', name: '翠云梯田', x: 52, y: 24, w: 11, h: 7 },
+      { id: 'cq-03', name: '礼嘉湾田', x: 41, y: 33, w: 12, h: 8 },
+      { id: 'cq-04', name: '悦来台地', x: 29, y: 28, w: 11, h: 7 },
+      { id: 'cq-05', name: '龙兴丘陵', x: 72, y: 48, w: 13, h: 9 },
+      { id: 'cq-06', name: '鱼复湿地', x: 57, y: 54, w: 12, h: 8 },
+      { id: 'cq-07', name: '水土河谷', x: 36, y: 50, w: 12, h: 8 },
+      { id: 'cq-08', name: '复盛苗圃', x: 48, y: 66, w: 11, h: 7 },
+      { id: 'cq-09', name: '照母山南麓', x: 23, y: 61, w: 12, h: 8 },
+      { id: 'cq-10', name: '唐家沱江岸', x: 78, y: 66, w: 12, h: 8 },
+      { id: 'cq-11', name: '鸳鸯坡地', x: 18, y: 40, w: 10, h: 7 },
+      { id: 'cq-12', name: '明月山试验田', x: 84, y: 38, w: 10, h: 7 }
+    ];
+
+    var state = {
+      plots: [],
+      devices: [],
+      thresholds: {},
+      realtime: {},
+      slotMap: {},
+      selectedPlotId: null,
+      droneOn: true,
+      dronePos: { x: 48, y: 38 },
+      droneTarget: 0,
+      lastTs: 0,
+      activeJobs: {},
+      battery: 96
+    };
+
+    var SLOT_KEY = 'agri_cq_map_slots_v1';
+    var CROP_KEY = 'agri_cq_crop_styles_v1';
+    var cropStyles = loadJson(CROP_KEY, {});
+
+    function canManagePlot() {
+      var role = Layout.getRole();
+      return role === 'admin' || role === 'sysadmin';
+    }
+
+    function loadJson(key, fallback) {
+      try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+    }
+
+    function saveJson(key, data) {
+      try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) {}
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function num(v, fallback) {
+      var n = Number(v);
+      return isNaN(n) ? fallback : n;
+    }
+
+    function fmt(v, unit) {
+      if (v === null || v === undefined || isNaN(Number(v))) return '--';
+      return Number(v).toFixed(1).replace(/\.0$/, '') + (unit || '');
+    }
+
+    function areaNumber(area) {
+      var m = String(area || '').match(/[\d.]+/);
+      return m ? Number(m[0]) : 1;
+    }
+
+    function slotById(id) {
+      return slots.filter(function (s) { return s.id === id; })[0] || slots[0];
+    }
+
+    function plotById(id) {
+      return state.plots.filter(function (p) { return p.id === id; })[0] || null;
+    }
+
+    function syncSlotMap() {
+      var stored = loadJson(SLOT_KEY, {});
+      var used = {};
+      var next = {};
+      state.plots.forEach(function (p, idx) {
+        var saved = stored[p.id];
+        if (saved && !used[saved]) {
+          next[p.id] = saved;
+          used[saved] = true;
+          return;
+        }
+        for (var i = 0; i < slots.length; i++) {
+          if (!used[slots[i].id]) {
+            next[p.id] = slots[i].id;
+            used[slots[i].id] = true;
+            return;
+          }
+        }
+        next[p.id] = slots[idx % slots.length].id;
+      });
+      state.slotMap = next;
+      saveJson(SLOT_KEY, next);
+    }
+
+    function cropType(plot) {
+      var chosen = cropStyles[plot.id];
+      if (chosen && chosen !== 'auto') return chosen;
+      var crop = String(plot.crop || '');
+      if (/瓜|藤|葡萄|黄瓜/.test(crop)) return 'vine';
+      if (/稻|麦|玉米|谷|高粱/.test(crop)) return 'grain';
+      if (/番茄|辣椒|茄|草莓|果/.test(crop)) return 'fruit';
+      return 'leaf';
+    }
+
+    function cropHtml(plot) {
+      var type = cropType(plot);
+      var rows = type === 'grain' ? 5 : 4;
+      var html = '<div class="crop crop-' + type + '">';
+      for (var r = 0; r < rows; r++) {
+        html += '<span class="crop-row">';
+        for (var i = 0; i < 7; i++) {
+          html += '<i></i>';
+        }
+        html += '</span>';
+      }
+      return html + '</div>';
+    }
+
+    function thresholdIssues(rt) {
+      var t = state.thresholds || {};
+      var issues = [];
+      var temp = num(rt && rt.temp, NaN);
+      var hum = num(rt && rt.humidity, NaN);
+      var lux = num(rt && rt.lux, NaN);
+      if (!isNaN(temp) && t.tempMax != null && temp > Number(t.tempMax)) issues.push('温度高于上限');
+      if (!isNaN(temp) && t.tempMin != null && temp < Number(t.tempMin)) issues.push('温度低于下限');
+      if (!isNaN(hum) && t.humidityMax != null && hum > Number(t.humidityMax)) issues.push('湿度高于上限');
+      if (!isNaN(hum) && t.humidityMin != null && hum < Number(t.humidityMin)) issues.push('湿度低于下限');
+      if (!isNaN(lux) && t.luxMax != null && lux > Number(t.luxMax)) issues.push('亮度高于上限');
+      if (!isNaN(lux) && t.luxMin != null && lux < Number(t.luxMin)) issues.push('亮度低于下限');
+      return issues;
+    }
+
+    function renderMap() {
+      var fieldLayer = document.getElementById('fieldLayer');
+      var slotLayer = document.getElementById('slotLayer');
+      fieldLayer.innerHTML = '';
+      slotLayer.innerHTML = '';
+
+      document.getElementById('mapEmpty').style.display = state.plots.length ? 'none' : 'block';
+      document.getElementById('openMapAdd').style.display = canManagePlot() ? 'inline-flex' : 'none';
+
+      var usedSlots = {};
+      state.plots.forEach(function (plot) {
+        usedSlots[state.slotMap[plot.id]] = true;
+        var slot = slotById(state.slotMap[plot.id]);
+        var rt = state.realtime[plot.id] || plot;
+        var issues = thresholdIssues(rt);
+        var field = document.createElement('button');
+        field.type = 'button';
+        field.className = 'cq-field' + (issues.length ? ' alert' : '') + (state.selectedPlotId === plot.id ? ' selected' : '');
+        field.setAttribute('data-plot-id', plot.id);
+        field.style.left = slot.x + '%';
+        field.style.top = slot.y + '%';
+        field.style.width = slot.w + '%';
+        field.style.height = slot.h + '%';
+        field.innerHTML =
+          '<span class="soil-bed"></span>' +
+          cropHtml(plot) +
+          '<span class="field-name">' + esc(plot.name) + '</span>' +
+          '<span class="field-crop">' + esc(plot.crop || '作物') + '</span>' +
+          '<span class="water-effect"><i></i><i></i><i></i><i></i></span>' +
+          (issues.length ? '<span class="field-alarm">阈值</span>' : '');
+        field.addEventListener('click', function () {
+          selectPlot(plot.id);
+        });
+        fieldLayer.appendChild(field);
+      });
+
+      if (canManagePlot()) {
+        slots.forEach(function (slot) {
+          if (usedSlots[slot.id]) return;
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'map-add-slot';
+          btn.style.left = slot.x + '%';
+          btn.style.top = slot.y + '%';
+          btn.style.width = slot.w + '%';
+          btn.style.height = slot.h + '%';
+          btn.innerHTML = '<span>+</span>';
+          btn.title = '在' + slot.name + '添加地块';
+          btn.addEventListener('click', function () { openAddModal(slot.id); });
+          slotLayer.appendChild(btn);
+        });
+      }
+      renderSelected();
+    }
+
+    function metricTile(label, value, unit, danger) {
+      return '<div class="map-metric' + (danger ? ' danger' : '') + '">' +
+        '<span>' + label + '</span><b>' + fmt(value, unit) + '</b></div>';
+    }
+
+    function renderSelected() {
+      var panel = document.getElementById('selectedPanel');
+      var plot = plotById(state.selectedPlotId);
+      if (!plot) {
+        panel.innerHTML =
+          '<div class="panel-kicker">PLOT DETAIL</div>' +
+          '<div class="panel-title">选择一个地块</div>' +
+          '<div class="panel-text">点击地图上的作物地块查看温度、土壤湿度、亮度和阈值状态。</div>';
+        return;
+      }
+      var rt = state.realtime[plot.id] || plot;
+      var issues = thresholdIssues(rt);
+      var devs = state.devices.filter(function (d) { return d.plotId === plot.id; });
+      var water = devs.filter(function (d) { return d.controllable; })[0];
+      var html =
+        '<div class="panel-kicker">' + esc(plot.id) + '</div>' +
+        '<div class="panel-title">' + esc(plot.name) + '</div>' +
+        '<div class="panel-text">' + esc(plot.crop || '-') + ' · ' + esc(plot.area || '-') + ' · ' + devs.length + ' 台设备</div>' +
+        '<div class="map-metrics">' +
+          metricTile('温度', rt.temp, '℃', issues.join('|').indexOf('温度') >= 0) +
+          metricTile('湿度', rt.humidity, '%', issues.join('|').indexOf('湿度') >= 0) +
+          metricTile('亮度', rt.lux, ' lx', issues.join('|').indexOf('亮度') >= 0) +
+        '</div>' +
+        '<div class="threshold-state ' + (issues.length ? 'bad' : 'good') + '">' +
+          (issues.length ? '检测到 ' + issues.join('、') : '当前地块阈值状态正常') +
+        '</div>' +
+        '<div class="panel-actions">' +
+          (issues.length ? '<a class="btn btn-danger btn-sm" href="alarm.html">跳转告警</a>' : '<a class="btn btn-outline btn-sm" href="monitoring.html">实时监测</a>') +
+          (water ? '<button class="btn btn-outline btn-sm" type="button" id="manualIrrigate">GRU浇灌</button>' : '') +
+          (canManagePlot() ? '<button class="btn btn-outline btn-sm" type="button" id="deleteMapPlot">删除地块</button>' : '') +
+        '</div>';
+      panel.innerHTML = html;
+
+      var del = document.getElementById('deleteMapPlot');
+      if (del) del.addEventListener('click', function () { deleteSelectedPlot(plot); });
+      var manual = document.getElementById('manualIrrigate');
+      if (manual) manual.addEventListener('click', function () { startAutoIrrigation(plot, true); });
+    }
+
+    function renderLogs() {
+      var log = document.getElementById('flightLog');
+      if (!log.children.length) {
+        log.innerHTML = '<div class="flight-item">等待无人机巡护事件</div>';
+      }
+    }
+
+    function pushLog(text, type) {
+      var log = document.getElementById('flightLog');
+      if (log.children.length === 1 && log.textContent.indexOf('等待') >= 0) log.innerHTML = '';
+      var item = document.createElement('div');
+      item.className = 'flight-item ' + (type || '');
+      item.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '  ' + text;
+      log.insertBefore(item, log.firstChild);
+      while (log.children.length > 8) log.removeChild(log.lastChild);
+    }
+
+    function updateDronePanel(text) {
+      document.getElementById('droneStateTitle').textContent = state.droneOn ? '自主巡航中' : '巡航已关闭';
+      document.getElementById('droneStateText').textContent = text || (state.droneOn ? '无人机正在沿地块航线巡检。' : '无人机停靠在基站，自动浇灌暂停。');
+      document.getElementById('droneBattery').style.width = state.battery + '%';
+    }
+
+    function routePoints() {
+      if (!state.plots.length) {
+        return [
+          { x: 22, y: 36 },
+          { x: 72, y: 28 },
+          { x: 79, y: 64 },
+          { x: 32, y: 68 }
+        ];
+      }
+      return state.plots.map(function (p) {
+        var slot = slotById(state.slotMap[p.id]);
+        return { x: slot.x + slot.w / 2, y: slot.y + slot.h / 2 - 3, plotId: p.id };
+      });
+    }
+
+    function tickDrone(ts) {
+      if (!state.lastTs) state.lastTs = ts;
+      var dt = Math.min(0.08, (ts - state.lastTs) / 1000);
+      state.lastTs = ts;
+      var drone = document.getElementById('drone');
+      if (state.droneOn) {
+        var route = routePoints();
+        var target = route[state.droneTarget % route.length];
+        var dx = target.x - state.dronePos.x;
+        var dy = target.y - state.dronePos.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        var speed = state.plots.length ? 11 : 8;
+        if (dist < 0.35) {
+          if (target.plotId) inspectPlot(target.plotId);
+          state.droneTarget = (state.droneTarget + 1) % route.length;
+        } else {
+          state.dronePos.x += dx / dist * speed * dt;
+          state.dronePos.y += dy / dist * speed * dt;
+        }
+        var angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        drone.style.left = state.dronePos.x + '%';
+        drone.style.top = state.dronePos.y + '%';
+        drone.style.transform = 'translate(-50%, -50%) rotate(' + angle + 'deg)';
+        state.battery = Math.max(64, state.battery - dt * 0.06);
+      }
+      updateDronePanel();
+      requestAnimationFrame(tickDrone);
+    }
+
+    function inspectPlot(plotId) {
+      var plot = plotById(plotId);
+      if (!plot) return;
+      var rt = state.realtime[plotId] || {};
+      var min = state.thresholds.humidityMin == null ? 40 : Number(state.thresholds.humidityMin);
+      var hum = num(rt.humidity, NaN);
+      if (!isNaN(hum) && hum < min) {
+        startAutoIrrigation(plot, false);
+      } else {
+        updateDronePanel('巡检 ' + plot.name + '：湿度状态正常。');
+      }
+    }
+
+    function setFieldIrrigating(plotId, on) {
+      var field = document.querySelector('[data-plot-id="' + plotId + '"]');
+      if (field) field.classList.toggle('irrigating', !!on);
+    }
+
+    function controlDevice(device, action) {
+      return API.controlIrrigation(device.id, action).then(function (res) {
+        if (res && res.code === 0) {
+          device.running = action === 'on';
+          return true;
+        }
+        pushLog((res && res.msg) || '灌溉设备指令下发失败', 'bad');
+        return false;
+      });
+    }
+
+    function getHistory(plotId) {
+      return API.getHistory(plotId, 7).then(function (res) {
+        return res && res.data ? res.data : null;
+      }).catch(function () { return null; });
+    }
+
+    function gruPlan(plot, rt, history) {
+      var min = state.thresholds.humidityMin == null ? 40 : Number(state.thresholds.humidityMin);
+      var hum = num(rt.humidity, min - 4);
+      var temp = num(rt.temp, 30);
+      var lux = num(rt.lux, 600);
+      var h = history && history.humidity ? history.humidity.filter(function (v) { return v != null; }).map(Number) : [];
+      var trend = h.length > 1 ? (h[h.length - 1] - h[0]) / Math.max(1, h.length - 1) : -0.3;
+      var deficit = Math.max(0, min + 4 - hum);
+      var resetGate = 1 / (1 + Math.exp(-((temp - 28) / 6 + (lux - 700) / 700 - trend)));
+      var updateGate = 1 / (1 + Math.exp(-(deficit / 7 + resetGate)));
+      var area = areaNumber(plot.area);
+      var seconds = Math.round(Math.max(8, Math.min(26, 7 + deficit * 1.35 + updateGate * 8 + area * 0.8)));
+      var liters = Math.max(1.2, area * (deficit + 3) * (0.75 + updateGate * 0.45));
+      return {
+        seconds: seconds,
+        target: Math.min(85, min + 5),
+        liters: liters,
+        minutesText: Math.max(3, Math.round(seconds * 2.5)),
+        confidence: Math.round(72 + updateGate * 22)
+      };
+    }
+
+    function startAutoIrrigation(plot, manual) {
+      if (!state.droneOn && !manual) return;
+      if (state.activeJobs[plot.id]) return;
+      var rt = state.realtime[plot.id] || {};
+      var water = state.devices.filter(function (d) {
+        return d.plotId === plot.id && d.controllable && d.online;
+      })[0];
+      if (!water) {
+        pushLog(plot.name + ' 缺少在线灌溉设备，已跳过自动浇水。', 'bad');
+        return;
+      }
+
+      state.activeJobs[plot.id] = true;
+      getHistory(plot.id).then(function (history) {
+        var plan = gruPlan(plot, rt, history);
+        pushLog(plot.name + ' 湿度偏低，GRU建议约 ' + plan.minutesText + ' 分钟，' + plan.liters.toFixed(1) + ' L，置信度 ' + plan.confidence + '%。', 'warn');
+        updateDronePanel('正在为 ' + plot.name + ' 执行精准浇灌。');
+        return controlDevice(water, 'on').then(function (ok) {
+          if (!ok) {
+            state.activeJobs[plot.id] = false;
+            return;
+          }
+          setFieldIrrigating(plot.id, true);
+          var start = Date.now();
+          var baseHum = num((state.realtime[plot.id] || {}).humidity, 0);
+          var timer = setInterval(function () {
+            var elapsed = (Date.now() - start) / 1000;
+            var ratio = Math.min(1, elapsed / plan.seconds);
+            state.realtime[plot.id] = state.realtime[plot.id] || {};
+            state.realtime[plot.id].humidity = baseHum + (plan.target - baseHum) * ratio;
+            if (state.selectedPlotId === plot.id) renderSelected();
+            if (ratio >= 1 || state.realtime[plot.id].humidity >= plan.target) {
+              clearInterval(timer);
+              controlDevice(water, 'off').then(function () {
+                setFieldIrrigating(plot.id, false);
+                pushLog(plot.name + ' 湿度已回到 ' + fmt(state.realtime[plot.id].humidity, '%') + '，灌溉自动停止。', 'good');
+                state.activeJobs[plot.id] = false;
+                renderMap();
+              });
+            }
+          }, 700);
+        });
+      });
+    }
+
+    function fillSlotOptions(defaultSlotId) {
+      var sel = document.getElementById('mapSlotSelect');
+      var used = {};
+      Object.keys(state.slotMap).forEach(function (pid) { used[state.slotMap[pid]] = true; });
+      sel.innerHTML = '';
+      slots.forEach(function (slot) {
+        if (used[slot.id] && slot.id !== defaultSlotId) return;
+        var opt = document.createElement('option');
+        opt.value = slot.id;
+        opt.textContent = slot.name;
+        if (slot.id === defaultSlotId) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+
+    function openAddModal(slotId) {
+      if (!canManagePlot()) {
+        Toast.error('当前角色无地块管理权限');
+        return;
+      }
+      fillSlotOptions(slotId);
+      document.getElementById('mapPlotName').value = '';
+      document.getElementById('mapPlotCrop').value = '';
+      document.getElementById('mapPlotArea').value = '';
+      document.getElementById('mapCropStyle').value = 'auto';
+      document.getElementById('mapAddModal').style.display = 'flex';
+    }
+
+    function closeAddModal() {
+      document.getElementById('mapAddModal').style.display = 'none';
+    }
+
+    function confirmAddPlot() {
+      var name = document.getElementById('mapPlotName').value.trim();
+      var crop = document.getElementById('mapPlotCrop').value.trim();
+      var area = document.getElementById('mapPlotArea').value.trim();
+      var slotId = document.getElementById('mapSlotSelect').value;
+      var style = document.getElementById('mapCropStyle').value;
+      if (!name || !crop || !area) {
+        Toast.error('请填写地块名称、作物和面积');
+        return;
+      }
+      API.addPlot({ name: name, crop: crop, area: area, devices: [] }).then(function (res) {
+        if (!res || res.code !== 0) {
+          Toast.error((res && res.msg) || '添加地块失败');
+          return;
+        }
+        var plot = res.data;
+        state.slotMap[plot.id] = slotId;
+        if (style !== 'auto') cropStyles[plot.id] = style;
+        saveJson(SLOT_KEY, state.slotMap);
+        saveJson(CROP_KEY, cropStyles);
+        Toast.success('地块「' + name + '」已加入巡田地图');
+        closeAddModal();
+        loadAll(plot.id);
+      });
+    }
+
+    function deleteSelectedPlot(plot) {
+      if (!confirm('确认删除地块「' + plot.name + '」及其关联设备、数据和告警吗？')) return;
+      API.deletePlot(plot.id).then(function (res) {
+        if (!res || res.code !== 0) {
+          Toast.error((res && res.msg) || '删除失败');
+          return;
+        }
+        delete state.slotMap[plot.id];
+        delete cropStyles[plot.id];
+        saveJson(SLOT_KEY, state.slotMap);
+        saveJson(CROP_KEY, cropStyles);
+        state.selectedPlotId = null;
+        Toast.success('地块已删除');
+        loadAll();
+      });
+    }
+
+    function selectPlot(plotId) {
+      state.selectedPlotId = plotId;
+      renderMap();
+    }
+
+    function loadRealtime() {
+      return Promise.all(state.plots.map(function (p) {
+        return API.getRealtime(p.id).then(function (res) {
+          if (res && res.code === 0) state.realtime[p.id] = res.data;
+        }).catch(function () {
+          state.realtime[p.id] = p;
+        });
+      }));
+    }
+
+    function loadAll(selectId) {
+      return Promise.all([
+        API.getPlots(),
+        API.getDevices(),
+        API.getThresholds()
+      ]).then(function (all) {
+        state.plots = (all[0] && all[0].data) || [];
+        state.devices = (all[1] && all[1].data) || [];
+        state.thresholds = (all[2] && all[2].data) || {};
+        syncSlotMap();
+        state.selectedPlotId = selectId || state.selectedPlotId || (state.plots[0] && state.plots[0].id) || null;
+        return loadRealtime();
+      }).then(function () {
+        renderMap();
+        renderLogs();
+        pushLog('地图数据已同步，共 ' + state.plots.length + ' 个地块。', 'good');
+      }).catch(function (e) {
+        Toast.error('巡田地图加载失败：' + e.message);
+      });
+    }
+
+    document.getElementById('droneToggle').addEventListener('click', function () {
+      state.droneOn = !state.droneOn;
+      var btn = document.getElementById('droneToggle');
+      btn.classList.toggle('active', state.droneOn);
+      document.getElementById('drone').classList.toggle('active', state.droneOn);
+      document.getElementById('droneToggleText').textContent = state.droneOn ? '无人机巡航中' : '无人机已关闭';
+      updateDronePanel();
+    });
+    document.getElementById('refreshMap').addEventListener('click', function () { loadAll(); });
+    document.getElementById('openMapAdd').addEventListener('click', function () { openAddModal(); });
+    document.getElementById('cancelMapAdd').addEventListener('click', closeAddModal);
+    document.getElementById('confirmMapAdd').addEventListener('click', confirmAddPlot);
+
+    loadAll().then(function () {
+      requestAnimationFrame(tickDrone);
+      setInterval(function () {
+        loadRealtime().then(renderMap);
+      }, 15000);
+    });
+  </script>
+</body>
+</html>
