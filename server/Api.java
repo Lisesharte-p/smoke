@@ -1067,7 +1067,8 @@ public class Api {
                     + "}";
 
             StringBuilder fc = new StringBuilder("[");
-            for (int i = 0; i < daily.size(); i++) {
+            int days = Math.min(6, daily.size());
+            for (int i = 0; i < days; i++) {
                 if (i > 0) fc.append(',');
                 Map<String, String> d = daily.get(i);
                 fc.append("{\"day\":").append(Json.str(dayLabel(i, d.get("fxDate"))))
@@ -1095,9 +1096,9 @@ public class Api {
         return Json.parseObject(root.get("now"));
     }
 
-    /** 3 天预报：请求 /v7/weather/3d，返回 daily 数组 */
+    /** 7 天预报：请求 /v7/weather/7d，接口层返回今天 + 未来 5 天 */
     private static List<Map<String, String>> fetchQWeatherDaily() throws IOException, InterruptedException {
-        String body = httpGet(QW_HOST + "/v7/weather/3d?location=" + QW_LOCATION + "&key=" + QW_API_KEY);
+        String body = httpGet(QW_HOST + "/v7/weather/7d?location=" + QW_LOCATION + "&key=" + QW_API_KEY);
         Map<String, String> root = Json.parseObject(body);
         if (!"200".equals(root.get("code"))) {
             throw new IOException("和风天气返回 code=" + root.get("code"));
