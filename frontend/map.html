@@ -25,6 +25,10 @@
               <span class="toggle-dot"></span>
               <span id="droneToggleText">无人机巡航中</span>
             </button>
+            <div class="mode-switch" id="irrigationMode">
+              <button class="active" type="button" data-mode="auto">自动灌溉</button>
+              <button type="button" data-mode="manual">手动灌溉</button>
+            </div>
             <button class="btn btn-outline btn-sm" id="refreshMap" type="button">刷新数据</button>
             <button class="btn btn-primary btn-sm" id="openMapAdd" type="button">添加地块</button>
           </div>
@@ -140,6 +144,14 @@
           <option value="vine">藤蔓作物</option>
         </select>
       </div>
+      <div class="form-group mt-16">
+        <div class="flex-between">
+          <label class="form-label" style="margin-bottom:0">绑定设备（可选，与设备管理同步）</label>
+          <button class="btn btn-outline btn-sm" id="addMapDevRow" type="button">添加设备</button>
+        </div>
+        <div class="form-hint">设备字段与设备管理一致；同一块环境监测板可分别绑定温度、湿度、亮度或灌溉设备。</div>
+        <div class="map-dev-rows" id="mapDevRows"></div>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-outline" id="cancelMapAdd" type="button">取消</button>
         <button class="btn btn-primary" id="confirmMapAdd" type="button">确认添加</button>
@@ -177,6 +189,7 @@
       slotMap: {},
       selectedPlotId: null,
       droneOn: true,
+      irrigationMode: 'auto',
       dronePos: { x: 48, y: 38 },
       droneTarget: 0,
       lastTs: 0,
@@ -310,9 +323,12 @@
         var slot = slotById(state.slotMap[plot.id]);
         var rt = state.realtime[plot.id] || plot;
         var issues = thresholdIssues(rt);
+        var hasRunningWater = state.devices.some(function (d) {
+          return d.plotId === plot.id && d.controllable && d.running;
+        });
         var field = document.createElement('button');
         field.type = 'button';
-        field.className = 'cq-field' + (issues.length ? ' alert' : '') + (state.selectedPlotId === plot.id ? ' selected' : '');
+        field.className = 'cq-field' + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : '');
         field.setAttribute('data-plot-id', plot.id);
         field.style.left = slot.x + '%';
         field.style.top = slot.y + '%';
@@ -355,6 +371,28 @@
         '<span>' + label + '</span><b>' + fmt(value, unit) + '</b></div>';
     }
 
+    function irrigationControlsHtml(waterDevices) {
+      if (!waterDevices.length) {
+        return '<div class="irrigation-device empty">该地块暂无灌溉设备，可在添加地块时同步绑定，或前往设备管理添加。</div>';
+      }
+      var html = '<div class="irrigation-devices">';
+      waterDevices.forEach(function (dev) {
+        html +=
+          '<div class="irrigation-device">' +
+            '<div>' +
+              '<b>' + esc(dev.name) + '</b>' +
+              '<span>' + esc(dev.ip || '-') + (dev.port ? ':' + dev.port : '') + ' · ' + (dev.online ? '在线' : '离线') + '</span>' +
+            '</div>' +
+            '<label class="switch">' +
+              '<input type="checkbox" class="map-water-switch" data-id="' + esc(dev.id) + '" ' +
+                (dev.running ? 'checked ' : '') + (dev.online ? '' : 'disabled') + '>' +
+              '<span class="slider"></span>' +
+            '</label>' +
+          '</div>';
+      });
+      return html + '</div>';
+    }
+
     function renderSelected() {
       var panel = document.getElementById('selectedPanel');
       var plot = plotById(state.selectedPlotId);
@@ -368,7 +406,8 @@
       var rt = state.realtime[plot.id] || plot;
       var issues = thresholdIssues(rt);
       var devs = state.devices.filter(function (d) { return d.plotId === plot.id; });
-      var water = devs.filter(function (d) { return d.controllable; })[0];
+      var waterDevices = devs.filter(function (d) { return d.controllable; });
+      var water = waterDevices[0];
       var html =
         '<div class="panel-kicker">' + esc(plot.id) + '</div>' +
         '<div class="panel-title">' + esc(plot.name) + '</div>' +
@@ -381,9 +420,11 @@
         '<div class="threshold-state ' + (issues.length ? 'bad' : 'good') + '">' +
           (issues.length ? '检测到 ' + issues.join('、') : '当前地块阈值状态正常') +
         '</div>' +
+        '<div class="panel-section-title">灌溉设备控制</div>' +
+        irrigationControlsHtml(waterDevices) +
         '<div class="panel-actions">' +
           (issues.length ? '<a class="btn btn-danger btn-sm" href="alarm.html">跳转告警</a>' : '<a class="btn btn-outline btn-sm" href="monitoring.html">实时监测</a>') +
-          (water ? '<button class="btn btn-outline btn-sm" type="button" id="manualIrrigate">GRU浇灌</button>' : '') +
+          (water ? '<button class="btn btn-outline btn-sm" type="button" id="manualIrrigate">GRU推荐浇灌</button>' : '') +
           (canManagePlot() ? '<button class="btn btn-outline btn-sm" type="button" id="deleteMapPlot">删除地块</button>' : '') +
         '</div>';
       panel.innerHTML = html;
@@ -392,6 +433,13 @@
       if (del) del.addEventListener('click', function () { deleteSelectedPlot(plot); });
       var manual = document.getElementById('manualIrrigate');
       if (manual) manual.addEventListener('click', function () { startAutoIrrigation(plot, true); });
+      panel.querySelectorAll('.map-water-switch').forEach(function (input) {
+        input.addEventListener('change', function () {
+          var dev = state.devices.filter(function (d) { return d.id === input.getAttribute('data-id'); })[0];
+          if (!dev) return;
+          controlIrrigationDevice(plot, dev, input.checked ? 'on' : 'off', input);
+        });
+      });
     }
 
     function renderLogs() {
@@ -413,7 +461,8 @@
 
     function updateDronePanel(text) {
       document.getElementById('droneStateTitle').textContent = state.droneOn ? '自主巡航中' : '巡航已关闭';
-      document.getElementById('droneStateText').textContent = text || (state.droneOn ? '无人机正在沿地块航线巡检。' : '无人机停靠在基站，自动浇灌暂停。');
+      var modeText = state.irrigationMode === 'auto' ? '自动灌溉模式' : '手动灌溉模式';
+      document.getElementById('droneStateText').textContent = text || (state.droneOn ? '无人机正在沿地块航线巡检，当前为' + modeText + '。' : '无人机停靠在基站，当前为' + modeText + '。');
       document.getElementById('droneBattery').style.width = state.battery + '%';
     }
 
@@ -467,8 +516,10 @@
       var rt = state.realtime[plotId] || {};
       var min = state.thresholds.humidityMin == null ? 40 : Number(state.thresholds.humidityMin);
       var hum = num(rt.humidity, NaN);
-      if (!isNaN(hum) && hum < min) {
+      if (state.irrigationMode === 'auto' && !isNaN(hum) && hum < min) {
         startAutoIrrigation(plot, false);
+      } else if (state.irrigationMode === 'manual' && !isNaN(hum) && hum < min) {
+        updateDronePanel('巡检 ' + plot.name + '：湿度偏低，当前为手动灌溉模式。');
       } else {
         updateDronePanel('巡检 ' + plot.name + '：湿度状态正常。');
       }
@@ -487,6 +538,23 @@
         }
         pushLog((res && res.msg) || '灌溉设备指令下发失败', 'bad');
         return false;
+      });
+    }
+
+    function controlIrrigationDevice(plot, device, action, input) {
+      if (input) input.disabled = true;
+      controlDevice(device, action).then(function (ok) {
+        if (ok) {
+          setFieldIrrigating(plot.id, action === 'on');
+          pushLog(plot.name + ' 的灌溉设备「' + device.name + '」已' + (action === 'on' ? '开启' : '关闭') + '。', action === 'on' ? 'warn' : 'good');
+          Toast.success('灌溉设备已' + (action === 'on' ? '开启' : '关闭'));
+        } else if (input) {
+          input.checked = action !== 'on';
+          Toast.error('灌溉设备控制失败');
+        }
+        renderSelected();
+      }).finally(function () {
+        if (input) input.disabled = false;
       });
     }
 
@@ -563,6 +631,71 @@
       });
     }
 
+    function addDeviceRow(data) {
+      data = data || {};
+      var wrap = document.getElementById('mapDevRows');
+      var row = document.createElement('div');
+      row.className = 'map-dev-row';
+      row.innerHTML =
+        '<div class="form-row">' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">设备名称</label>' +
+            '<input type="text" class="form-control dev-name" placeholder="如：灌溉设备-01" value="' + esc(data.name || '') + '">' +
+          '</div>' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">设备类型</label>' +
+            '<select class="form-control dev-type">' +
+              '<option>土壤湿度</option>' +
+              '<option>温度</option>' +
+              '<option>亮度</option>' +
+              '<option>环境监测板</option>' +
+              '<option>灌溉设备</option>' +
+            '</select>' +
+          '</div>' +
+        '</div>' +
+        '<div class="form-row mt-8">' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">设备 IP</label>' +
+            '<input type="text" class="form-control dev-ip" placeholder="如 192.168.70.4" value="' + esc(data.ip || '') + '">' +
+          '</div>' +
+          '<div class="form-group mb-0">' +
+            '<label class="form-label">端口</label>' +
+            '<input type="number" class="form-control dev-port" min="1" max="65535" placeholder="如 8888" value="' + esc(data.port || '') + '">' +
+          '</div>' +
+          '<div class="form-group mb-0 map-dev-remove-cell">' +
+            '<label class="form-label">&nbsp;</label>' +
+            '<button class="btn btn-outline btn-sm remove-dev-row" type="button">移除</button>' +
+          '</div>' +
+        '</div>';
+      wrap.appendChild(row);
+      row.querySelector('.dev-type').value = data.type || '灌溉设备';
+      row.querySelector('.remove-dev-row').addEventListener('click', function () {
+        row.remove();
+      });
+    }
+
+    function readDeviceRows() {
+      var devices = [];
+      var rows = document.querySelectorAll('#mapDevRows .map-dev-row');
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var name = row.querySelector('.dev-name').value.trim();
+        var type = row.querySelector('.dev-type').value;
+        var ip = row.querySelector('.dev-ip').value.trim();
+        var portRaw = row.querySelector('.dev-port').value.trim();
+        var empty = !name && !ip && !portRaw;
+        if (empty) continue;
+        if (!name) throw new Error('请填写第 ' + (i + 1) + ' 个设备名称');
+        if (!ip) throw new Error('请填写设备「' + name + '」的 IP');
+        var port = parseInt(portRaw, 10);
+        if (isNaN(port) || port < 1 || port > 65535) {
+          throw new Error('设备「' + name + '」端口需在 1-65535 之间');
+        }
+        devices.push({ name: name, type: type, ip: ip, port: port });
+      }
+      return devices;
+    }
+
     function fillSlotOptions(defaultSlotId) {
       var sel = document.getElementById('mapSlotSelect');
       var used = {};
@@ -588,11 +721,12 @@
       document.getElementById('mapPlotCrop').value = '';
       document.getElementById('mapPlotArea').value = '';
       document.getElementById('mapCropStyle').value = 'auto';
-      document.getElementById('mapAddModal').style.display = 'flex';
+      document.getElementById('mapDevRows').innerHTML = '';
+      document.getElementById('mapAddModal').classList.add('show');
     }
 
     function closeAddModal() {
-      document.getElementById('mapAddModal').style.display = 'none';
+      document.getElementById('mapAddModal').classList.remove('show');
     }
 
     function confirmAddPlot() {
@@ -605,7 +739,14 @@
         Toast.error('请填写地块名称、作物和面积');
         return;
       }
-      API.addPlot({ name: name, crop: crop, area: area, devices: [] }).then(function (res) {
+      var devices;
+      try {
+        devices = readDeviceRows();
+      } catch (e) {
+        Toast.error(e.message);
+        return;
+      }
+      API.addPlot({ name: name, crop: crop, area: area, devices: devices }).then(function (res) {
         if (!res || res.code !== 0) {
           Toast.error((res && res.msg) || '添加地块失败');
           return;
@@ -615,7 +756,7 @@
         if (style !== 'auto') cropStyles[plot.id] = style;
         saveJson(SLOT_KEY, state.slotMap);
         saveJson(CROP_KEY, cropStyles);
-        Toast.success('地块「' + name + '」已加入巡田地图');
+        Toast.success('地块「' + name + '」已加入巡田地图' + (devices.length ? '，并同步绑定 ' + devices.length + ' 台设备' : ''));
         closeAddModal();
         loadAll(plot.id);
       });
@@ -682,8 +823,19 @@
       document.getElementById('droneToggleText').textContent = state.droneOn ? '无人机巡航中' : '无人机已关闭';
       updateDronePanel();
     });
+    document.querySelectorAll('#irrigationMode button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.irrigationMode = btn.getAttribute('data-mode');
+        document.querySelectorAll('#irrigationMode button').forEach(function (b) {
+          b.classList.toggle('active', b === btn);
+        });
+        pushLog('已切换为' + (state.irrigationMode === 'auto' ? '自动灌溉' : '手动灌溉') + '模式。', 'good');
+        updateDronePanel();
+      });
+    });
     document.getElementById('refreshMap').addEventListener('click', function () { loadAll(); });
     document.getElementById('openMapAdd').addEventListener('click', function () { openAddModal(); });
+    document.getElementById('addMapDevRow').addEventListener('click', function () { addDeviceRow(); });
     document.getElementById('cancelMapAdd').addEventListener('click', closeAddModal);
     document.getElementById('confirmMapAdd').addEventListener('click', confirmAddPlot);
 

@@ -1524,6 +1524,33 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   box-shadow: 0 0 12px rgba(52, 211, 153, .85);
 }
 
+.mode-switch {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .72);
+}
+
+.mode-switch button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  color: #d8fff0;
+  background: linear-gradient(135deg, rgba(52, 211, 153, .22), rgba(34, 211, 238, .16));
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, .26);
+}
+
 .map-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -2083,6 +2110,52 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   margin-top: 14px;
 }
 
+.panel-section-title {
+  margin-top: 14px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.irrigation-devices {
+  display: grid;
+  gap: 8px;
+}
+
+.irrigation-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .13);
+  background: rgba(15, 23, 42, .62);
+}
+
+.irrigation-device b,
+.irrigation-device span {
+  display: block;
+}
+
+.irrigation-device b {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.irrigation-device span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.irrigation-device.empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .flight-log {
   display: grid;
   gap: 8px;
@@ -2117,6 +2190,25 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .map-modal {
   width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+
+.map-dev-rows {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.map-dev-row {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .14);
+  background: rgba(15, 23, 42, .52);
+}
+
+.map-dev-remove-cell {
+  flex: 0 0 78px;
 }
 
 @media (max-width: 1180px) {
