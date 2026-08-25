@@ -38,7 +38,9 @@ window.MOCK = (function () {
      ------------------------------------------------------------------ */
   var thresholds = {
     humidityMin: 40,   // 土壤湿度下限(%)
-    tempMax: 35        // 温度上限(℃)
+    tempMax: 35,       // 温度上限(℃)
+    luxMin: 200,       // 亮度下限(lx)
+    luxMax: 800        // 亮度上限(lx)
   };
 
   /* ------------------------------------------------------------------
@@ -109,13 +111,26 @@ window.MOCK = (function () {
       list.push({ icon: '🌡️', tag: '通风', text: hotNames + ' 温度超过 ' + thresholds.tempMax + '℃，建议加强通风降温。', href: 'monitoring.html', action: '看数据' });
     }
 
-    // 4. 设备离线提醒
+    // 4. 光照建议：亮度过高遮阳，亮度过低补光
+    var highLux = plots.filter(function (p) { return p.lux > thresholds.luxMax; });
+    if (highLux.length) {
+      var highLuxNames = highLux.map(function (p) { return p.name; }).join('、');
+      list.push({ icon: '☀️', tag: '遮阳', text: highLuxNames + ' 亮度超过 ' + thresholds.luxMax + ' lx，建议适当遮阳，减少强光灼伤风险。', href: 'monitoring.html', action: '看数据' });
+    }
+
+    var lowLux = plots.filter(function (p) { return p.lux < thresholds.luxMin; });
+    if (lowLux.length) {
+      var lowLuxNames = lowLux.map(function (p) { return p.name; }).join('、');
+      list.push({ icon: '💡', tag: '补光', text: lowLuxNames + ' 亮度低于 ' + thresholds.luxMin + ' lx，建议检查遮挡情况，必要时开启补光。', href: 'monitoring.html', action: '看数据' });
+    }
+
+    // 5. 设备离线提醒
     var offline = devices.filter(function (d) { return !d.online; });
     if (offline.length) {
       list.push({ icon: '🔌', tag: '设备', text: '有 ' + offline.length + ' 台设备离线，请检查供电与网络连接。', href: 'devices.html', action: '去设备' });
     }
 
-    // 5. 防病建议：高湿或雨后
+    // 6. 防病建议：高湿或雨后
     var humid = plots.filter(function (p) { return p.humidity > 70; });
     if (hasRain || humid.length) {
       list.push({ icon: '🐛', tag: '防病', text: '近期湿度偏高，注意通风除湿，预防灰霉病等病害。', href: null, action: '' });
@@ -123,7 +138,7 @@ window.MOCK = (function () {
 
     // 兜底：数据均正常时给一条常规建议
     if (!list.length) {
-      list.push({ icon: '✅', tag: '正常', text: '各地块温湿度均在正常范围，请保持当前管理节奏。', href: null, action: '' });
+      list.push({ icon: '✅', tag: '正常', text: '各地块温度、湿度、亮度均在正常范围，请保持当前管理节奏。', href: null, action: '' });
     }
 
     return list;

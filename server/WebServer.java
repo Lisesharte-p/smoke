@@ -60,9 +60,10 @@ public class WebServer {
         server.setExecutor(Executors.newFixedThreadPool(10));
         server.start();
 
-        // 确保对话历史表、知识库表存在（幂等，多个环境都能跑）
+        // 确保对话历史表、知识库表、阈值字段存在（幂等，多个环境都能跑）
         DBUtil.ensureChatTables();
         DBUtil.ensureKnowledgeTables();
+        DBUtil.ensureThresholdColumns();
 
         // 加载智能问答知识库（RAG 检索用，启动时预载入内存）
         Rag.init();

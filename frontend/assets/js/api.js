@@ -237,6 +237,8 @@ window.API = (function () {
     if (config.useMock) {
       window.MOCK.thresholds.humidityMin = data.humidityMin;
       window.MOCK.thresholds.tempMax = data.tempMax;
+      window.MOCK.thresholds.luxMin = data.luxMin;
+      window.MOCK.thresholds.luxMax = data.luxMax;
       return mockDelay({ code: 0 }, 300);
     }
     return request(config.endpoints.thresholds, { method: 'PUT', data: data });

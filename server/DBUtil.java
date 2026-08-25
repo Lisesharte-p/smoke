@@ -1,7 +1,9 @@
 package server;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -124,6 +126,31 @@ public class DBUtil {
             System.out.println("[DBUtil] 知识库表已就绪");
         } catch (SQLException e) {
             System.out.println("[DBUtil] 建知识库表失败: " + e.getMessage());
+        }
+    }
+
+    /** 确保告警阈值表包含亮度上下限字段（旧库自动补列）。 */
+    public static void ensureThresholdColumns() {
+        try (Connection conn = getConnection();
+             Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "plot_threshold", "lux_min")) {
+                st.execute("ALTER TABLE plot_threshold ADD COLUMN lux_min DECIMAL(8,2) DEFAULT 200 COMMENT '亮度下限（lx）' AFTER temp_max");
+            }
+            if (!columnExists(conn, "plot_threshold", "lux_max")) {
+                st.execute("ALTER TABLE plot_threshold ADD COLUMN lux_max DECIMAL(8,2) DEFAULT 800 COMMENT '亮度上限（lx）' AFTER lux_min");
+            }
+            st.execute("UPDATE plot_threshold SET lux_min = 200 WHERE lux_min IS NULL");
+            st.execute("UPDATE plot_threshold SET lux_max = 800 WHERE lux_max IS NULL");
+            System.out.println("[DBUtil] 告警阈值亮度字段已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 检查告警阈值亮度字段失败: " + e.getMessage());
+        }
+    }
+
+    private static boolean columnExists(Connection conn, String table, String column) throws SQLException {
+        DatabaseMetaData meta = conn.getMetaData();
+        try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, table, column)) {
+            return rs.next();
         }
     }
 }

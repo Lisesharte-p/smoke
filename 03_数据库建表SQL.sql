@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS `plot_threshold` (
     `plot_id`      VARCHAR(16)  PRIMARY KEY COMMENT '地块编号（关联 plot.id），每地块一行',
     `humidity_min` DECIMAL(5,2) DEFAULT 40 COMMENT '土壤湿度下限（%）',
     `temp_max`     DECIMAL(5,2) DEFAULT 35 COMMENT '温度上限（℃）',
+    `lux_min`      DECIMAL(8,2) DEFAULT 200 COMMENT '亮度下限（lx）',
+    `lux_max`      DECIMAL(8,2) DEFAULT 800 COMMENT '亮度上限（lx）',
     `updated_at`   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '告警阈值配置表（每地块一行）';
 
@@ -87,7 +89,7 @@ CREATE TABLE IF NOT EXISTS `alarm` (
     `id`         BIGINT       AUTO_INCREMENT PRIMARY KEY,
     `plot_id`    VARCHAR(16)  NOT NULL COMMENT '关联 plot.id',
     `device_id`  VARCHAR(16)  DEFAULT NULL COMMENT '触发设备（设备离线告警时填）',
-    `alarm_type` VARCHAR(30)  NOT NULL COMMENT '告警类型：土壤湿度过低 / 温度过高 / 设备离线',
+    `alarm_type` VARCHAR(30)  NOT NULL COMMENT '告警类型：土壤湿度过低 / 温度过高 / 亮度过低 / 亮度过高 / 设备离线',
     `value`      VARCHAR(20)  DEFAULT NULL COMMENT '触发时的值（展示型带单位），如 38%、36.5℃、-',
     `level`      VARCHAR(10)  NOT NULL COMMENT '级别：严重 / 警告',
     `status`     VARCHAR(10)  DEFAULT '未处理' COMMENT '状态：未处理 / 已处理',
@@ -132,11 +134,12 @@ CREATE TABLE IF NOT EXISTS `register_request` (
 -- 9. 种子数据（静态参考数据；sensor_data / alarm / control_log 运行时生成，register_request 预置一条演示）
 -- =============================================================
 
--- 9.1 阈值：每个地块一行（P001 湿度下限 40% / 温度上限 35℃；P002 湿度下限 45% / 温度上限 32℃）
-INSERT INTO `plot_threshold` (`plot_id`, `humidity_min`, `temp_max`) VALUES
-('P001', 40, 35),
-('P002', 45, 32)
-ON DUPLICATE KEY UPDATE `humidity_min` = VALUES(`humidity_min`), `temp_max` = VALUES(`temp_max`);
+-- 9.1 阈值：每个地块一行（湿度下限 / 温度上限 / 亮度下限 / 亮度上限）
+INSERT INTO `plot_threshold` (`plot_id`, `humidity_min`, `temp_max`, `lux_min`, `lux_max`) VALUES
+('P001', 40, 35, 200, 800),
+('P002', 45, 32, 200, 800)
+ON DUPLICATE KEY UPDATE `humidity_min` = VALUES(`humidity_min`), `temp_max` = VALUES(`temp_max`),
+                        `lux_min` = VALUES(`lux_min`), `lux_max` = VALUES(`lux_max`);
 
 -- 9.2 用户：三种角色各一个（密码均为占位哈希，正式用 BCrypt 生成后替换）
 INSERT INTO `user` (`username`, `password`, `name`, `role`) VALUES
