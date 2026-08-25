@@ -733,13 +733,13 @@ public class Api {
         if (window != null && intervalSql != null) {
             sql = "SELECT " + selectExpr +
                   " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                  " WHERE d.plot_id = ? AND d.online = 1" + dataTypes +
+                  " WHERE d.plot_id = ?" + dataTypes +
                   " AND s.collected_at >= DATE_SUB(NOW(), INTERVAL " + intervalSql + ")" +
                   " GROUP BY " + groupSql + " ORDER BY x";
         } else {
             sql = "SELECT DATE_FORMAT(s.collected_at, '%Y-%m-%d') AS x, s.metric, AVG(s.value) AS v" +
                   " FROM sensor_data s JOIN device d ON d.id = s.device_id" +
-                  " WHERE d.plot_id = ? AND d.online = 1" + dataTypes +
+                  " WHERE d.plot_id = ?" + dataTypes +
                   " AND s.collected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)" +
                   " GROUP BY x, s.metric ORDER BY x";
         }
