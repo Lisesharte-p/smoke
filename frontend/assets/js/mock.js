@@ -38,6 +38,8 @@ window.MOCK = (function () {
      ------------------------------------------------------------------ */
   var thresholds = {
     humidityMin: 40,   // 土壤湿度下限(%)
+    humidityMax: 70,   // 土壤湿度上限(%)
+    tempMin: 10,       // 温度下限(℃)
     tempMax: 35,       // 温度上限(℃)
     luxMin: 200,       // 亮度下限(lx)
     luxMax: 800        // 亮度上限(lx)
@@ -98,27 +100,39 @@ window.MOCK = (function () {
     }
 
     // 2. 灌溉建议：土壤湿度低于阈值的干旱地块
-    var dry = plots.filter(function (p) { return p.humidity < thresholds.humidityMin; });
+    var dry = plots.filter(function (p) { return thresholds.humidityMin !== null && p.humidity < thresholds.humidityMin; });
     if (dry.length) {
       var dryNames = dry.map(function (p) { return p.name; }).join('、');
       list.push({ icon: '💧', tag: '灌溉', text: dryNames + ' 土壤湿度低于阈值 ' + thresholds.humidityMin + '%，建议尽快补水。', href: 'control.html', action: '去灌溉' });
     }
 
-    // 3. 通风建议：温度超过阈值的高温地块
-    var hot = plots.filter(function (p) { return p.temp > thresholds.tempMax; });
+    var wet = plots.filter(function (p) { return thresholds.humidityMax !== null && p.humidity > thresholds.humidityMax; });
+    if (wet.length) {
+      var wetNames = wet.map(function (p) { return p.name; }).join('、');
+      list.push({ icon: '💦', tag: '排湿', text: wetNames + ' 土壤湿度高于阈值 ' + thresholds.humidityMax + '%，建议减少灌溉并加强通风排湿。', href: 'monitoring.html', action: '看数据' });
+    }
+
+    // 3. 温度建议：低温保温，高温通风
+    var cold = plots.filter(function (p) { return thresholds.tempMin !== null && p.temp < thresholds.tempMin; });
+    if (cold.length) {
+      var coldNames = cold.map(function (p) { return p.name; }).join('、');
+      list.push({ icon: '🧊', tag: '保温', text: coldNames + ' 温度低于阈值 ' + thresholds.tempMin + '℃，建议检查保温措施，必要时升温。', href: 'monitoring.html', action: '看数据' });
+    }
+
+    var hot = plots.filter(function (p) { return thresholds.tempMax !== null && p.temp > thresholds.tempMax; });
     if (hot.length) {
       var hotNames = hot.map(function (p) { return p.name; }).join('、');
       list.push({ icon: '🌡️', tag: '通风', text: hotNames + ' 温度超过 ' + thresholds.tempMax + '℃，建议加强通风降温。', href: 'monitoring.html', action: '看数据' });
     }
 
     // 4. 光照建议：亮度过高遮阳，亮度过低补光
-    var highLux = plots.filter(function (p) { return p.lux > thresholds.luxMax; });
+    var highLux = plots.filter(function (p) { return thresholds.luxMax !== null && p.lux > thresholds.luxMax; });
     if (highLux.length) {
       var highLuxNames = highLux.map(function (p) { return p.name; }).join('、');
       list.push({ icon: '☀️', tag: '遮阳', text: highLuxNames + ' 亮度超过 ' + thresholds.luxMax + ' lx，建议适当遮阳，减少强光灼伤风险。', href: 'monitoring.html', action: '看数据' });
     }
 
-    var lowLux = plots.filter(function (p) { return p.lux < thresholds.luxMin; });
+    var lowLux = plots.filter(function (p) { return thresholds.luxMin !== null && p.lux < thresholds.luxMin; });
     if (lowLux.length) {
       var lowLuxNames = lowLux.map(function (p) { return p.name; }).join('、');
       list.push({ icon: '💡', tag: '补光', text: lowLuxNames + ' 亮度低于 ' + thresholds.luxMin + ' lx，建议检查遮挡情况，必要时开启补光。', href: 'monitoring.html', action: '看数据' });

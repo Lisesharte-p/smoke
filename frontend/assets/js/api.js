@@ -236,6 +236,8 @@ window.API = (function () {
   function saveThresholds(data) {
     if (config.useMock) {
       window.MOCK.thresholds.humidityMin = data.humidityMin;
+      window.MOCK.thresholds.humidityMax = data.humidityMax;
+      window.MOCK.thresholds.tempMin = data.tempMin;
       window.MOCK.thresholds.tempMax = data.tempMax;
       window.MOCK.thresholds.luxMin = data.luxMin;
       window.MOCK.thresholds.luxMax = data.luxMax;

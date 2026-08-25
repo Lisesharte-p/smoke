@@ -35,6 +35,16 @@
               <div class="form-hint">低于该值时触发「土壤湿度过低」告警</div>
             </div>
             <div class="form-group mb-0">
+              <label class="form-label">土壤湿度上限（%）</label>
+              <input type="number" class="form-control" id="humidityMax" min="0" max="100">
+              <div class="form-hint">高于该值时触发「土壤湿度过高」告警</div>
+            </div>
+            <div class="form-group mb-0">
+              <label class="form-label">温度下限（℃）</label>
+              <input type="number" class="form-control" id="tempMin" min="-20" max="80">
+              <div class="form-hint">低于该值时触发「温度过低」告警</div>
+            </div>
+            <div class="form-group mb-0">
               <label class="form-label">温度上限（℃）</label>
               <input type="number" class="form-control" id="tempMax" min="-20" max="80">
               <div class="form-hint">高于该值时触发「温度过高」告警</div>
@@ -52,6 +62,9 @@
           </div>
           <div class="mt-16">
             <button class="btn btn-primary" id="saveThreshold">💾 保存阈值</button>
+            <button class="btn btn-outline" id="deleteHumidityThreshold">删除湿度阈值</button>
+            <button class="btn btn-outline" id="deleteTempThreshold">删除温度阈值</button>
+            <button class="btn btn-outline" id="deleteLuxThreshold">删除亮度阈值</button>
           </div>
         </div>
 
@@ -159,36 +172,98 @@
     /* ---------- 加载阈值 ---------- */
     function loadThresholds() {
       API.getThresholds().then(function (res) {
-        document.getElementById('humidityMin').value = res.data.humidityMin;
-        document.getElementById('tempMax').value = res.data.tempMax;
-        document.getElementById('luxMin').value = res.data.luxMin;
-        document.getElementById('luxMax').value = res.data.luxMax;
+        setValue('humidityMin', res.data.humidityMin);
+        setValue('humidityMax', res.data.humidityMax);
+        setValue('tempMin', res.data.tempMin);
+        setValue('tempMax', res.data.tempMax);
+        setValue('luxMin', res.data.luxMin);
+        setValue('luxMax', res.data.luxMax);
       });
     }
 
-    /* ---------- 保存阈值 ---------- */
-    document.getElementById('saveThreshold').addEventListener('click', function () {
-      var humidityMin = parseInt(document.getElementById('humidityMin').value, 10);
-      var tempMax = parseInt(document.getElementById('tempMax').value, 10);
-      var luxMin = parseInt(document.getElementById('luxMin').value, 10);
-      var luxMax = parseInt(document.getElementById('luxMax').value, 10);
+    function setValue(id, value) {
+      document.getElementById(id).value = (value === null || value === undefined) ? '' : value;
+    }
 
-      if (isNaN(humidityMin) || isNaN(tempMax) || isNaN(luxMin) || isNaN(luxMax)) {
-        Toast.error('请填写完整的阈值数值');
+    function thresholdValue(id) {
+      var raw = document.getElementById(id).value.trim();
+      if (raw === '') return null;
+      var n = Number(raw);
+      return isNaN(n) ? NaN : n;
+    }
+
+    function clearThresholdGroup(group) {
+      if (group === 'humidity') {
+        setValue('humidityMin', null);
+        setValue('humidityMax', null);
+      } else if (group === 'temp') {
+        setValue('tempMin', null);
+        setValue('tempMax', null);
+      } else if (group === 'lux') {
+        setValue('luxMin', null);
+        setValue('luxMax', null);
+      }
+      saveThresholds(group);
+    }
+
+    /* ---------- 保存阈值 ---------- */
+    function saveThresholds(deletedGroup) {
+      var humidityMin = thresholdValue('humidityMin');
+      var humidityMax = thresholdValue('humidityMax');
+      var tempMin = thresholdValue('tempMin');
+      var tempMax = thresholdValue('tempMax');
+      var luxMin = thresholdValue('luxMin');
+      var luxMax = thresholdValue('luxMax');
+
+      if ([humidityMin, humidityMax, tempMin, tempMax, luxMin, luxMax].some(function (v) { return isNaN(v); })) {
+        Toast.error('阈值必须是数字，留空表示不启用该项');
         return;
       }
-      if (luxMin > luxMax) {
+      if (humidityMin !== null && humidityMax !== null && humidityMin > humidityMax) {
+        Toast.error('湿度下限不能大于湿度上限');
+        return;
+      }
+      if (tempMin !== null && tempMax !== null && tempMin > tempMax) {
+        Toast.error('温度下限不能大于温度上限');
+        return;
+      }
+      if (luxMin !== null && luxMax !== null && luxMin > luxMax) {
         Toast.error('亮度下限不能大于亮度上限');
         return;
       }
 
-      API.saveThresholds({ humidityMin: humidityMin, tempMax: tempMax, luxMin: luxMin, luxMax: luxMax }).then(function (res) {
+      API.saveThresholds({
+        humidityMin: humidityMin,
+        humidityMax: humidityMax,
+        tempMin: tempMin,
+        tempMax: tempMax,
+        luxMin: luxMin,
+        luxMax: luxMax
+      }).then(function (res) {
         if (res && res.code !== 0) {
           Toast.error(res.msg || '保存失败');
           return;
         }
-        Toast.success('阈值已保存：湿度下限 ' + humidityMin + '%，温度上限 ' + tempMax + '℃，亮度范围 ' + luxMin + '-' + luxMax + ' lx');
+        if (deletedGroup) {
+          var label = deletedGroup === 'humidity' ? '湿度' : (deletedGroup === 'temp' ? '温度' : '亮度');
+          Toast.success(label + '阈值已删除');
+        } else {
+          Toast.success('阈值已保存');
+        }
       });
+    }
+
+    document.getElementById('saveThreshold').addEventListener('click', function () {
+      saveThresholds();
+    });
+    document.getElementById('deleteHumidityThreshold').addEventListener('click', function () {
+      clearThresholdGroup('humidity');
+    });
+    document.getElementById('deleteTempThreshold').addEventListener('click', function () {
+      clearThresholdGroup('temp');
+    });
+    document.getElementById('deleteLuxThreshold').addEventListener('click', function () {
+      clearThresholdGroup('lux');
     });
 
     /* ---------- 初始化 ---------- */

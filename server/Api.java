@@ -927,11 +927,7 @@ public class Api {
      * 天气类建议因后端无气象数据源暂不生成，其余规则与前端 mock 保持一致。
      */
     private static String adviceJson() throws SQLException {
-        BigDecimal[] t = currentThresholds();
-        BigDecimal humidityMin = t[0];
-        BigDecimal tempMax = t[1];
-        BigDecimal luxMin = t[2];
-        BigDecimal luxMax = t[3];
+        ThresholdConfig t = currentThresholds();
 
         // 先取出所有地块编号与名称，再逐地块取最新温湿度和亮度（复用 latestValue 的在线+类型过滤）
         List<String[]> plots = new ArrayList<>();
@@ -944,6 +940,8 @@ public class Api {
         }
 
         List<String> dryNames = new ArrayList<>();
+        List<String> wetNames = new ArrayList<>();
+        List<String> coldNames = new ArrayList<>();
         List<String> hotNames = new ArrayList<>();
         List<String> lowLuxNames = new ArrayList<>();
         List<String> highLuxNames = new ArrayList<>();
@@ -953,10 +951,12 @@ public class Api {
             BigDecimal hum = latestValue(p[0], "humidity");
             BigDecimal temp = latestValue(p[0], "temp");
             BigDecimal lux = latestValue(p[0], "lux");
-            if (hum != null && hum.compareTo(humidityMin) < 0) dryNames.add(name);
-            if (temp != null && temp.compareTo(tempMax) > 0) hotNames.add(name);
-            if (lux != null && lux.compareTo(luxMin) < 0) lowLuxNames.add(name);
-            if (lux != null && lux.compareTo(luxMax) > 0) highLuxNames.add(name);
+            if (hum != null && t.humidityMin != null && hum.compareTo(t.humidityMin) < 0) dryNames.add(name);
+            if (hum != null && t.humidityMax != null && hum.compareTo(t.humidityMax) > 0) wetNames.add(name);
+            if (temp != null && t.tempMin != null && temp.compareTo(t.tempMin) < 0) coldNames.add(name);
+            if (temp != null && t.tempMax != null && temp.compareTo(t.tempMax) > 0) hotNames.add(name);
+            if (lux != null && t.luxMin != null && lux.compareTo(t.luxMin) < 0) lowLuxNames.add(name);
+            if (lux != null && t.luxMax != null && lux.compareTo(t.luxMax) > 0) highLuxNames.add(name);
             if (hum != null && hum.compareTo(new BigDecimal("70")) > 0) humid = true;
         }
 
@@ -965,22 +965,32 @@ public class Api {
         List<String> items = new ArrayList<>();
         if (!dryNames.isEmpty()) {
             items.add(adviceItem("💧", "灌溉",
-                    joinNames(dryNames) + " 土壤湿度低于阈值 " + numStr(humidityMin) + "%，建议尽快补水。",
+                    joinNames(dryNames) + " 土壤湿度低于阈值 " + numStr(t.humidityMin) + "%，建议尽快补水。",
                     "control.html", "去灌溉"));
+        }
+        if (!wetNames.isEmpty()) {
+            items.add(adviceItem("💦", "排湿",
+                    joinNames(wetNames) + " 土壤湿度高于阈值 " + numStr(t.humidityMax) + "%，建议减少灌溉并加强通风排湿。",
+                    "monitoring.html", "看数据"));
+        }
+        if (!coldNames.isEmpty()) {
+            items.add(adviceItem("🧊", "保温",
+                    joinNames(coldNames) + " 温度低于阈值 " + numStr(t.tempMin) + "℃，建议检查保温措施，必要时升温。",
+                    "monitoring.html", "看数据"));
         }
         if (!hotNames.isEmpty()) {
             items.add(adviceItem("🌡️", "通风",
-                    joinNames(hotNames) + " 温度超过 " + numStr(tempMax) + "℃，建议加强通风降温。",
+                    joinNames(hotNames) + " 温度超过 " + numStr(t.tempMax) + "℃，建议加强通风降温。",
                     "monitoring.html", "看数据"));
         }
         if (!highLuxNames.isEmpty()) {
             items.add(adviceItem("☀️", "遮阳",
-                    joinNames(highLuxNames) + " 亮度超过 " + numStr(luxMax) + " lx，建议适当遮阳，减少强光灼伤风险。",
+                    joinNames(highLuxNames) + " 亮度超过 " + numStr(t.luxMax) + " lx，建议适当遮阳，减少强光灼伤风险。",
                     "monitoring.html", "看数据"));
         }
         if (!lowLuxNames.isEmpty()) {
             items.add(adviceItem("💡", "补光",
-                    joinNames(lowLuxNames) + " 亮度低于 " + numStr(luxMin) + " lx，建议检查遮挡情况，必要时开启补光。",
+                    joinNames(lowLuxNames) + " 亮度低于 " + numStr(t.luxMin) + " lx，建议检查遮挡情况，必要时开启补光。",
                     "monitoring.html", "看数据"));
         }
         if (offline > 0) {
@@ -1173,76 +1183,67 @@ public class Api {
        阈值 / 告警
        ================================================================== */
 
-    /** 当前阈值：取第一个地块的配置（每地块一行），全部没配置时用默认 40 / 35 / 200 / 800 */
-    private static BigDecimal[] currentThresholds() throws SQLException {
-        BigDecimal humidityMin = new BigDecimal(40);
-        BigDecimal tempMax = new BigDecimal(35);
-        BigDecimal luxMin = new BigDecimal(200);
-        BigDecimal luxMax = new BigDecimal(800);
-        String sql = "SELECT humidity_min, temp_max, lux_min, lux_max FROM plot_threshold ORDER BY plot_id LIMIT 1";
+    /** 当前阈值：取第一个地块的配置（每地块一行）；无配置行时使用默认上下限。 */
+    private static ThresholdConfig currentThresholds() throws SQLException {
+        ThresholdConfig cfg = ThresholdConfig.defaults();
+        String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold ORDER BY plot_id LIMIT 1";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
             if (rs.next()) {
-                humidityMin = defaultIfNull(rs.getBigDecimal("humidity_min"), humidityMin);
-                tempMax = defaultIfNull(rs.getBigDecimal("temp_max"), tempMax);
-                luxMin = defaultIfNull(rs.getBigDecimal("lux_min"), luxMin);
-                luxMax = defaultIfNull(rs.getBigDecimal("lux_max"), luxMax);
+                cfg.humidityMin = rs.getBigDecimal("humidity_min");
+                cfg.humidityMax = rs.getBigDecimal("humidity_max");
+                cfg.tempMin = rs.getBigDecimal("temp_min");
+                cfg.tempMax = rs.getBigDecimal("temp_max");
+                cfg.luxMin = rs.getBigDecimal("lux_min");
+                cfg.luxMax = rs.getBigDecimal("lux_max");
             }
         }
-        return new BigDecimal[]{humidityMin, tempMax, luxMin, luxMax};
-    }
-
-    private static BigDecimal defaultIfNull(BigDecimal value, BigDecimal fallback) {
-        return value == null ? fallback : value;
+        return cfg;
     }
 
     /**
      * GET /api/thresholds —— 阈值配置。
      * 前端只有一个全局编辑器，DB 是每地块一行（plot_threshold）；
-     * 这里返回当前阈值（首个地块），未配置时用默认值 40 / 35。
+     * 这里返回当前阈值（首个地块），null 表示该类阈值已删除/禁用。
      */
     private static String thresholdsJson() throws SQLException {
-        BigDecimal[] t = currentThresholds();
+        ThresholdConfig t = currentThresholds();
         return "{\"code\":0,\"data\":{"
-                + "\"humidityMin\":" + Json.num(t[0].stripTrailingZeros().toPlainString())
-                + ",\"tempMax\":" + Json.num(t[1].stripTrailingZeros().toPlainString())
-                + ",\"luxMin\":" + Json.num(t[2].stripTrailingZeros().toPlainString())
-                + ",\"luxMax\":" + Json.num(t[3].stripTrailingZeros().toPlainString())
+                + "\"humidityMin\":" + Json.num(numLit(t.humidityMin))
+                + ",\"humidityMax\":" + Json.num(numLit(t.humidityMax))
+                + ",\"tempMin\":" + Json.num(numLit(t.tempMin))
+                + ",\"tempMax\":" + Json.num(numLit(t.tempMax))
+                + ",\"luxMin\":" + Json.num(numLit(t.luxMin))
+                + ",\"luxMax\":" + Json.num(numLit(t.luxMax))
                 + "}}";
     }
 
     /**
      * PUT /api/thresholds —— 保存阈值。
-     * body: {humidityMin, tempMax, luxMin, luxMax}；对每个地块 upsert 一份，保证前端全局编辑后各地块一致。
+     * body: {humidityMin, humidityMax, tempMin, tempMax, luxMin, luxMax}；值为 null 表示删除对应阈值。
      */
     private static String saveThresholdsJson(HttpExchange ex) throws IOException, SQLException {
         Map<String, String> body = Json.parseObject(readBody(ex));
-        String h = body.get("humidityMin");
-        String t = body.get("tempMax");
-        String lMin = body.get("luxMin");
-        String lMax = body.get("luxMax");
-        if (h == null || t == null || lMin == null || lMax == null) {
-            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：humidityMin/tempMax/luxMin/luxMax 必填") + "}";
-        }
-        BigDecimal humidityMin;
-        BigDecimal tempMax;
-        BigDecimal luxMin;
-        BigDecimal luxMax;
+        ThresholdConfig cfg;
         try {
-            humidityMin = new BigDecimal(h);
-            tempMax = new BigDecimal(t);
-            luxMin = new BigDecimal(lMin);
-            luxMax = new BigDecimal(lMax);
+            cfg = ThresholdConfig.fromBody(body);
         } catch (NumberFormatException e) {
             return "{\"code\":1,\"msg\":" + Json.str("参数错误：阈值必须是数字") + "}";
         }
-        if (luxMin.compareTo(luxMax) > 0) {
+        if (cfg.humidityMin != null && cfg.humidityMax != null && cfg.humidityMin.compareTo(cfg.humidityMax) > 0) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：湿度下限不能大于湿度上限") + "}";
+        }
+        if (cfg.tempMin != null && cfg.tempMax != null && cfg.tempMin.compareTo(cfg.tempMax) > 0) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：温度下限不能大于温度上限") + "}";
+        }
+        if (cfg.luxMin != null && cfg.luxMax != null && cfg.luxMin.compareTo(cfg.luxMax) > 0) {
             return "{\"code\":1,\"msg\":" + Json.str("参数错误：亮度下限不能大于亮度上限") + "}";
         }
         String sql =
-                "INSERT INTO plot_threshold(plot_id, humidity_min, temp_max, lux_min, lux_max) VALUES (?, ?, ?, ?, ?)" +
-                " ON DUPLICATE KEY UPDATE humidity_min = VALUES(humidity_min), temp_max = VALUES(temp_max)," +
+                "INSERT INTO plot_threshold(plot_id, humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max) VALUES (?, ?, ?, ?, ?, ?, ?)" +
+                " ON DUPLICATE KEY UPDATE humidity_min = VALUES(humidity_min), humidity_max = VALUES(humidity_max)," +
+                " temp_min = VALUES(temp_min), temp_max = VALUES(temp_max)," +
                 " lux_min = VALUES(lux_min), lux_max = VALUES(lux_max)";
         try (Connection conn = DBUtil.getConnection()) {
             // 1. 收集全部地块编号
@@ -1255,16 +1256,60 @@ public class Api {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 for (String plotId : plotIds) {
                     ps.setString(1, plotId);
-                    ps.setBigDecimal(2, humidityMin);
-                    ps.setBigDecimal(3, tempMax);
-                    ps.setBigDecimal(4, luxMin);
-                    ps.setBigDecimal(5, luxMax);
+                    ps.setBigDecimal(2, cfg.humidityMin);
+                    ps.setBigDecimal(3, cfg.humidityMax);
+                    ps.setBigDecimal(4, cfg.tempMin);
+                    ps.setBigDecimal(5, cfg.tempMax);
+                    ps.setBigDecimal(6, cfg.luxMin);
+                    ps.setBigDecimal(7, cfg.luxMax);
                     ps.addBatch();
                 }
                 ps.executeBatch();
             }
         }
         return "{\"code\":0}";
+    }
+
+    private static String numLit(BigDecimal b) {
+        return b == null ? null : b.stripTrailingZeros().toPlainString();
+    }
+
+    private static class ThresholdConfig {
+        BigDecimal humidityMin;
+        BigDecimal humidityMax;
+        BigDecimal tempMin;
+        BigDecimal tempMax;
+        BigDecimal luxMin;
+        BigDecimal luxMax;
+
+        static ThresholdConfig defaults() {
+            ThresholdConfig c = new ThresholdConfig();
+            c.humidityMin = new BigDecimal(40);
+            c.humidityMax = new BigDecimal(70);
+            c.tempMin = new BigDecimal(10);
+            c.tempMax = new BigDecimal(35);
+            c.luxMin = new BigDecimal(200);
+            c.luxMax = new BigDecimal(800);
+            return c;
+        }
+
+        static ThresholdConfig fromBody(Map<String, String> body) {
+            ThresholdConfig c = new ThresholdConfig();
+            c.humidityMin = nullableDecimal(body.get("humidityMin"));
+            c.humidityMax = nullableDecimal(body.get("humidityMax"));
+            c.tempMin = nullableDecimal(body.get("tempMin"));
+            c.tempMax = nullableDecimal(body.get("tempMax"));
+            c.luxMin = nullableDecimal(body.get("luxMin"));
+            c.luxMax = nullableDecimal(body.get("luxMax"));
+            return c;
+        }
+
+        private static BigDecimal nullableDecimal(String value) {
+            if (value == null) return null;
+            String v = value.trim();
+            if (v.isEmpty() || "null".equalsIgnoreCase(v)) return null;
+            return new BigDecimal(v);
+        }
     }
 
     /**
@@ -2649,40 +2694,49 @@ public class Api {
 
     /** 越过阈值时插入一条告警（同一地块同类型未处理告警不重复插） */
     static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
-        BigDecimal humidityMin = new BigDecimal(40);
-        BigDecimal tempMax = new BigDecimal(35);
-        BigDecimal luxMin = new BigDecimal(200);
-        BigDecimal luxMax = new BigDecimal(800);
-        String sql = "SELECT humidity_min, temp_max, lux_min, lux_max FROM plot_threshold WHERE plot_id = ?";
+        ThresholdConfig cfg = null;
+        String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold WHERE plot_id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, plotId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    humidityMin = defaultIfNull(rs.getBigDecimal("humidity_min"), humidityMin);
-                    tempMax = defaultIfNull(rs.getBigDecimal("temp_max"), tempMax);
-                    luxMin = defaultIfNull(rs.getBigDecimal("lux_min"), luxMin);
-                    luxMax = defaultIfNull(rs.getBigDecimal("lux_max"), luxMax);
+                    cfg = new ThresholdConfig();
+                    cfg.humidityMin = rs.getBigDecimal("humidity_min");
+                    cfg.humidityMax = rs.getBigDecimal("humidity_max");
+                    cfg.tempMin = rs.getBigDecimal("temp_min");
+                    cfg.tempMax = rs.getBigDecimal("temp_max");
+                    cfg.luxMin = rs.getBigDecimal("lux_min");
+                    cfg.luxMax = rs.getBigDecimal("lux_max");
                 }
             }
         }
+        if (cfg == null) cfg = ThresholdConfig.defaults();
 
         String alarmType = null;
         String alarmValue = null;
         String level = null;
-        if ("humidity".equals(metric) && value.compareTo(humidityMin) < 0) {
+        if ("humidity".equals(metric) && cfg.humidityMin != null && value.compareTo(cfg.humidityMin) < 0) {
             alarmType = "土壤湿度过低";
             alarmValue = value.stripTrailingZeros().toPlainString() + "%";
             level = "警告";
-        } else if ("temp".equals(metric) && value.compareTo(tempMax) > 0) {
+        } else if ("humidity".equals(metric) && cfg.humidityMax != null && value.compareTo(cfg.humidityMax) > 0) {
+            alarmType = "土壤湿度过高";
+            alarmValue = value.stripTrailingZeros().toPlainString() + "%";
+            level = "警告";
+        } else if ("temp".equals(metric) && cfg.tempMin != null && value.compareTo(cfg.tempMin) < 0) {
+            alarmType = "温度过低";
+            alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
+            level = "警告";
+        } else if ("temp".equals(metric) && cfg.tempMax != null && value.compareTo(cfg.tempMax) > 0) {
             alarmType = "温度过高";
             alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
             level = "严重";
-        } else if ("lux".equals(metric) && value.compareTo(luxMin) < 0) {
+        } else if ("lux".equals(metric) && cfg.luxMin != null && value.compareTo(cfg.luxMin) < 0) {
             alarmType = "亮度过低";
             alarmValue = value.stripTrailingZeros().toPlainString() + " lx";
             level = "警告";
-        } else if ("lux".equals(metric) && value.compareTo(luxMax) > 0) {
+        } else if ("lux".equals(metric) && cfg.luxMax != null && value.compareTo(cfg.luxMax) > 0) {
             alarmType = "亮度过高";
             alarmValue = value.stripTrailingZeros().toPlainString() + " lx";
             level = "警告";

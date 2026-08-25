@@ -60,6 +60,8 @@ CREATE TABLE `sensor_data` (
 CREATE TABLE `plot_threshold` (
   `plot_id` varchar(16) NOT NULL COMMENT '地块编号（关联 plot.id），每地块一行',
   `humidity_min` decimal(5,2) DEFAULT '40.00' COMMENT '土壤湿度下限（%）',
+  `humidity_max` decimal(5,2) DEFAULT '70.00' COMMENT '土壤湿度上限（%）',
+  `temp_min` decimal(5,2) DEFAULT '10.00' COMMENT '温度下限（℃）',
   `temp_max` decimal(5,2) DEFAULT '35.00' COMMENT '温度上限（℃）',
   `lux_min` decimal(8,2) DEFAULT '200.00' COMMENT '亮度下限（lx）',
   `lux_max` decimal(8,2) DEFAULT '800.00' COMMENT '亮度上限（lx）',
@@ -72,7 +74,7 @@ CREATE TABLE `alarm` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `plot_id` varchar(16) NOT NULL COMMENT '关联 plot.id',
   `device_id` varchar(16) DEFAULT NULL COMMENT '触发设备（设备离线告警时填）',
-  `alarm_type` varchar(30) NOT NULL COMMENT '告警类型：土壤湿度过低 / 温度过高 / 亮度过低 / 亮度过高 / 设备离线',
+  `alarm_type` varchar(30) NOT NULL COMMENT '告警类型：土壤湿度过低 / 土壤湿度过高 / 温度过低 / 温度过高 / 亮度过低 / 亮度过高 / 设备离线',
   `value` varchar(20) DEFAULT NULL COMMENT '触发时的值（展示型带单位），如 38%、36.5℃、-',
   `level` varchar(10) NOT NULL COMMENT '级别：严重 / 警告',
   `status` varchar(10) DEFAULT '未处理' COMMENT '状态：未处理 / 已处理',

@@ -129,21 +129,25 @@ public class DBUtil {
         }
     }
 
-    /** 确保告警阈值表包含亮度上下限字段（旧库自动补列）。 */
+    /** 确保告警阈值表包含温湿度和亮度上下限字段（旧库自动补列）。 */
     public static void ensureThresholdColumns() {
         try (Connection conn = getConnection();
              Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "plot_threshold", "humidity_max")) {
+                st.execute("ALTER TABLE plot_threshold ADD COLUMN humidity_max DECIMAL(5,2) DEFAULT 70 COMMENT '土壤湿度上限（%）' AFTER humidity_min");
+            }
+            if (!columnExists(conn, "plot_threshold", "temp_min")) {
+                st.execute("ALTER TABLE plot_threshold ADD COLUMN temp_min DECIMAL(5,2) DEFAULT 10 COMMENT '温度下限（℃）' AFTER humidity_max");
+            }
             if (!columnExists(conn, "plot_threshold", "lux_min")) {
                 st.execute("ALTER TABLE plot_threshold ADD COLUMN lux_min DECIMAL(8,2) DEFAULT 200 COMMENT '亮度下限（lx）' AFTER temp_max");
             }
             if (!columnExists(conn, "plot_threshold", "lux_max")) {
                 st.execute("ALTER TABLE plot_threshold ADD COLUMN lux_max DECIMAL(8,2) DEFAULT 800 COMMENT '亮度上限（lx）' AFTER lux_min");
             }
-            st.execute("UPDATE plot_threshold SET lux_min = 200 WHERE lux_min IS NULL");
-            st.execute("UPDATE plot_threshold SET lux_max = 800 WHERE lux_max IS NULL");
-            System.out.println("[DBUtil] 告警阈值亮度字段已就绪");
+            System.out.println("[DBUtil] 告警阈值上下限字段已就绪");
         } catch (SQLException e) {
-            System.out.println("[DBUtil] 检查告警阈值亮度字段失败: " + e.getMessage());
+            System.out.println("[DBUtil] 检查告警阈值上下限字段失败: " + e.getMessage());
         }
     }
 
