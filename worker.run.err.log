@@ -1,0 +1,57 @@
+[tcp @ 000001543d11eb00] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 000001543d11ec80] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.140:8081 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.140:8081 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.140:8081 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.140:8081 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154681b7bc0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 00000154682736c0] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273600] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273440] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273440] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273440] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273440] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273440] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273600] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273640] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273440] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[tcp @ 0000015468273c40] Connection to tcp://192.168.70.220:8888 failed: Error number -138 occurred
+[ WARN:0@1477.259] global cap_ffmpeg_impl.hpp:453 _opencv_ffmpeg_interrupt_callback Stream timeout triggered after 30083.769000 ms
+Traceback (most recent call last):
+  File "D:\smoke\workers\human_detection_worker.py", line 326, in <module>
+    main()
+    ~~~~^^
+  File "D:\smoke\workers\human_detection_worker.py", line 305, in main
+    cameras = load_cameras()
+  File "D:\smoke\workers\human_detection_worker.py", line 291, in load_cameras
+    cameras = api_get("/api/internal/camera-configs")
+  File "D:\smoke\workers\human_detection_worker.py", line 41, in api_get
+    res.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\smoke\.venv-detection\Lib\site-packages\requests\models.py", line 1167, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: http://localhost:8080/api/internal/camera-configs

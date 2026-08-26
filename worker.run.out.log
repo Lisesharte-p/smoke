@@ -1,0 +1,105 @@
+[worker] YOLO 模型: D:\smoke\models\yolov8n.pt
+[worker] 服务器: http://localhost:8080
+[worker] 存储目录: D:\smoke\data\detections
+[worker] ffmpeg: D:\smoke\tools\ffmpeg-9.0.1-essentials_build\bin\ffmpeg.exe
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video
+[worker] D021 识别循环异常: 读取摄像头帧失败
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video
+[worker] D021 检测到人体，置信度 0.501
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] D021 识别记录已上报: {'id': 7, 'alarmId': 37}
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 检测到人体，置信度 0.575
+[worker] D021 识别记录已上报: {'id': 8, 'alarmId': 38}
+[worker] D021 检测到人体，置信度 0.643
+[worker] D021 识别记录已上报: {'id': 9, 'alarmId': 39}
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 检测到人体，置信度 0.639
+[worker] D021 识别记录已上报: {'id': 10, 'alarmId': 40}
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 检测到人体，置信度 0.618
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] D021 识别记录已上报: {'id': 11, 'alarmId': 41}
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 检测到人体，置信度 0.705
+[worker] D021 识别记录已上报: {'id': 12, 'alarmId': 42}
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D007 识别循环异常: 无法打开摄像头流
+[worker] D007 状态上报失败: HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /api/internal/detection-status (Caused by NewConnectionError("HTTPConnection(host='localhost', port=8080): Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。"))
+[worker] D015 识别循环异常: 无法打开摄像头流
+[worker] 连接摄像头 D007: http://admin:admin@192.168.70.220:8888/video
+[worker] 连接摄像头 D015: http://admin:admin@192.168.70.220:8888/video
+[worker] D021 识别循环异常: 读取摄像头帧失败
+[worker] D021 状态上报失败: 500 Server Error: Internal Server Error for url: http://localhost:8080/api/internal/detection-status
+[worker] 连接摄像头 D021: http://admin:admin@192.168.70.140:8081/video

@@ -20,7 +20,7 @@ import java.sql.Statement;
 public class DBUtil {
 
     // ================== 连接配置（默认连共享库，可用环境变量覆盖） ==================
-    public static final String HOST = env("DB_HOST", "192.168.70.188");
+    public static final String HOST = env("DB_HOST", "192.168.70.189");
     public static final int    PORT = Integer.parseInt(env("DB_PORT", "3306"));
     public static final String DB   = env("DB_NAME", "farm");
     public static final String USER = env("DB_USER", "newuser");

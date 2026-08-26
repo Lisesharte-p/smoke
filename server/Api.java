@@ -762,7 +762,9 @@ public class Api {
     /** 设备类型映射：数据库类型 → 前端契约类型 */
     private static String typeMap(String type) {
         if ("灌溉设备".equals(type)) return "灌溉设备";
+        if ("温度".equals(type)) return "温度";
         if ("温度传感器".equals(type)) return "温度";
+        if ("亮度".equals(type)) return "亮度";
         if ("亮度传感器".equals(type)) return "亮度";
         if ("环境监测板".equals(type)) return "环境监测板";
         if ("摄像头".equals(type)) return "摄像头";
