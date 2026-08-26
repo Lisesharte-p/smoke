@@ -52,8 +52,8 @@
 :root[data-theme="light"] {
   /* 中性色（浅色体系） */
   --bg: #e6eff9;                           /* 浅蓝底 */
-  --card: rgba(255, 255, 255, .82);        /* 白色玻璃拟态卡片 */
-  --card-solid: #ffffff;
+  --card: rgba(236, 245, 253, .88);        /* 浅蓝玻璃拟态卡片 */
+  --card-solid: #eaf3fb;                   /* 浅蓝实底 */
   --border: rgba(15, 23, 42, .12);
   --text: #1e293b;
   --text-secondary: #475569;
@@ -1586,7 +1586,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 /* 侧边栏（浅色：白底 + 深色文字） */
 :root[data-theme="light"] .sidebar {
-  background: linear-gradient(90deg, #ffffff 0%, #f1f5f9 100%);
+  background: linear-gradient(90deg, #f4f9fd 0%, #e7f0f9 100%);
   color: #475569;
   border-bottom: 1px solid rgba(15, 23, 42, .08);
   box-shadow: 0 4px 24px rgba(15, 23, 42, .08);
@@ -1609,32 +1609,44 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 /* 顶栏（浅色） */
 :root[data-theme="light"] .topbar {
-  background: rgba(255, 255, 255, .8);
+  background: rgba(240, 247, 253, .85);
   box-shadow: 0 4px 20px rgba(15, 23, 42, .06);
 }
 
 /* 表单控件（浅色：白色输入框） */
-:root[data-theme="light"] .form-control { background: #ffffff; }
-:root[data-theme="light"] select.form-control option { background: #ffffff; color: var(--text); }
+:root[data-theme="light"] .form-control { background: #f2f7fc; }
+:root[data-theme="light"] select.form-control option { background: #eef5fc; color: var(--text); }
 
 /* 大数值块 / 聊天 / chip / outline 按钮等硬编码深色背景 → 浅色 */
 :root[data-theme="light"] .metric-big {
-  background: linear-gradient(180deg, rgba(52, 211, 153, .06), rgba(241, 245, 249, .6));
+  background: linear-gradient(180deg, rgba(52, 211, 153, .06), rgba(235, 243, 251, .7));
 }
-:root[data-theme="light"] .msg.bot .bubble { background: #ffffff; }
+:root[data-theme="light"] .msg.bot .bubble { background: #eef5fc; }
 :root[data-theme="light"] .msg .bubble code { background: rgba(15, 23, 42, .06); }
-:root[data-theme="light"] .chip { background: #ffffff; }
-:root[data-theme="light"] .btn-outline { background: #ffffff; }
+:root[data-theme="light"] .chip { background: #eef5fc; }
+:root[data-theme="light"] .btn-outline { background: #eef5fc; }
 
-/* 登录页浅色模式：保持暗色科技风（背景图 + 深色蒙层 + 深色面板），不额外变白。
-   在 .login-page 作用域内恢复暗色变量，避免深色面板上出现浅色文字/边框。 */
+/* 登录页浅色模式：
+   - 背景图 + 深色蒙层 + 左侧品牌/标语保持暗色（浅色文字）
+   - 登录卡片变为浅蓝底 + 深色字体 */
 :root[data-theme="light"] .login-page {
   --text: #e7efff;
   --text-secondary: #9db1cc;
   --text-muted: #64748b;
   --border: rgba(148, 163, 184, .16);
 }
-:root[data-theme="light"] .login-page .form-control { background: rgba(15, 23, 42, .6); }
+:root[data-theme="light"] .login-panel {
+  background: rgba(236, 245, 253, .94);
+  border-color: rgba(52, 211, 153, .4);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .28);
+  --text: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border: rgba(15, 23, 42, .14);
+}
+:root[data-theme="light"] .login-panel .form-control { background: #f2f7fc; }
+:root[data-theme="light"] .login-panel .role-tab.active { color: #059669; }
+:root[data-theme="light"] .login-panel .login-switch a { color: #059669; }
 
 /* 登录页响应式：窄屏单列，左侧内容在上、登录面板在下 */
 @media (max-width: 900px) {
