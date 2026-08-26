@@ -51,7 +51,7 @@
    ========================================================================== */
 :root[data-theme="light"] {
   /* 中性色（浅色体系） */
-  --bg: #eef2f7;                           /* 浅灰蓝底 */
+  --bg: #e6eff9;                           /* 浅蓝底 */
   --card: rgba(255, 255, 255, .82);        /* 白色玻璃拟态卡片 */
   --card-solid: #ffffff;
   --border: rgba(15, 23, 42, .12);
@@ -1626,26 +1626,15 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 :root[data-theme="light"] .chip { background: #ffffff; }
 :root[data-theme="light"] .btn-outline { background: #ffffff; }
 
-/* 登录页浅色适配：蒙层变亮、面板变白、左侧文字变深 */
-:root[data-theme="light"] .login-page::before { background: rgba(255, 255, 255, .55); }
-:root[data-theme="light"] .login-panel {
-  background: rgba(255, 255, 255, .92);
-  border-color: rgba(52, 211, 153, .35);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, .18);
+/* 登录页浅色模式：保持暗色科技风（背景图 + 深色蒙层 + 深色面板），不额外变白。
+   在 .login-page 作用域内恢复暗色变量，避免深色面板上出现浅色文字/边框。 */
+:root[data-theme="light"] .login-page {
+  --text: #e7efff;
+  --text-secondary: #9db1cc;
+  --text-muted: #64748b;
+  --border: rgba(148, 163, 184, .16);
 }
-:root[data-theme="light"] .login-brand h1 { color: #0f172a; }
-:root[data-theme="light"] .login-brand p { color: #475569; }
-:root[data-theme="light"] .login-slogan .slogan-text {
-  color: #0f766e;
-  text-shadow: 0 1px 3px rgba(15, 23, 42, .12), 0 0 20px rgba(16, 185, 129, .25);
-}
-:root[data-theme="light"] .login-switch a { color: var(--primary-dark); }
-:root[data-theme="light"] .role-tab.active { color: #059669; }
-:root[data-theme="light"] .login-page .theme-toggle {
-  background: rgba(255, 255, 255, .72);
-  border-color: rgba(15, 23, 42, .12);
-  color: #0f172a;
-}
+:root[data-theme="light"] .login-page .form-control { background: rgba(15, 23, 42, .6); }
 
 /* 登录页响应式：窄屏单列，左侧内容在上、登录面板在下 */
 @media (max-width: 900px) {
