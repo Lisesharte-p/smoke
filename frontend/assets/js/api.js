@@ -38,6 +38,109 @@ window.API = (function () {
     }
   };
 
+  var loaderState = {
+    active: 0,
+    showTimer: null,
+    hideTimer: null,
+    textTimer: null,
+    shownAt: 0,
+    messageIndex: 0,
+    pageLoadUntil: Date.now() + 2600,
+    messages: ['正在连接设备', '正在分析数据', '正在同步状态']
+  };
+
+  function loaderMessages(url, method) {
+    if (url.indexOf('/api/devices') === 0 || url.indexOf('/api/board') === 0) {
+      return ['正在连接设备', '正在同步设备状态', '正在读取实时数据'];
+    }
+    if (url.indexOf('/api/plots') === 0 || url.indexOf('/api/sensor-data') === 0) {
+      return ['正在分析数据', '正在整理地块信息', '正在刷新监测指标'];
+    }
+    if (url.indexOf('/api/alarms') === 0 || url.indexOf('/api/thresholds') === 0) {
+      return ['正在检查告警', '正在读取阈值配置', '正在同步处理状态'];
+    }
+    if (url.indexOf('/api/camera') === 0) {
+      return ['正在连接摄像头', '正在加载识别状态', '正在同步视频记录'];
+    }
+    if (url.indexOf('/api/weather') === 0 || url.indexOf('/api/advice') === 0) {
+      return ['正在分析数据', '正在生成农事建议', '正在同步天气信息'];
+    }
+    if (url.indexOf('/api/assistant') === 0) {
+      return ['正在分析数据', '正在检索知识库', '正在生成回答'];
+    }
+    if (method !== 'GET') {
+      return ['正在提交操作', '正在同步状态', '正在刷新数据'];
+    }
+    return ['正在加载数据', '正在分析数据', '正在同步状态'];
+  }
+
+  function ensureLoader() {
+    var el = document.getElementById('pageLoader');
+    if (el) return el;
+
+    el = document.createElement('div');
+    el.id = 'pageLoader';
+    el.className = 'page-loader';
+    el.setAttribute('aria-live', 'polite');
+    el.innerHTML =
+      '<div class="page-loader-panel">' +
+        '<div class="page-loader-spinner"><span></span><span></span><span></span></div>' +
+        '<div class="page-loader-text" id="pageLoaderText">正在加载数据</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function setLoaderText() {
+    var text = document.getElementById('pageLoaderText');
+    if (!text) return;
+    text.textContent = loaderState.messages[loaderState.messageIndex % loaderState.messages.length];
+  }
+
+  function showLoader(messages) {
+    loaderState.messages = messages || loaderState.messages;
+    loaderState.messageIndex = 0;
+    var el = ensureLoader();
+    setLoaderText();
+    el.classList.add('show');
+    loaderState.shownAt = Date.now();
+
+    clearInterval(loaderState.textTimer);
+    loaderState.textTimer = setInterval(function () {
+      loaderState.messageIndex += 1;
+      setLoaderText();
+    }, 1400);
+  }
+
+  function beginLoader(url, method, enabled) {
+    if (!enabled) return false;
+    loaderState.active += 1;
+    clearTimeout(loaderState.hideTimer);
+    clearTimeout(loaderState.showTimer);
+    loaderState.showTimer = setTimeout(function () {
+      if (loaderState.active > 0) showLoader(loaderMessages(url, method));
+    }, 180);
+    return true;
+  }
+
+  function endLoader(started) {
+    if (!started) return;
+    loaderState.active = Math.max(0, loaderState.active - 1);
+    if (loaderState.active > 0) return;
+
+    clearTimeout(loaderState.showTimer);
+    var el = document.getElementById('pageLoader');
+    if (!el || !el.classList.contains('show')) return;
+
+    var wait = Math.max(0, 420 - (Date.now() - loaderState.shownAt));
+    loaderState.hideTimer = setTimeout(function () {
+      if (loaderState.active > 0) return;
+      el.classList.remove('show');
+      clearInterval(loaderState.textTimer);
+      loaderState.textTimer = null;
+    }, wait);
+  }
+
   /* 通用请求函数：mock 模式下走本地数据，否则走真实 fetch */
   function request(url, options) {
     options = options || {};
@@ -45,12 +148,19 @@ window.API = (function () {
       // mock 模式不会真正走这里，各方法内已直接返回 mock Promise
       return Promise.resolve(null);
     }
+    var method = options.method || 'GET';
+    var showGlobalLoader = options.loader !== false && (Date.now() <= loaderState.pageLoadUntil || method !== 'GET');
+    var loaderStarted = beginLoader(url, method, showGlobalLoader);
     return fetch(config.baseUrl + url, {
-      method: options.method || 'GET',
+      method: method,
       headers: { 'Content-Type': 'application/json' },
       body: options.data ? JSON.stringify(options.data) : undefined
     }).then(function (res) {
+      endLoader(loaderStarted);
       return res.json();
+    }, function (err) {
+      endLoader(loaderStarted);
+      throw err;
     });
   }
 
@@ -263,15 +373,29 @@ window.API = (function () {
     return request(config.endpoints.alarms);
   }
 
-  function updateAlarmStatus(alarmId, status) {
+  function updateAlarmStatus(alarmId, status, data) {
+    data = data || {};
     if (config.useMock) {
       var arr = window.MOCK.alarms;
       for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === alarmId) { arr[i].status = status; break; }
+        if (arr[i].id === alarmId) {
+          arr[i].status = status;
+          arr[i].handler = data.handler || arr[i].handler || '演示用户';
+          arr[i].handledAt = data.handledAt || arr[i].handledAt || new Date().toLocaleString('zh-CN', { hour12: false }).slice(0, 16);
+          arr[i].handleLog = data.handleLog || arr[i].handleLog || '';
+          break;
+        }
       }
       return mockDelay({ code: 0 }, 300);
     }
-    return request(config.endpoints.alarms + '/' + alarmId, { method: 'PUT', data: { status: status } });
+    return request(config.endpoints.alarms + '/' + alarmId, {
+      method: 'PUT',
+      data: {
+        status: status,
+        handler: data.handler,
+        handleLog: data.handleLog
+      }
+    });
   }
 
   /* ==================================================================

@@ -90,6 +90,9 @@
                   <th>当前值</th>
                   <th>等级</th>
                   <th>状态</th>
+                  <th>处理人</th>
+                  <th>处理时间</th>
+                  <th>处理日志</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -101,6 +104,41 @@
     </div>
   </div>
 
+  <div class="modal-mask" id="handleAlarmModal">
+    <div class="modal">
+      <div class="modal-title">填写处理日志</div>
+      <div class="form-group">
+        <label class="form-label">处理人</label>
+        <div class="readonly-field" id="handlerNameText"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">处理日志</label>
+        <textarea class="form-control" id="handleLogInput" rows="6" placeholder="请输入处理措施、复查结果或后续跟进事项"></textarea>
+        <div class="form-hint">处理日志会保存到该告警条目中，便于后续追溯。</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelHandleAlarm">取消</button>
+        <button class="btn btn-primary" id="submitHandleAlarm">确认处理</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="logDetailModal">
+    <div class="modal">
+      <div class="modal-title">处理日志</div>
+      <div class="alarm-log-meta">
+        <div><span>报警类型</span><b id="logDetailType">-</b></div>
+        <div><span>报警时间</span><b id="logDetailAlarmTime">-</b></div>
+        <div><span>处理人</span><b id="logDetailHandler">-</b></div>
+        <div><span>处理时间</span><b id="logDetailHandledAt">-</b></div>
+      </div>
+      <div class="alarm-log-detail" id="logDetailText"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="closeLogDetail">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
@@ -109,6 +147,21 @@
     Layout.init();
 
     var alarms = [];
+    var pendingAlarmId = null;
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function currentHandlerName() {
+      var user = Layout.getUser ? Layout.getUser() : {};
+      return user.name || user.username || '演示用户';
+    }
 
     /* ---------- 渲染告警列表 ---------- */
     function renderAlarms() {
@@ -123,33 +176,50 @@
           ? '<span class="badge badge-normal"><span class="dot"></span>已处理</span>'
           : '<span class="badge badge-alarm"><span class="dot"></span>未处理</span>';
         var action = a.status === '未处理'
-          ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
+          ? '<button class="btn btn-sm btn-primary handle-alarm-btn" data-id="' + a.id + '">标记处理</button>'
           : '<span class="text-muted">—</span>';
         if (a.detectionRecordId) {
           action = '<div class="flex gap-8">' +
             '<a class="btn btn-sm btn-outline" href="camera.html?recordId=' + encodeURIComponent(a.detectionRecordId) + '">查看回放</a>' +
             (a.status === '未处理'
-              ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
+              ? '<button class="btn btn-sm btn-primary handle-alarm-btn" data-id="' + a.id + '">标记处理</button>'
               : '') +
             '</div>';
+        }
+        var handler = a.status === '已处理' && a.handler ? escapeHtml(a.handler) : '<span class="text-muted">-</span>';
+        var handledAt = a.status === '已处理' && a.handledAt ? escapeHtml(a.handledAt) : '<span class="text-muted">-</span>';
+        var log = (a.handleLog || '').trim();
+        var logSummary = '<span class="text-muted">-</span>';
+        if (log) {
+          var summary = log.length > 12 ? log.slice(0, 12) + '...' : log;
+          logSummary = '<button class="alarm-log-link" data-log-id="' + a.id + '">' + escapeHtml(summary) + '</button>';
         }
 
         var tr = document.createElement('tr');
         tr.innerHTML =
-          '<td>' + a.time + '</td>' +
-          '<td>' + a.plotName + '</td>' +
-          '<td>' + a.type + '</td>' +
-          '<td>' + a.value + '</td>' +
+          '<td>' + escapeHtml(a.time) + '</td>' +
+          '<td>' + escapeHtml(a.plotName) + '</td>' +
+          '<td>' + escapeHtml(a.type) + '</td>' +
+          '<td>' + escapeHtml(a.value) + '</td>' +
           '<td>' + levelBadge + '</td>' +
           '<td>' + statusBadge + '</td>' +
+          '<td>' + handler + '</td>' +
+          '<td>' + handledAt + '</td>' +
+          '<td>' + logSummary + '</td>' +
           '<td>' + action + '</td>';
         body.appendChild(tr);
       });
 
       // 绑定「标记处理」
-      body.querySelectorAll('button[data-id]').forEach(function (btn) {
+      body.querySelectorAll('.handle-alarm-btn[data-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          handleAlarm(btn.getAttribute('data-id'));
+          openHandleAlarmModal(btn.getAttribute('data-id'));
+        });
+      });
+
+      body.querySelectorAll('.alarm-log-link[data-log-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          openLogDetail(btn.getAttribute('data-log-id'));
         });
       });
 
@@ -168,14 +238,62 @@
       }
     }
 
+    function findAlarm(id) {
+      return alarms.filter(function (x) { return String(x.id) === String(id); })[0];
+    }
+
+    function openHandleAlarmModal(id) {
+      pendingAlarmId = id;
+      document.getElementById('handlerNameText').textContent = currentHandlerName();
+      document.getElementById('handleLogInput').value = '';
+      document.getElementById('handleAlarmModal').classList.add('show');
+      setTimeout(function () { document.getElementById('handleLogInput').focus(); }, 40);
+    }
+
+    function closeHandleAlarmModal() {
+      pendingAlarmId = null;
+      document.getElementById('handleAlarmModal').classList.remove('show');
+    }
+
     /* ---------- 标记处理 ---------- */
-    function handleAlarm(id) {
-      API.updateAlarmStatus(id, '已处理').then(function () {
-        var a = alarms.filter(function (x) { return x.id === id; })[0];
-        if (a) a.status = '已处理';
-        Toast.success('告警「' + (a ? a.type : id) + '」已标记为已处理');
-        renderAlarms();
+    function submitHandleAlarm() {
+      if (!pendingAlarmId) return;
+      var alarmId = pendingAlarmId;
+      var handler = currentHandlerName();
+      var handleLog = document.getElementById('handleLogInput').value.trim();
+      if (!handleLog) {
+        Toast.error('请填写处理日志');
+        return;
+      }
+
+      API.updateAlarmStatus(alarmId, '已处理', {
+        handler: handler,
+        handleLog: handleLog
+      }).then(function (res) {
+        if (res && res.code !== 0) {
+          Toast.error(res.msg || '处理失败');
+          return;
+        }
+        var a = findAlarm(alarmId);
+        closeHandleAlarmModal();
+        Toast.success('告警「' + (a ? a.type : alarmId) + '」已处理');
+        loadAlarms();
       });
+    }
+
+    function openLogDetail(id) {
+      var a = findAlarm(id);
+      var text = a && a.handleLog ? a.handleLog : '暂无处理日志';
+      document.getElementById('logDetailType').textContent = a && a.type ? a.type : '-';
+      document.getElementById('logDetailAlarmTime').textContent = a && a.time ? a.time : '-';
+      document.getElementById('logDetailHandler').textContent = a && a.handler ? a.handler : '-';
+      document.getElementById('logDetailHandledAt').textContent = a && a.handledAt ? a.handledAt : '-';
+      document.getElementById('logDetailText').textContent = text;
+      document.getElementById('logDetailModal').classList.add('show');
+    }
+
+    function closeLogDetail() {
+      document.getElementById('logDetailModal').classList.remove('show');
     }
 
     /* ---------- 加载阈值 ---------- */
@@ -274,12 +392,31 @@
     document.getElementById('deleteLuxThreshold').addEventListener('click', function () {
       clearThresholdGroup('lux');
     });
+    document.getElementById('cancelHandleAlarm').addEventListener('click', closeHandleAlarmModal);
+    document.getElementById('submitHandleAlarm').addEventListener('click', submitHandleAlarm);
+    document.getElementById('closeLogDetail').addEventListener('click', closeLogDetail);
+    document.getElementById('handleAlarmModal').addEventListener('click', function (e) {
+      if (e.target === this) closeHandleAlarmModal();
+    });
+    document.getElementById('logDetailModal').addEventListener('click', function (e) {
+      if (e.target === this) closeLogDetail();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        closeHandleAlarmModal();
+        closeLogDetail();
+      }
+    });
+
+    function loadAlarms() {
+      API.getAlarms().then(function (res) {
+        alarms = res.data;
+        renderAlarms();
+      });
+    }
 
     /* ---------- 初始化 ---------- */
-    API.getAlarms().then(function (res) {
-      alarms = res.data;
-      renderAlarms();
-    });
+    loadAlarms();
     loadThresholds();
   </script>
 </body>

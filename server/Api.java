@@ -36,6 +36,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Base64;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -79,6 +82,18 @@ public class Api {
     private static final String QW_API_KEY = envFirst("QWEATHER_API_KEY", "WEATHER_API_KEY");
     private static final String QW_LOCATION = env("QWEATHER_LOCATION", "106.565952,29.642614"); // 重庆两江新区，和风格式：经度,纬度
     private static final String QW_HOST = trimTrailingSlash(env("QWEATHER_HOST", "https://ma5rk8cjh3.re.qweatherapi.com"));
+
+    private static final long CAMERA_ONLINE_REFRESH_INTERVAL_MS =
+            Long.parseLong(env("CAMERA_ONLINE_REFRESH_INTERVAL_MS", "30000"));
+    private static final Object CAMERA_ONLINE_REFRESH_LOCK = new Object();
+    private static final AtomicBoolean CAMERA_ONLINE_REFRESH_RUNNING = new AtomicBoolean(false);
+    private static volatile long lastCameraOnlineRefreshAt = 0L;
+    private static final ExecutorService CAMERA_ONLINE_REFRESH_EXECUTOR =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "camera-online-refresh");
+                t.setDaemon(true);
+                return t;
+            });
 
     /* ==================================================================
        YOLO 人体识别配置
@@ -301,7 +316,7 @@ public class Api {
      * temp/humidity 取该地块最新一条传感器读数；deviceCount/onlineCount 由 device 聚合。
      */
     private static String plotsJson() throws SQLException {
-        refreshCameraOnlineStates();
+        scheduleCameraOnlineRefresh();
         StringBuilder sb = new StringBuilder();
         sb.append("{\"code\":0,\"data\":[");
         String sql =
@@ -564,39 +579,40 @@ public class Api {
      * plotName 由 join plot 得出；controllable 由 type=='灌溉设备' 推出。
      */
     private static String devicesJson() throws SQLException {
-        refreshCameraOnlineStates();
-        Map<String, Map<String, BigDecimal>> latest = latestByDevice();
+        scheduleCameraOnlineRefresh();
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port, d.protocol, d.username, d.password" +
                 " FROM device d LEFT JOIN plot p ON p.id = d.plot_id ORDER BY d.id";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
+        try (Connection conn = DBUtil.getConnection()) {
+            Map<String, Map<String, BigDecimal>> latest = latestByDevice(conn);
+            try (PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
-            boolean first = true;
-            while (rs.next()) {
-                if (!first) sb.append(',');
-                first = false;
-                String type = rs.getString("type");
-                Map<String, BigDecimal> vals = latest.get(rs.getString("id"));
-                sb.append('{')
-                  .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
-                  .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
-                  .append("\"type\":").append(Json.str(typeMap(type))).append(',')
-                  .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
-                  .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
-                  .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
-                  .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
-                  .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
-                  .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
-                  .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
-                  .append("\"online\":").append(rs.getInt("online") == 1).append(',')
-                  .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
-                  .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
-                  .append("\"lux\":").append(numOrNull(vals, "lux")).append(',')
-                  .append("\"controllable\":").append("灌溉设备".equals(type)).append(',')
-                  .append("\"running\":").append(rs.getInt("running") == 1)
-                  .append('}');
+                boolean first = true;
+                while (rs.next()) {
+                    if (!first) sb.append(',');
+                    first = false;
+                    String type = rs.getString("type");
+                    Map<String, BigDecimal> vals = latest.get(rs.getString("id"));
+                    sb.append('{')
+                      .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
+                      .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
+                      .append("\"type\":").append(Json.str(typeMap(type))).append(',')
+                      .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
+                      .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
+                      .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
+                      .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
+                      .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
+                      .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
+                      .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
+                      .append("\"online\":").append(rs.getInt("online") == 1).append(',')
+                      .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
+                      .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
+                      .append("\"lux\":").append(numOrNull(vals, "lux")).append(',')
+                      .append("\"controllable\":").append("灌溉设备".equals(type)).append(',')
+                      .append("\"running\":").append(rs.getInt("running") == 1)
+                      .append('}');
+                }
             }
         }
         sb.append("]}");
@@ -604,14 +620,13 @@ public class Api {
     }
 
     /** 每台设备各指标的最新一条读数：deviceId -> {temp, humidity, lux} */
-    private static Map<String, Map<String, BigDecimal>> latestByDevice() throws SQLException {
+    private static Map<String, Map<String, BigDecimal>> latestByDevice(Connection conn) throws SQLException {
         Map<String, Map<String, BigDecimal>> map = new HashMap<>();
         String sql =
                 "SELECT device_id, metric, value FROM sensor_data WHERE id IN (" +
                 " SELECT MAX(id) FROM sensor_data WHERE metric IN ('temp','humidity','lux')" +
                 " GROUP BY device_id, metric)";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
+        try (PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 String deviceId = rs.getString("device_id");
@@ -737,7 +752,7 @@ public class Api {
             ps.setString(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return "null";
-                Map<String, BigDecimal> vals = latestByDevice().get(id);
+                Map<String, BigDecimal> vals = latestByDevice(conn).get(id);
                 return "{\"id\":" + Json.str(rs.getString("id"))
                         + ",\"name\":" + Json.str(rs.getString("name"))
                         + ",\"type\":" + Json.str(typeMap(rs.getString("type")))
@@ -892,6 +907,26 @@ public class Api {
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /** 页面列表接口只触发后台刷新，避免离线摄像头探测阻塞页面切换。 */
+    private static void scheduleCameraOnlineRefresh() {
+        long now = System.currentTimeMillis();
+        synchronized (CAMERA_ONLINE_REFRESH_LOCK) {
+            if (now - lastCameraOnlineRefreshAt < CAMERA_ONLINE_REFRESH_INTERVAL_MS) return;
+            lastCameraOnlineRefreshAt = now;
+        }
+        if (!CAMERA_ONLINE_REFRESH_RUNNING.compareAndSet(false, true)) return;
+
+        CAMERA_ONLINE_REFRESH_EXECUTOR.submit(() -> {
+            try {
+                refreshCameraOnlineStates();
+            } catch (SQLException e) {
+                System.out.println("[Api] 摄像头在线状态后台刷新失败: " + e.getMessage());
+            } finally {
+                CAMERA_ONLINE_REFRESH_RUNNING.set(false);
+            }
+        });
     }
 
     /** 刷新摄像头设备在线状态；HTTP/MJPEG 看 /video 是否可连接，RTSP 先做 TCP 端口探测。 */
@@ -2105,13 +2140,13 @@ public class Api {
 
     /**
      * GET /api/alarms —— 告警列表。
-     * 返回：id,time,plotId,plotName,type,value,level,status。
+     * 返回：id,time,plotId,plotName,type,value,level,status,handler,handledAt,handleLog。
      * time 格式与 mock 一致（yyyy-MM-dd HH:mm）；type 直接用库里的中文 alarm_type。
      */
     private static String alarmsJson() throws SQLException {
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at," +
+                "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at, a.handled_at, a.handler, a.handle_log," +
                 " r.id AS detectionRecordId," +
                 " p.name AS plotName FROM alarm a LEFT JOIN plot p ON p.id = a.plot_id" +
                 " LEFT JOIN human_detection_record r ON r.alarm_id = a.id" +
@@ -2126,6 +2161,8 @@ public class Api {
                 first = false;
                 Timestamp ts = rs.getTimestamp("created_at");
                 String time = ts == null ? "" : fmt.format(ts);
+                Timestamp handledTs = rs.getTimestamp("handled_at");
+                String handledAt = handledTs == null ? "" : fmt.format(handledTs);
                 sb.append('{')
                   .append("\"id\":").append(rs.getLong("id")).append(',')
                   .append("\"time\":").append(Json.str(time)).append(',')
@@ -2135,6 +2172,9 @@ public class Api {
                   .append("\"value\":").append(Json.str(rs.getString("value"))).append(',')
                   .append("\"level\":").append(Json.str(rs.getString("level"))).append(',')
                   .append("\"status\":").append(Json.str(rs.getString("status"))).append(',')
+                  .append("\"handler\":").append(Json.str(rs.getString("handler"))).append(',')
+                  .append("\"handledAt\":").append(Json.str(handledAt)).append(',')
+                  .append("\"handleLog\":").append(Json.str(rs.getString("handle_log"))).append(',')
                   .append("\"detectionRecordId\":").append(rs.getObject("detectionRecordId") == null ? "null" : rs.getLong("detectionRecordId"))
                   .append('}');
             }
@@ -2145,7 +2185,7 @@ public class Api {
 
     /**
      * PUT /api/alarms/{id} —— 标记处理。
-     * body: {status:'已处理'}；顺手记录处理人和处理时间。
+     * body: {status:'已处理', handler:'处理人', handleLog:'处理日志'}；顺手记录处理人和处理时间。
      */
     private static String updateAlarmJson(String id, HttpExchange ex) throws IOException, SQLException {
         Map<String, String> body = Json.parseObject(readBody(ex));
@@ -2153,14 +2193,20 @@ public class Api {
         if (status == null || status.isEmpty()) {
             return "{\"code\":1,\"msg\":" + Json.str("参数不完整：status 必填") + "}";
         }
-        String handler = body.containsKey("handler") && body.get("handler") != null
-                ? body.get("handler") : "演示用户";
-        String sql = "UPDATE alarm SET status = ?, handled_at = NOW(), handler = ? WHERE id = ?";
+        String handler = body.containsKey("handler") && body.get("handler") != null && !body.get("handler").trim().isEmpty()
+                ? body.get("handler").trim() : "演示用户";
+        String handleLog = body.containsKey("handleLog") && body.get("handleLog") != null
+                ? body.get("handleLog").trim() : "";
+        if ("已处理".equals(status) && handleLog.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("请填写处理日志") + "}";
+        }
+        String sql = "UPDATE alarm SET status = ?, handled_at = NOW(), handler = ?, handle_log = ? WHERE id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, status);
             ps.setString(2, handler);
-            ps.setLong(3, Long.parseLong(id));
+            ps.setString(3, handleLog);
+            ps.setLong(4, Long.parseLong(id));
             if (ps.executeUpdate() == 0) {
                 return "{\"code\":1,\"msg\":" + Json.str("告警不存在: " + id) + "}";
             }

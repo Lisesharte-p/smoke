@@ -170,6 +170,25 @@ public class DBUtil {
         }
     }
 
+    /** 确保告警表包含处理日志字段（旧库自动补列）。 */
+    public static void ensureAlarmHandleColumns() {
+        try (Connection conn = getConnection();
+             Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "alarm", "handled_at")) {
+                st.execute("ALTER TABLE alarm ADD COLUMN handled_at DATETIME DEFAULT NULL COMMENT '处理时间' AFTER status");
+            }
+            if (!columnExists(conn, "alarm", "handler")) {
+                st.execute("ALTER TABLE alarm ADD COLUMN handler VARCHAR(50) DEFAULT NULL COMMENT '处理人' AFTER handled_at");
+            }
+            if (!columnExists(conn, "alarm", "handle_log")) {
+                st.execute("ALTER TABLE alarm ADD COLUMN handle_log TEXT DEFAULT NULL COMMENT '处理日志' AFTER handler");
+            }
+            System.out.println("[DBUtil] 告警处理字段已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 检查告警处理字段失败: " + e.getMessage());
+        }
+    }
+
     /** 确保人体识别记录和识别设置表存在。 */
     public static void ensureDetectionTables() {
         String[] ddl = {

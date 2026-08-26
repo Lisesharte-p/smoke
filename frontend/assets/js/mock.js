@@ -52,10 +52,10 @@ window.MOCK = (function () {
      ------------------------------------------------------------------ */
   var alarms = [
     { id: 'A001', time: '2026-08-21 09:32', plotId: 'P003', plotName: '三号菜地', type: '土壤湿度过低', value: '38%', level: '警告', status: '未处理' },
-    { id: 'A002', time: '2026-08-21 06:15', plotId: 'P001', plotName: '一号大棚', type: '温度过高',     value: '36.5℃', level: '严重', status: '已处理' },
+    { id: 'A002', time: '2026-08-21 06:15', plotId: 'P001', plotName: '一号大棚', type: '温度过高',     value: '36.5℃', level: '严重', status: '已处理', handler: '李四', handledAt: '2026-08-21 06:28', handleLog: '已打开通风设备并检查棚内温度，10分钟后温度下降到安全范围。' },
     { id: 'A003', time: '2026-08-20 18:40', plotId: 'P003', plotName: '三号菜地', type: '设备离线',     value: '-',    level: '严重', status: '未处理' },
-    { id: 'A004', time: '2026-08-20 11:03', plotId: 'P002', plotName: '二号大棚', type: '土壤湿度过低', value: '39%', level: '警告', status: '已处理' },
-    { id: 'A005', time: '2026-08-19 22:18', plotId: 'P001', plotName: '一号大棚', type: '温度过高',     value: '35.8℃', level: '警告', status: '已处理' }
+    { id: 'A004', time: '2026-08-20 11:03', plotId: 'P002', plotName: '二号大棚', type: '土壤湿度过低', value: '39%', level: '警告', status: '已处理', handler: '张老三', handledAt: '2026-08-20 11:15', handleLog: '已完成补水灌溉，复查土壤湿度恢复正常。' },
+    { id: 'A005', time: '2026-08-19 22:18', plotId: 'P001', plotName: '一号大棚', type: '温度过高',     value: '35.8℃', level: '警告', status: '已处理', handler: '李四', handledAt: '2026-08-19 22:31', handleLog: '夜间短时高温，已调整通风并记录观察。' }
   ];
 
   /* ------------------------------------------------------------------

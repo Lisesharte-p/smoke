@@ -81,6 +81,7 @@ CREATE TABLE `alarm` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '触发时间',
   `handled_at` datetime DEFAULT NULL COMMENT '处理时间',
   `handler` varchar(50) DEFAULT NULL COMMENT '处理人',
+  `handle_log` text COMMENT '处理日志',
   PRIMARY KEY (`id`),
   KEY `idx_plot_time` (`plot_id`,`created_at`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='告警表'
