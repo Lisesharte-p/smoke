@@ -2162,8 +2162,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   height: calc(100vh - 210px);
   overflow: hidden;
   background:
-    linear-gradient(140deg, rgba(11, 43, 41, .95), rgba(10, 21, 34, .96) 44%, rgba(33, 51, 28, .92)),
-    radial-gradient(circle at 50% 48%, rgba(52, 211, 153, .16), transparent 36%);
+    radial-gradient(circle at 18% 16%, rgba(187, 247, 208, .20), transparent 30%),
+    radial-gradient(circle at 72% 22%, rgba(250, 204, 21, .14), transparent 30%),
+    radial-gradient(circle at 56% 78%, rgba(52, 211, 153, .16), transparent 34%),
+    linear-gradient(145deg, #102f1d 0%, #173f28 44%, #273a1d 100%);
 }
 
 .cq-terrain {
@@ -2171,80 +2173,64 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   inset: 0;
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 18px 38px rgba(0, 0, 0, .45));
+  opacity: .96;
 }
 
-.cq-boundary {
-  fill: url(#landGlow);
-  stroke: rgba(125, 211, 252, .28);
-  stroke-width: 2.4;
+.cq-map-base {
+  fill: url(#fullMapLand);
 }
 
-.cq-ridge,
-.cq-road,
-.cq-river {
-  fill: none;
-  stroke-linecap: round;
+.cq-patch {
+  mix-blend-mode: soft-light;
+  opacity: .68;
 }
 
-.cq-ridge {
-  stroke: rgba(187, 247, 208, .18);
-  stroke-width: 10;
+.patch-a {
+  fill: #74d675;
 }
 
-.ridge-b {
-  stroke: rgba(253, 230, 138, .15);
-  stroke-width: 8;
+.patch-b {
+  fill: #e9c85e;
 }
 
-.cq-river {
-  stroke: url(#riverGlow);
-  stroke-width: 14;
-  opacity: .66;
-  filter: drop-shadow(0 0 12px rgba(34, 211, 238, .45));
+.patch-c {
+  fill: #66c98a;
 }
 
-.river-b {
-  stroke-width: 9;
-  opacity: .5;
+.patch-d {
+  fill: #b8d96a;
 }
 
-.cq-road {
-  stroke: rgba(226, 232, 240, .18);
-  stroke-width: 3;
-  stroke-dasharray: 8 14;
+.patch-e {
+  fill: #92df78;
+  opacity: .42;
 }
 
-.road-b {
-  stroke: rgba(253, 230, 138, .2);
-  stroke-width: 2;
+.cq-parcel {
+  fill: rgba(255, 255, 255, .055);
+  stroke: none;
+  mix-blend-mode: soft-light;
+}
+
+.parcel-b,
+.parcel-e {
+  fill: rgba(250, 204, 21, .075);
+}
+
+.parcel-c,
+.parcel-f {
+  fill: rgba(94, 234, 212, .055);
 }
 
 .map-grid-lines {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(148, 163, 184, .06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, .06) 1px, transparent 1px);
-  background-size: 48px 48px;
-  opacity: .55;
+    radial-gradient(circle at 20% 25%, rgba(236, 253, 245, .10) 0 1px, transparent 2px),
+    radial-gradient(circle at 78% 68%, rgba(254, 240, 138, .08) 0 1px, transparent 2px);
+  background-size: 46px 46px, 58px 58px;
+  opacity: .32;
   pointer-events: none;
-}
-
-.map-scan {
-  position: absolute;
-  left: -20%;
-  right: -20%;
-  top: 0;
-  height: 160px;
-  background: linear-gradient(180deg, transparent, rgba(34, 211, 238, .11), transparent);
-  animation: map-scan 9s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes map-scan {
-  from { transform: translateY(-180px); }
-  to { transform: translateY(760px); }
 }
 
 .map-label {
@@ -2256,106 +2242,83 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   text-shadow: 0 0 12px rgba(15, 23, 42, .9);
 }
 
-.city-a { left: 59%; top: 47%; transform: rotate(-7deg); }
-.city-b { left: 29%; top: 44%; transform: rotate(8deg); }
 .city-c { left: 48%; top: 36%; color: rgba(167, 243, 208, .82); }
 
 .field-layer,
-.add-slot-layer {
+.field-layer-svg,
+.plot-draw-layer {
   position: absolute;
   inset: 0;
 }
 
-.cq-field,
-.map-add-slot {
-  position: absolute;
-  transform: translate(-50%, -50%);
+.field-layer-svg,
+.plot-draw-layer {
+  width: 100%;
+  height: 100%;
 }
 
-.cq-field {
-  min-width: 94px;
-  min-height: 62px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  cursor: pointer;
-  color: var(--text);
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .36));
-  transition: transform .18s ease, filter .18s ease;
+.field-layer-svg {
+  z-index: 4;
 }
 
-.cq-field:hover,
-.cq-field.selected {
-  transform: translate(-50%, -50%) scale(1.06);
-  filter: drop-shadow(0 14px 24px rgba(0, 0, 0, .44)) drop-shadow(0 0 14px rgba(52, 211, 153, .28));
-}
-
-.soil-bed {
-  position: absolute;
-  inset: 7px 2px 10px;
-  border-radius: 48% 54% 42% 50%;
-  background:
-    repeating-linear-gradient(12deg, rgba(92, 55, 29, .95) 0 9px, rgba(126, 77, 39, .95) 9px 17px),
-    #6f4527;
-  border: 1px solid rgba(251, 191, 36, .26);
-  box-shadow: inset 0 -10px 18px rgba(30, 14, 8, .32), inset 0 8px 14px rgba(255, 255, 255, .08);
-}
-
-.cq-field.alert .soil-bed {
-  border-color: rgba(248, 113, 113, .7);
-  box-shadow: inset 0 -10px 18px rgba(30, 14, 8, .32), 0 0 16px rgba(248, 113, 113, .42);
-}
-
-.crop {
-  position: absolute;
-  left: 14%;
-  right: 14%;
-  top: 20%;
-  bottom: 30%;
-  display: grid;
-  gap: 2px;
-  transform: rotate(-6deg);
+.field-layer {
+  z-index: 6;
   pointer-events: none;
 }
 
-.crop-row {
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
+.plot-draw-layer {
+  z-index: 7;
+  pointer-events: none;
 }
 
-.crop i {
-  width: 7px;
-  height: 12px;
-  border-radius: 70% 12% 70% 12%;
-  background: linear-gradient(140deg, #bef264, #16a34a);
-  box-shadow: 0 0 8px rgba(132, 204, 22, .25);
+.cq-field-path {
+  stroke: rgba(236, 253, 245, .78);
+  stroke-width: .42;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 7px 7px rgba(0, 0, 0, .24));
+  cursor: pointer;
+  opacity: .96;
+  transition: opacity .18s ease, filter .18s ease, stroke .18s ease;
 }
 
-.crop-fruit i:nth-child(2n) {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ef4444;
-  box-shadow: 0 0 8px rgba(248, 113, 113, .6);
+.cq-field-path:hover,
+.cq-field-path.selected {
+  stroke: #ecfccb;
+  stroke-width: .72;
+  filter: drop-shadow(0 9px 8px rgba(0, 0, 0, .28)) drop-shadow(0 0 5px rgba(190, 242, 100, .46));
 }
 
-.crop-grain i {
-  width: 4px;
-  height: 18px;
-  border-radius: 4px;
-  background: linear-gradient(#fde68a, #84cc16);
+.cq-field-path.alert {
+  stroke: #fecaca;
+  filter: drop-shadow(0 8px 8px rgba(0, 0, 0, .28)) drop-shadow(0 0 6px rgba(248, 113, 113, .7));
 }
 
-.crop-vine {
-  transform: rotate(-8deg);
+.cq-field-path.irrigating {
+  filter: drop-shadow(0 8px 8px rgba(0, 0, 0, .28)) drop-shadow(0 0 7px rgba(56, 189, 248, .65));
 }
 
-.crop-vine i {
-  width: 13px;
-  height: 8px;
-  border-radius: 999px 999px 2px 999px;
-  background: linear-gradient(135deg, #86efac, #15803d);
+.cq-field-label {
+  position: absolute;
+  z-index: 5;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text);
+  width: 128px;
+  height: 54px;
+  transform: translate(-50%, -50%);
+  transition: transform .18s ease, filter .18s ease;
+  pointer-events: auto;
+}
+
+.cq-field-label {
+  min-width: 0;
+  min-height: 0;
+}
+
+.cq-field-label:hover,
+.cq-field-label.selected {
+  filter: drop-shadow(0 14px 24px rgba(0, 0, 0, .44)) drop-shadow(0 0 14px rgba(52, 211, 153, .28));
 }
 
 .field-name,
@@ -2369,14 +2332,14 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 }
 
 .field-name {
-  bottom: -13px;
+  top: 13px;
   font-size: 12px;
   font-weight: 700;
   color: #eff6ff;
 }
 
 .field-crop {
-  bottom: -29px;
+  top: 31px;
   font-size: 10px;
   color: rgba(203, 213, 225, .78);
 }
@@ -2394,37 +2357,100 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   border: 1px solid rgba(248, 113, 113, .55);
 }
 
-.map-add-slot {
-  border: 1px dashed rgba(167, 243, 208, .25);
-  border-radius: 10px;
-  color: rgba(167, 243, 208, .7);
-  background: rgba(15, 23, 42, .18);
-  cursor: pointer;
-  opacity: .52;
-  transition: opacity .18s ease, background .18s ease, border-color .18s ease;
+.cq-map.drawing-plot {
+  cursor: crosshair;
 }
 
-.map-add-slot:hover {
-  opacity: 1;
-  background: rgba(52, 211, 153, .1);
-  border-color: rgba(52, 211, 153, .48);
+.cq-map.drawing-plot .field-layer,
+.cq-map.drawing-plot .field-layer-svg {
+  pointer-events: none;
 }
 
-.map-add-slot span {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  margin: auto;
-  border-radius: 50%;
-  background: rgba(52, 211, 153, .15);
-  font-weight: 800;
+.map-draw-tip {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 9;
+  display: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, .28);
+  background: rgba(15, 23, 42, .78);
+  color: #d8fff0;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.map-draw-tip.show {
+  display: block;
+}
+
+.draft-poly {
+  fill: rgba(52, 211, 153, .28);
+  stroke: rgba(190, 242, 100, .96);
+  stroke-width: .7;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 8px rgba(52, 211, 153, .42));
+}
+
+.draft-poly.invalid {
+  fill: rgba(248, 113, 113, .24);
+  stroke: rgba(248, 113, 113, .95);
+}
+
+.draft-line {
+  fill: none;
+  stroke: rgba(190, 242, 100, .9);
+  stroke-width: .55;
+  stroke-dasharray: 1.4 1.2;
+}
+
+.draft-dot {
+  fill: #ecfccb;
+  stroke: rgba(21, 128, 61, .95);
+  stroke-width: .25;
+}
+
+.plot-shape-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+}
+
+.plot-shape-tools span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plot-create-mode {
+  width: 100%;
+}
+
+.plot-create-mode button {
+  flex: 1;
+}
+
+#mapAddModal {
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 92px 28px 28px;
+  pointer-events: none;
+  background: rgba(4, 8, 16, .22);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+#mapAddModal .modal {
+  pointer-events: auto;
 }
 
 .water-effect {
   position: absolute;
   left: 50%;
-  top: -20px;
+  top: -28px;
   width: 70px;
   height: 72px;
   transform: translateX(-50%);
@@ -2448,7 +2474,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 .water-effect i:nth-child(3) { right: 28px; transform: rotate(10deg); animation-delay: .16s; }
 .water-effect i:nth-child(4) { right: 14px; transform: rotate(28deg); animation-delay: .24s; }
 
-.cq-field.irrigating .water-effect {
+.cq-field-label.irrigating .water-effect {
   opacity: 1;
 }
 
@@ -2462,14 +2488,14 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   position: absolute;
   left: 48%;
   top: 38%;
-  width: 72px;
-  height: 72px;
+  width: 82px;
+  height: 82px;
   z-index: 8;
   opacity: .58;
   transform: translate(-50%, -50%);
   pointer-events: none;
   transition: opacity .2s ease;
-  filter: drop-shadow(0 0 16px rgba(34, 211, 238, .55));
+  filter: drop-shadow(0 0 18px rgba(34, 211, 238, .5)) drop-shadow(0 12px 14px rgba(0, 0, 0, .34));
 }
 
 .drone.active {
@@ -2478,12 +2504,12 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .drone-body {
   position: absolute;
-  left: 22px;
-  top: 24px;
-  width: 28px;
-  height: 22px;
-  border-radius: 50% 50% 44% 44%;
-  background: linear-gradient(135deg, #f8fafc, #7dd3fc 55%, #0f766e);
+  left: 23px;
+  top: 25px;
+  width: 36px;
+  height: 26px;
+  border-radius: 46% 46% 42% 42%;
+  background: linear-gradient(135deg, #f8fafc, #bae6fd 45%, #14b8a6 78%, #0f766e);
   border: 1px solid rgba(224, 242, 254, .72);
   box-shadow: inset 0 -6px 10px rgba(15, 23, 42, .35);
 }
@@ -2498,8 +2524,8 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   background: rgba(226, 232, 240, .85);
 }
 
-.drone-body::before { right: 24px; transform: rotate(15deg); }
-.drone-body::after { left: 24px; transform: rotate(-15deg); }
+.drone-body::before { right: 31px; transform: rotate(14deg); }
+.drone-body::after { left: 31px; transform: rotate(-14deg); }
 
 .drone-eye {
   position: absolute;
@@ -2514,8 +2540,8 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .rotor {
   position: absolute;
-  width: 25px;
-  height: 25px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   border: 2px solid rgba(191, 219, 254, .78);
   background: radial-gradient(circle, rgba(34, 211, 238, .5), rgba(15, 23, 42, .12));
@@ -2533,10 +2559,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   animation: rotor-spin .13s linear infinite;
 }
 
-.rotor-nw { left: 2px; top: 3px; }
-.rotor-ne { right: 2px; top: 3px; }
-.rotor-sw { left: 2px; bottom: 3px; }
-.rotor-se { right: 2px; bottom: 3px; }
+.rotor-nw { left: 2px; top: 2px; }
+.rotor-ne { right: 2px; top: 2px; }
+.rotor-sw { left: 2px; bottom: 2px; }
+.rotor-se { right: 2px; bottom: 2px; }
 
 @keyframes rotor-spin {
   to { transform: rotate(180deg); }
@@ -2825,9 +2851,9 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   .map-side {
     grid-template-columns: 1fr;
   }
-  .cq-field {
-    min-width: 76px;
-    min-height: 54px;
+  .cq-field-label {
+    width: 112px;
+    height: 50px;
   }
   .field-name {
     font-size: 11px;
@@ -3137,53 +3163,46 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 }
 
 :root[data-theme="light"] .cq-map {
-  background: #ffffff;
+  background:
+    radial-gradient(circle at 20% 18%, rgba(16, 185, 129, .13), transparent 30%),
+    radial-gradient(circle at 76% 30%, rgba(234, 179, 8, .12), transparent 34%),
+    radial-gradient(circle at 58% 78%, rgba(34, 197, 94, .10), transparent 34%),
+    #ffffff;
 }
 
-:root[data-theme="light"] #landGlow stop:nth-child(1) { stop-color: #e7f5e8; }
-:root[data-theme="light"] #landGlow stop:nth-child(2) { stop-color: #e9f7f1; }
-:root[data-theme="light"] #landGlow stop:nth-child(3) { stop-color: #f3f8e8; }
-:root[data-theme="light"] #riverGlow stop:nth-child(1) { stop-color: #38bdf8; }
-:root[data-theme="light"] #riverGlow stop:nth-child(2) { stop-color: #7dd3fc; }
-:root[data-theme="light"] #riverGlow stop:nth-child(3) { stop-color: #0ea5e9; }
+:root[data-theme="light"] #fullMapLand stop:nth-child(1) { stop-color: #f8fff7; }
+:root[data-theme="light"] #fullMapLand stop:nth-child(2) { stop-color: #eefbea; }
+:root[data-theme="light"] #fullMapLand stop:nth-child(3) { stop-color: #fdf8df; }
 
 :root[data-theme="light"] .cq-terrain {
-  filter: drop-shadow(0 12px 24px rgba(15, 23, 42, .12));
+  opacity: .98;
 }
 
-:root[data-theme="light"] .cq-boundary {
-  stroke: rgba(15, 118, 110, .34);
+:root[data-theme="light"] .cq-patch {
+  mix-blend-mode: multiply;
+  opacity: .26;
 }
 
-:root[data-theme="light"] .cq-ridge {
-  stroke: rgba(22, 163, 74, .22);
+:root[data-theme="light"] .cq-parcel {
+  fill: rgba(4, 120, 87, .055);
+  stroke: none;
+  mix-blend-mode: multiply;
 }
 
-:root[data-theme="light"] .ridge-b {
-  stroke: rgba(202, 138, 4, .2);
+:root[data-theme="light"] .parcel-b,
+:root[data-theme="light"] .parcel-e {
+  fill: rgba(202, 138, 4, .055);
 }
 
-:root[data-theme="light"] .cq-river {
-  opacity: .72;
-  filter: drop-shadow(0 0 10px rgba(14, 165, 233, .24));
-}
-
-:root[data-theme="light"] .cq-road {
-  stroke: rgba(71, 85, 105, .24);
-}
-
-:root[data-theme="light"] .road-b {
-  stroke: rgba(180, 83, 9, .22);
+:root[data-theme="light"] .parcel-c,
+:root[data-theme="light"] .parcel-f {
+  fill: rgba(14, 165, 233, .042);
 }
 
 :root[data-theme="light"] .map-grid-lines {
   background-image:
-    linear-gradient(rgba(15, 23, 42, .05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 23, 42, .05) 1px, transparent 1px);
-}
-
-:root[data-theme="light"] .map-scan {
-  background: linear-gradient(180deg, transparent, rgba(14, 165, 233, .1), transparent);
+    radial-gradient(circle at 20% 25%, rgba(15, 118, 110, .08) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 78% 68%, rgba(202, 138, 4, .08) 0 1px, transparent 1.8px);
 }
 
 :root[data-theme="light"] .map-label {
@@ -3195,12 +3214,23 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   color: rgba(4, 120, 87, .72);
 }
 
-:root[data-theme="light"] .cq-field {
+:root[data-theme="light"] .cq-field-path {
+  stroke: rgba(15, 118, 110, .54);
+  filter: drop-shadow(0 8px 8px rgba(15, 23, 42, .12));
+}
+
+:root[data-theme="light"] .cq-field-path:hover,
+:root[data-theme="light"] .cq-field-path.selected {
+  stroke: #047857;
+  filter: drop-shadow(0 10px 9px rgba(15, 23, 42, .14)) drop-shadow(0 0 5px rgba(16, 185, 129, .35));
+}
+
+:root[data-theme="light"] .cq-field-label {
   filter: drop-shadow(0 10px 18px rgba(15, 23, 42, .18));
 }
 
-:root[data-theme="light"] .cq-field:hover,
-:root[data-theme="light"] .cq-field.selected {
+:root[data-theme="light"] .cq-field-label:hover,
+:root[data-theme="light"] .cq-field-label.selected {
   filter: drop-shadow(0 14px 24px rgba(15, 23, 42, .2)) drop-shadow(0 0 14px rgba(52, 211, 153, .26));
 }
 
@@ -3215,12 +3245,6 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 :root[data-theme="light"] .field-crop {
   color: #475569;
-}
-
-:root[data-theme="light"] .map-add-slot {
-  color: #047857;
-  background: rgba(236, 253, 245, .62);
-  border-color: rgba(5, 150, 105, .28);
 }
 
 :root[data-theme="light"] .map-empty,

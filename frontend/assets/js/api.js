@@ -224,6 +224,8 @@ window.API = (function () {
         name: data.name,
         crop: data.crop,
         area: data.area + '亩',
+        mapShape: data.mapShape || null,
+        cropStyle: data.cropStyle || null,
         temp: null,
         humidity: null,
         deviceCount: devs.length,

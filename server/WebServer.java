@@ -67,6 +67,7 @@ public class WebServer {
         DBUtil.ensureKnowledgeTables();
         DBUtil.ensureThresholdColumns();
         DBUtil.ensureDeviceCameraColumns();
+        DBUtil.ensurePlotMapColumns();
         DBUtil.ensureAlarmHandleColumns();
         DBUtil.ensureDetectionTables();
 

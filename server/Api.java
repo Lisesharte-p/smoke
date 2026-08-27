@@ -319,7 +319,7 @@ public class Api {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT p.id, p.name, p.crop, p.area," +
+                "SELECT p.id, p.name, p.crop, p.area, p.map_shape, p.crop_style," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id) AS deviceCount," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id AND d.online=1) AS onlineCount," +
                 "  (SELECT s.value FROM sensor_data s JOIN device d ON d.id=s.device_id" +
@@ -343,6 +343,8 @@ public class Api {
                   .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
                   .append("\"crop\":").append(Json.str(rs.getString("crop"))).append(',')
                   .append("\"area\":").append(Json.str(areaStr(rs.getBigDecimal("area")))).append(',')
+                  .append("\"mapShape\":").append(jsonObjectOrNull(rs.getString("map_shape"))).append(',')
+                  .append("\"cropStyle\":").append(Json.str(rs.getString("crop_style"))).append(',')
                   .append("\"temp\":").append(Json.num(rs.getBigDecimal("temp"))).append(',')
                   .append("\"humidity\":").append(Json.num(rs.getBigDecimal("humidity"))).append(',')
                   .append("\"deviceCount\":").append(rs.getInt("deviceCount")).append(',')
@@ -375,7 +377,7 @@ public class Api {
     /** 按地块编号查单个地块 JSON（与列表项形状一致）；不存在返回 null */
     private static String plotJson(String plotId) throws SQLException {
         String sql =
-                "SELECT p.id, p.name, p.crop, p.area," +
+                "SELECT p.id, p.name, p.crop, p.area, p.map_shape, p.crop_style," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id) AS deviceCount," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id AND d.online=1) AS onlineCount" +
                 " FROM plot p WHERE p.id = ?";
@@ -388,6 +390,8 @@ public class Api {
                         + ",\"name\":" + Json.str(rs.getString("name"))
                         + ",\"crop\":" + Json.str(rs.getString("crop"))
                         + ",\"area\":" + Json.str(areaStr(rs.getBigDecimal("area")))
+                        + ",\"mapShape\":" + jsonObjectOrNull(rs.getString("map_shape"))
+                        + ",\"cropStyle\":" + Json.str(rs.getString("crop_style"))
                         + ",\"temp\":" + Json.num(latestValue(plotId, "temp"))
                         + ",\"humidity\":" + Json.num(latestValue(plotId, "humidity"))
                         + ",\"deviceCount\":" + rs.getInt("deviceCount")
@@ -413,6 +417,8 @@ public class Api {
         String name = body.get("name");
         String crop = body.get("crop");
         String area = body.get("area");
+        String mapShape = normalizeJsonObject(body.get("mapShape"));
+        String cropStyle = trimToNull(body.get("cropStyle"));
         if (name == null || name.trim().isEmpty()
                 || crop == null || crop.trim().isEmpty()
                 || area == null || area.trim().isEmpty()) {
@@ -436,11 +442,13 @@ public class Api {
             try {
                 // 1. 插入地块
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "INSERT INTO plot(id, name, crop, area) VALUES (?, ?, ?, ?)")) {
+                        "INSERT INTO plot(id, name, crop, area, map_shape, crop_style) VALUES (?, ?, ?, ?, ?, ?)")) {
                     ps.setString(1, plotId);
                     ps.setString(2, name.trim());
                     ps.setString(3, crop.trim());
                     ps.setBigDecimal(4, areaVal);
+                    ps.setString(5, mapShape);
+                    ps.setString(6, cropStyle);
                     ps.executeUpdate();
                 }
                 // 2. 绑定设备（校验后逐个插入；编号在事务内递增，避免重复）
@@ -863,6 +871,17 @@ public class Api {
         if (s == null) return null;
         String v = s.trim();
         return v.isEmpty() ? null : v;
+    }
+
+    private static String normalizeJsonObject(String s) {
+        String v = trimToNull(s);
+        if (v == null) return null;
+        return v.startsWith("{") && v.endsWith("}") ? v : null;
+    }
+
+    private static String jsonObjectOrNull(String s) {
+        String v = normalizeJsonObject(s);
+        return v == null ? "null" : v;
     }
 
     private static class CameraConfig {
@@ -1544,6 +1563,7 @@ public class Api {
         } else if ("error".equals(status) || "unknown".equals(status)) {
             updateDeviceOnline(deviceId, false);
         }
+        BoardCollector.rescanNow();
         return "{\"code\":0}";
     }
 

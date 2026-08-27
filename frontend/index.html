@@ -61,7 +61,7 @@
         <!-- 多地块总览 -->
         <div class="section-title">
           <span>多地块总览</span>
-          <button class="btn btn-primary btn-sm" id="openAddPlot" style="margin-left:auto">＋ 添加地块</button>
+          <a class="btn btn-primary btn-sm" id="openAddPlot" href="map.html?add=1" style="margin-left:auto">＋ 添加地块</a>
         </div>
         <div class="plot-grid" id="plotGrid"></div>
 
@@ -650,11 +650,7 @@
     /* ---------- 添加地块弹窗控制 ---------- */
     var addPlotModal = document.getElementById('addPlotModal');
     document.getElementById('openAddPlot').addEventListener('click', function () {
-      document.getElementById('plotName').value = '';
-      document.getElementById('plotCrop').value = '';
-      document.getElementById('plotArea').value = '';
-      document.getElementById('devRows').innerHTML = '';
-      addPlotModal.classList.add('show');
+      location.href = 'map.html?add=1';
     });
     document.getElementById('cancelAddPlot').addEventListener('click', function () {
       addPlotModal.classList.remove('show');

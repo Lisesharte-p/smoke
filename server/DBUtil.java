@@ -170,6 +170,22 @@ public class DBUtil {
         }
     }
 
+    /** 确保地块表包含巡田地图轮廓与作物样式字段（旧库自动补列）。 */
+    public static void ensurePlotMapColumns() {
+        try (Connection conn = getConnection();
+             Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "plot", "map_shape")) {
+                st.execute("ALTER TABLE plot ADD COLUMN map_shape TEXT DEFAULT NULL COMMENT '重庆巡田地图轮廓 JSON' AFTER area");
+            }
+            if (!columnExists(conn, "plot", "crop_style")) {
+                st.execute("ALTER TABLE plot ADD COLUMN crop_style VARCHAR(20) DEFAULT NULL COMMENT '地图作物形态' AFTER map_shape");
+            }
+            System.out.println("[DBUtil] 地块巡田地图字段已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 检查地块巡田地图字段失败: " + e.getMessage());
+        }
+    }
+
     /** 确保告警表包含处理日志字段（旧库自动补列）。 */
     public static void ensureAlarmHandleColumns() {
         try (Connection conn = getConnection();

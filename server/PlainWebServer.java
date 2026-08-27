@@ -57,6 +57,7 @@ public class PlainWebServer {
         DBUtil.ensureKnowledgeTables();
         DBUtil.ensureThresholdColumns();
         DBUtil.ensureDeviceCameraColumns();
+        DBUtil.ensurePlotMapColumns();
         DBUtil.ensureAlarmHandleColumns();
         DBUtil.ensureDetectionTables();
         Rag.init();

@@ -39,33 +39,47 @@
             <div class="cq-map" id="cqMap">
               <svg class="cq-terrain" viewBox="0 0 1000 640" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
-                  <linearGradient id="landGlow" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0" stop-color="#16301f"/>
-                    <stop offset=".48" stop-color="#0f2b35"/>
-                    <stop offset="1" stop-color="#123421"/>
+                  <linearGradient id="fullMapLand" x1="0" x2="1" y1="0" y2="1">
+                    <stop offset="0" stop-color="#123c24"/>
+                    <stop offset=".42" stop-color="#17472c"/>
+                    <stop offset="1" stop-color="#263f20"/>
                   </linearGradient>
-                  <linearGradient id="riverGlow" x1="0" x2="1" y1="0" y2="0">
-                    <stop offset="0" stop-color="#0ea5e9"/>
-                    <stop offset=".5" stop-color="#67e8f9"/>
-                    <stop offset="1" stop-color="#22d3ee"/>
-                  </linearGradient>
+                  <radialGradient id="mapLightA" cx="22%" cy="18%" r="48%">
+                    <stop offset="0" stop-color="#8ee8a3" stop-opacity=".34"/>
+                    <stop offset="1" stop-color="#8ee8a3" stop-opacity="0"/>
+                  </radialGradient>
+                  <radialGradient id="mapLightB" cx="78%" cy="38%" r="44%">
+                    <stop offset="0" stop-color="#f6d36c" stop-opacity=".24"/>
+                    <stop offset="1" stop-color="#f6d36c" stop-opacity="0"/>
+                  </radialGradient>
+                  <filter id="softTerrain">
+                    <feTurbulence type="fractalNoise" baseFrequency=".018" numOctaves="3" seed="8"/>
+                    <feColorMatrix type="saturate" values=".55"/>
+                    <feBlend mode="soft-light" in2="SourceGraphic"/>
+                  </filter>
                 </defs>
-                <path class="cq-boundary" d="M101,356 C89,260 147,165 256,126 C346,91 437,113 507,80 C604,35 707,63 788,130 C878,203 927,321 894,426 C862,529 746,582 619,560 C530,545 458,592 354,562 C244,530 118,470 101,356 Z" />
-                <path class="cq-ridge ridge-a" d="M172 214 C279 166 360 189 446 148 C540 102 654 112 760 176" />
-                <path class="cq-ridge ridge-b" d="M154 445 C250 390 347 420 437 374 C545 320 652 337 828 278" />
-                <path class="cq-river river-a" d="M60 378 C168 350 225 294 326 302 C464 314 516 407 650 398 C775 390 843 324 960 312" />
-                <path class="cq-river river-b" d="M222 70 C268 169 315 246 423 291 C505 326 547 389 579 525" />
-                <path class="cq-road" d="M135 316 C253 265 401 253 520 285 C643 318 721 386 870 395" />
-                <path class="cq-road road-b" d="M290 520 C346 415 433 365 551 336 C637 315 717 242 823 193" />
+                <rect class="cq-map-base" width="1000" height="640" filter="url(#softTerrain)" />
+                <rect width="1000" height="640" fill="url(#mapLightA)" />
+                <rect width="1000" height="640" fill="url(#mapLightB)" />
+                <path class="cq-patch patch-a" d="M-40,108 C122,28 286,42 408,132 C526,219 451,337 276,335 C113,333 -35,258 -40,108 Z" />
+                <path class="cq-patch patch-b" d="M383,8 C564,-38 804,26 1028,170 L1040,352 C837,321 669,286 542,214 C457,166 397,96 383,8 Z" />
+                <path class="cq-patch patch-c" d="M-26,420 C154,345 314,384 472,489 C572,555 505,660 300,674 L-36,674 Z" />
+                <path class="cq-patch patch-d" d="M520,356 C681,292 861,344 1040,475 L1040,674 L550,674 C470,575 432,433 520,356 Z" />
+                <path class="cq-patch patch-e" d="M192,230 C310,158 447,178 530,267 C601,343 519,444 386,431 C252,418 126,325 192,230 Z" />
+                <path class="cq-parcel parcel-a" d="M56,74 L238,38 L346,150 L286,270 L84,244 Z" />
+                <path class="cq-parcel parcel-b" d="M326,64 L532,42 L642,180 L506,292 L356,222 Z" />
+                <path class="cq-parcel parcel-c" d="M650,58 L968,120 L1018,292 L760,282 Z" />
+                <path class="cq-parcel parcel-d" d="M42,278 L238,284 L318,430 L166,542 L-26,472 Z" />
+                <path class="cq-parcel parcel-e" d="M342,286 L536,302 L608,452 L468,590 L306,466 Z" />
+                <path class="cq-parcel parcel-f" d="M626,316 L846,300 L1030,436 L1018,656 L754,590 Z" />
               </svg>
 
               <div class="map-grid-lines"></div>
-              <div class="map-label city-a">嘉陵江</div>
-              <div class="map-label city-b">长江</div>
+              <svg class="field-layer-svg" id="fieldLayerSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
               <div class="map-label city-c">两江新区</div>
-              <div class="map-scan"></div>
-              <div class="add-slot-layer" id="slotLayer"></div>
               <div class="field-layer" id="fieldLayer"></div>
+              <svg class="plot-draw-layer" id="drawLayer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <div class="map-draw-tip" id="mapDrawTip">在地图上点击勾勒地块轮廓，至少 3 个点。</div>
 
               <div class="drone active" id="drone" aria-hidden="true">
                 <span class="rotor rotor-nw"></span>
@@ -134,9 +148,19 @@
           <input type="number" class="form-control" id="mapPlotArea" min="0.1" step="0.1" placeholder="如：2.4">
         </div>
         <div class="form-group">
-          <label class="form-label">地图点位</label>
-          <select class="form-control" id="mapSlotSelect"></select>
+          <label class="form-label">生成方式</label>
+          <div class="mode-switch plot-create-mode" id="plotCreateMode">
+            <button class="active" type="button" data-create-mode="draw">手绘轮廓</button>
+            <button type="button" data-create-mode="recommend">推荐地块</button>
+          </div>
         </div>
+      </div>
+      <select class="form-control" id="mapSlotSelect" style="display:none"></select>
+      <div class="plot-shape-tools">
+        <button class="btn btn-outline btn-sm" id="undoDrawPoint" type="button">撤销点</button>
+        <button class="btn btn-outline btn-sm" id="resetDrawPlot" type="button">一键清空</button>
+        <button class="btn btn-outline btn-sm" id="recommendPlot" type="button">推荐地块</button>
+        <span id="shapeStatus">请在地图上点击勾勒轮廓。</span>
       </div>
       <div class="form-group mb-0">
         <label class="form-label">作物形态</label>
@@ -225,11 +249,13 @@
       activeJobs: {},
       scheduleTimers: {},
       autoSchedule: null,
-      battery: 96
+      battery: 96,
+      draft: null
     };
 
     var SLOT_KEY = 'agri_cq_map_slots_v1';
     var CROP_KEY = 'agri_cq_crop_styles_v1';
+    var AREA_SCALE = 0.028;
     var cropStyles = loadJson(CROP_KEY, {});
 
     function canManagePlot() {
@@ -284,6 +310,208 @@
       return state.plots.filter(function (p) { return p.id === id; })[0] || null;
     }
 
+    function rectShape(slot) {
+      var wobble = (slot.id.charCodeAt(slot.id.length - 1) % 5) * 0.35;
+      return {
+        points: [
+          { x: slot.x - slot.w / 2 + wobble, y: slot.y - slot.h / 2 + 0.7 },
+          { x: slot.x + slot.w / 2 - 0.9, y: slot.y - slot.h / 2 + wobble },
+          { x: slot.x + slot.w / 2 - wobble, y: slot.y + slot.h / 2 - 0.5 },
+          { x: slot.x + 1.2, y: slot.y + slot.h / 2 + 0.4 },
+          { x: slot.x - slot.w / 2 + 0.6, y: slot.y + slot.h / 2 - wobble }
+        ]
+      };
+    }
+
+    function shapeForPlot(plot) {
+      if (plot && plot.mapShape && plot.mapShape.points && plot.mapShape.points.length >= 3) {
+        return normalizeShape(plot.mapShape);
+      }
+      return rectShape(slotById(state.slotMap[plot.id]));
+    }
+
+    function pointsText(points) {
+      return points.map(function (p) { return p.x.toFixed(2) + ',' + p.y.toFixed(2); }).join(' ');
+    }
+
+    function orderedPolygonPoints(points) {
+      var clean = [];
+      (points || []).forEach(function (p) {
+        var point = { x: Number(p.x), y: Number(p.y) };
+        if (isNaN(point.x) || isNaN(point.y)) return;
+        var duplicated = clean.some(function (existing) {
+          return Math.abs(existing.x - point.x) < 0.01 && Math.abs(existing.y - point.y) < 0.01;
+        });
+        if (!duplicated) clean.push(point);
+      });
+      if (clean.length < 3) return clean;
+      var center = clean.reduce(function (acc, p) {
+        acc.x += p.x;
+        acc.y += p.y;
+        return acc;
+      }, { x: 0, y: 0 });
+      center.x /= clean.length;
+      center.y /= clean.length;
+      return clean.map(function (p) {
+        return {
+          point: p,
+          angle: Math.atan2(p.y - center.y, p.x - center.x),
+          distance: Math.pow(p.x - center.x, 2) + Math.pow(p.y - center.y, 2)
+        };
+      }).sort(function (a, b) {
+        return a.angle === b.angle ? a.distance - b.distance : a.angle - b.angle;
+      }).map(function (item) {
+        return item.point;
+      });
+    }
+
+    function normalizeShape(shape) {
+      return {
+        points: orderedPolygonPoints(shape && shape.points),
+        source: shape && shape.source
+      };
+    }
+
+    function pathD(points) {
+      if (!points || !points.length) return '';
+      return points.map(function (p, idx) {
+        return (idx ? 'L' : 'M') + p.x.toFixed(2) + ',' + p.y.toFixed(2);
+      }).join(' ') + ' Z';
+    }
+
+    function shapeCenter(shape) {
+      var points = shape.points;
+      var signed = 0;
+      var cx = 0;
+      var cy = 0;
+      for (var i = 0; i < points.length; i++) {
+        var a = points[i];
+        var b = points[(i + 1) % points.length];
+        var cross = a.x * b.y - b.x * a.y;
+        signed += cross;
+        cx += (a.x + b.x) * cross;
+        cy += (a.y + b.y) * cross;
+      }
+      if (Math.abs(signed) < 0.0001) {
+        var bounds = shapeBounds(shape);
+        return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+      }
+      signed *= 0.5;
+      return { x: cx / (6 * signed), y: cy / (6 * signed) };
+    }
+
+    function fieldSvgDefs() {
+      return '' +
+        '<defs>' +
+          '<pattern id="fieldPattern-leaf" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(-18)">' +
+            '<rect width="5" height="5" fill="#6b3f1f"/><path d="M0 3.8 Q2.6 1 5 3.8" fill="none" stroke="#83d45b" stroke-width=".6" opacity=".95"/>' +
+          '</pattern>' +
+          '<pattern id="fieldPattern-fruit" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-12)">' +
+            '<rect width="6" height="6" fill="#70411f"/><circle cx="1.6" cy="2.2" r=".55" fill="#ef4444"/><circle cx="4.6" cy="4.1" r=".5" fill="#f97316"/><path d="M0 5.4 L6 4.3" stroke="#65a30d" stroke-width=".55" opacity=".8"/>' +
+          '</pattern>' +
+          '<pattern id="fieldPattern-grain" width="4" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(7)">' +
+            '<rect width="4" height="6" fill="#7a4a22"/><path d="M.9 0 L1.2 6 M2.8 0 L3 6" stroke="#facc15" stroke-width=".42" opacity=".92"/>' +
+          '</pattern>' +
+          '<pattern id="fieldPattern-vine" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-24)">' +
+            '<rect width="7" height="7" fill="#61391d"/><path d="M-1 4 C2 1 4 7 8 3" fill="none" stroke="#22c55e" stroke-width=".55"/><circle cx="3.2" cy="3.2" r=".6" fill="#86efac"/>' +
+          '</pattern>' +
+        '</defs>';
+    }
+
+    function polygonArea(points) {
+      if (!points || points.length < 3) return 0;
+      var sum = 0;
+      for (var i = 0; i < points.length; i++) {
+        var a = points[i];
+        var b = points[(i + 1) % points.length];
+        sum += a.x * b.y - b.x * a.y;
+      }
+      return Math.abs(sum) / 2;
+    }
+
+    function areaFromShape(shape) {
+      return Math.max(0.1, polygonArea(shape.points) * AREA_SCALE);
+    }
+
+    function shapeBounds(shape) {
+      var minX = 100, minY = 100, maxX = 0, maxY = 0;
+      shape.points.forEach(function (p) {
+        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+      });
+      return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+    }
+
+    function pointInPolygon(point, poly) {
+      var inside = false;
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var pi = poly[i], pj = poly[j];
+        var intersect = ((pi.y > point.y) !== (pj.y > point.y)) &&
+          (point.x < (pj.x - pi.x) * (point.y - pi.y) / ((pj.y - pi.y) || 0.0001) + pi.x);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function ccw(a, b, c) {
+      return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+    }
+
+    function segmentsIntersect(a, b, c, d) {
+      return ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+    }
+
+    function shapesOverlap(a, b) {
+      var ab = shapeBounds(a), bb = shapeBounds(b);
+      if (ab.maxX <= bb.minX || bb.maxX <= ab.minX || ab.maxY <= bb.minY || bb.maxY <= ab.minY) return false;
+      for (var i = 0; i < a.points.length; i++) {
+        var a1 = a.points[i], a2 = a.points[(i + 1) % a.points.length];
+        for (var j = 0; j < b.points.length; j++) {
+          if (segmentsIntersect(a1, a2, b.points[j], b.points[(j + 1) % b.points.length])) return true;
+        }
+      }
+      return pointInPolygon(a.points[0], b.points) || pointInPolygon(b.points[0], a.points);
+    }
+
+    function overlapsExisting(shape, exceptPlotId) {
+      return state.plots.some(function (plot) {
+        return plot.id !== exceptPlotId && shapesOverlap(shape, shapeForPlot(plot));
+      });
+    }
+
+    function clampPoint(p) {
+      return { x: Math.max(6, Math.min(94, p.x)), y: Math.max(8, Math.min(92, p.y)) };
+    }
+
+    function recommendedShape(area, preferredSlotId) {
+      var target = Math.max(6, Number(area || 1) / AREA_SCALE);
+      var candidates = preferredSlotId ? [slotById(preferredSlotId)] : [];
+      slots.forEach(function (slot) {
+        if (!preferredSlotId || slot.id !== preferredSlotId) candidates.push(slot);
+      });
+      for (var i = 0; i < candidates.length; i++) {
+        var slot = candidates[i];
+        var w = Math.max(7, Math.min(17, Math.sqrt(target * 1.45)));
+        var h = Math.max(5, Math.min(12, target / w));
+        var shape = {
+          points: [
+            clampPoint({ x: slot.x - w * .52, y: slot.y - h * .34 }),
+            clampPoint({ x: slot.x - w * .10, y: slot.y - h * .58 }),
+            clampPoint({ x: slot.x + w * .50, y: slot.y - h * .32 }),
+            clampPoint({ x: slot.x + w * .44, y: slot.y + h * .42 }),
+            clampPoint({ x: slot.x + w * .04, y: slot.y + h * .58 }),
+            clampPoint({ x: slot.x - w * .48, y: slot.y + h * .36 })
+          ],
+          source: 'recommend'
+        };
+        if (!overlapsExisting(shape)) {
+          document.getElementById('mapSlotSelect').value = slot.id;
+          return shape;
+        }
+      }
+      return null;
+    }
+
     function waterDevicesForPlot(plotId, onlineOnly) {
       return state.devices.filter(function (d) {
         return d.plotId === plotId && d.controllable && (!onlineOnly || d.online);
@@ -315,27 +543,13 @@
     }
 
     function cropType(plot) {
-      var chosen = cropStyles[plot.id];
+      var chosen = cropStyles[plot.id] || plot.cropStyle;
       if (chosen && chosen !== 'auto') return chosen;
       var crop = String(plot.crop || '');
       if (/瓜|藤|葡萄|黄瓜/.test(crop)) return 'vine';
       if (/稻|麦|玉米|谷|高粱/.test(crop)) return 'grain';
       if (/番茄|辣椒|茄|草莓|果/.test(crop)) return 'fruit';
       return 'leaf';
-    }
-
-    function cropHtml(plot) {
-      var type = cropType(plot);
-      var rows = type === 'grain' ? 5 : 4;
-      var html = '<div class="crop crop-' + type + '">';
-      for (var r = 0; r < rows; r++) {
-        html += '<span class="crop-row">';
-        for (var i = 0; i < 7; i++) {
-          html += '<i></i>';
-        }
-        html += '</span>';
-      }
-      return html + '</div>';
     }
 
     function thresholdIssues(rt) {
@@ -355,33 +569,38 @@
 
     function renderMap() {
       var fieldLayer = document.getElementById('fieldLayer');
-      var slotLayer = document.getElementById('slotLayer');
+      var svgLayer = document.getElementById('fieldLayerSvg');
       fieldLayer.innerHTML = '';
-      slotLayer.innerHTML = '';
+      svgLayer.innerHTML = fieldSvgDefs();
 
       document.getElementById('mapEmpty').style.display = state.plots.length ? 'none' : 'block';
       document.getElementById('openMapAdd').style.display = canManagePlot() ? 'inline-flex' : 'none';
 
-      var usedSlots = {};
       state.plots.forEach(function (plot) {
-        usedSlots[state.slotMap[plot.id]] = true;
-        var slot = slotById(state.slotMap[plot.id]);
+        var shape = shapeForPlot(plot);
+        var center = shapeCenter(shape);
         var rt = state.realtime[plot.id] || plot;
         var issues = thresholdIssues(rt);
         var hasRunningWater = state.devices.some(function (d) {
           return d.plotId === plot.id && d.controllable && d.running;
         });
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathD(shape.points));
+        path.setAttribute('class', 'cq-field-path crop-' + cropType(plot) + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : ''));
+        path.setAttribute('fill', 'url(#fieldPattern-' + cropType(plot) + ')');
+        path.setAttribute('data-plot-id', plot.id);
+        path.addEventListener('click', function () {
+          selectPlot(plot.id);
+        });
+        svgLayer.appendChild(path);
+
         var field = document.createElement('button');
         field.type = 'button';
-        field.className = 'cq-field' + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : '');
+        field.className = 'cq-field-label' + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : '');
         field.setAttribute('data-plot-id', plot.id);
-        field.style.left = slot.x + '%';
-        field.style.top = slot.y + '%';
-        field.style.width = slot.w + '%';
-        field.style.height = slot.h + '%';
+        field.style.left = center.x + '%';
+        field.style.top = center.y + '%';
         field.innerHTML =
-          '<span class="soil-bed"></span>' +
-          cropHtml(plot) +
           '<span class="field-name">' + esc(plot.name) + '</span>' +
           '<span class="field-crop">' + esc(plot.crop || '作物') + '</span>' +
           '<span class="water-effect"><i></i><i></i><i></i><i></i></span>' +
@@ -391,23 +610,6 @@
         });
         fieldLayer.appendChild(field);
       });
-
-      if (canManagePlot()) {
-        slots.forEach(function (slot) {
-          if (usedSlots[slot.id]) return;
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'map-add-slot';
-          btn.style.left = slot.x + '%';
-          btn.style.top = slot.y + '%';
-          btn.style.width = slot.w + '%';
-          btn.style.height = slot.h + '%';
-          btn.innerHTML = '<span>+</span>';
-          btn.title = '在' + slot.name + '添加地块';
-          btn.addEventListener('click', function () { openAddModal(slot.id); });
-          slotLayer.appendChild(btn);
-        });
-      }
       renderSelected();
     }
 
@@ -546,8 +748,8 @@
         ];
       }
       return state.plots.map(function (p) {
-        var slot = slotById(state.slotMap[p.id]);
-        return { x: slot.x + slot.w / 2, y: slot.y + slot.h / 2 - 3, plotId: p.id };
+        var bounds = shapeBounds(shapeForPlot(p));
+        return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 - 3, plotId: p.id };
       });
     }
 
@@ -596,8 +798,9 @@
     }
 
     function setFieldIrrigating(plotId, on) {
-      var field = document.querySelector('[data-plot-id="' + plotId + '"]');
-      if (field) field.classList.toggle('irrigating', !!on);
+      document.querySelectorAll('[data-plot-id="' + plotId + '"]').forEach(function (field) {
+        field.classList.toggle('irrigating', !!on);
+      });
     }
 
     function controlDevice(device, action) {
@@ -769,11 +972,14 @@
     function cancelIrrigationSchedule(stopRunning) {
       var schedule = state.autoSchedule;
       clearScheduleTimers();
-      state.autoSchedule = null;
       if (stopRunning && schedule && schedule.running) {
         var plot = plotById(schedule.plotId);
-        if (plot) stopScheduledIrrigation(plot);
+        if (plot) {
+          stopScheduledIrrigation(plot);
+          return;
+        }
       }
+      state.autoSchedule = null;
     }
 
     function stopAutoIrrigationNow() {
@@ -1015,22 +1221,142 @@
       });
     }
 
+    function draftShape() {
+      return state.draft && state.draft.points.length >= 3
+        ? { points: orderedPolygonPoints(state.draft.points), source: state.draft.mode }
+        : null;
+    }
+
+    function setCreateMode(mode) {
+      if (!state.draft) state.draft = { mode: 'draw', points: [] };
+      state.draft.mode = mode;
+      document.querySelectorAll('#plotCreateMode button').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-create-mode') === mode);
+      });
+      document.getElementById('mapPlotArea').readOnly = mode === 'draw';
+      document.getElementById('undoDrawPoint').style.display = mode === 'draw' ? 'inline-flex' : 'none';
+      document.getElementById('resetDrawPlot').style.display = mode === 'draw' ? 'inline-flex' : 'none';
+      document.getElementById('recommendPlot').style.display = mode === 'recommend' ? 'inline-flex' : 'none';
+      document.getElementById('cqMap').classList.toggle('drawing-plot', mode === 'draw');
+      document.getElementById('mapDrawTip').classList.toggle('show', mode === 'draw');
+      updateShapeStatus();
+      renderDraftShape();
+    }
+
+    function updateShapeStatus() {
+      var status = document.getElementById('shapeStatus');
+      if (!status || !state.draft) return;
+      var shape = draftShape();
+      var undo = document.getElementById('undoDrawPoint');
+      var reset = document.getElementById('resetDrawPlot');
+      if (undo) undo.disabled = state.draft.mode !== 'draw' || !state.draft.points.length;
+      if (reset) reset.disabled = state.draft.mode !== 'draw' || !state.draft.points.length;
+      if (state.draft.mode === 'draw') {
+        status.textContent = state.draft.points.length < 3
+          ? '请在地图上点击至少 3 个点，当前 ' + state.draft.points.length + ' 个点。'
+          : '面积约 ' + areaFromShape(shape).toFixed(1) + ' 亩，可继续调整或确认添加。';
+        return;
+      }
+      status.textContent = shape
+        ? '已生成推荐轮廓，面积约 ' + areaFromShape(shape).toFixed(1) + ' 亩。'
+        : '填写面积后点击推荐地块，系统会自动避开现有地块。';
+    }
+
+    function renderDraftShape() {
+      var layer = document.getElementById('drawLayer');
+      if (!layer) return;
+      layer.innerHTML = '';
+      if (!state.draft || !state.draft.points.length) {
+        updateShapeStatus();
+        return;
+      }
+      var shape = draftShape();
+      var polygonPoints = shape ? shape.points : state.draft.points;
+      var pts = pointsText(polygonPoints);
+      if (state.draft.points.length >= 3) {
+        var poly = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        poly.setAttribute('d', pathD(polygonPoints));
+        poly.setAttribute('class', overlapsExisting(shape) ? 'draft-poly invalid' : 'draft-poly');
+        layer.appendChild(poly);
+      } else if (state.draft.points.length === 2) {
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        line.setAttribute('points', pts);
+        line.setAttribute('class', 'draft-line');
+        layer.appendChild(line);
+      }
+      state.draft.points.forEach(function (p, idx) {
+        var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', p.x);
+        dot.setAttribute('cy', p.y);
+        dot.setAttribute('r', idx === 0 ? '1.1' : '.85');
+        dot.setAttribute('class', 'draft-dot');
+        layer.appendChild(dot);
+      });
+      if (shape && state.draft.mode === 'draw') {
+        document.getElementById('mapPlotArea').value = areaFromShape(shape).toFixed(1);
+      }
+      updateShapeStatus();
+    }
+
+    function resetDraft() {
+      state.draft = { mode: state.draft ? state.draft.mode : 'draw', points: [] };
+      if (state.draft.mode === 'draw') document.getElementById('mapPlotArea').value = '';
+      renderDraftShape();
+    }
+
+    function undoDraftPoint() {
+      if (!state.draft || state.draft.mode !== 'draw') return;
+      state.draft.points.pop();
+      if (state.draft.points.length < 3) document.getElementById('mapPlotArea').value = '';
+      renderDraftShape();
+    }
+
+    function mapPointFromEvent(e) {
+      var rect = document.getElementById('cqMap').getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(100, (e.clientX - rect.left) / rect.width * 100)),
+        y: Math.max(0, Math.min(100, (e.clientY - rect.top) / rect.height * 100))
+      };
+    }
+
+    function generateRecommendedDraft() {
+      var area = parseFloat(document.getElementById('mapPlotArea').value);
+      if (isNaN(area) || area <= 0) {
+        Toast.error('请先填写大于 0 的面积');
+        return;
+      }
+      var shape = recommendedShape(area, document.getElementById('mapSlotSelect').value);
+      if (!shape) {
+        Toast.error('推荐区域与现有地块重叠，请调小面积或改用手绘轮廓');
+        return;
+      }
+      state.draft = { mode: 'recommend', points: shape.points };
+      setCreateMode('recommend');
+      renderDraftShape();
+    }
+
     function openAddModal(slotId) {
       if (!canManagePlot()) {
         Toast.error('当前角色无地块管理权限');
         return;
       }
       fillSlotOptions(slotId);
+      state.draft = { mode: 'draw', points: [] };
       document.getElementById('mapPlotName').value = '';
       document.getElementById('mapPlotCrop').value = '';
       document.getElementById('mapPlotArea').value = '';
       document.getElementById('mapCropStyle').value = 'auto';
       document.getElementById('mapDevRows').innerHTML = '';
       document.getElementById('mapAddModal').classList.add('show');
+      setCreateMode('draw');
     }
 
     function closeAddModal() {
       document.getElementById('mapAddModal').classList.remove('show');
+      state.draft = null;
+      document.getElementById('cqMap').classList.remove('drawing-plot');
+      document.getElementById('mapDrawTip').classList.remove('show');
+      renderDraftShape();
     }
 
     function confirmAddPlot() {
@@ -1039,8 +1365,17 @@
       var area = document.getElementById('mapPlotArea').value.trim();
       var slotId = document.getElementById('mapSlotSelect').value;
       var style = document.getElementById('mapCropStyle').value;
+      var shape = draftShape();
       if (!name || !crop || !area) {
         Toast.error('请填写地块名称、作物和面积');
+        return;
+      }
+      if (!shape) {
+        Toast.error(state.draft && state.draft.mode === 'recommend' ? '请先生成推荐地块轮廓' : '请在地图上勾勒至少 3 个轮廓点');
+        return;
+      }
+      if (overlapsExisting(shape)) {
+        Toast.error('地块重叠，不可添加');
         return;
       }
       var devices;
@@ -1050,7 +1385,7 @@
         Toast.error(e.message);
         return;
       }
-      API.addPlot({ name: name, crop: crop, area: area, devices: devices }).then(function (res) {
+      API.addPlot({ name: name, crop: crop, area: area, mapShape: shape, cropStyle: style, devices: devices }).then(function (res) {
         if (!res || res.code !== 0) {
           Toast.error((res && res.msg) || '添加地块失败');
           return;
@@ -1068,7 +1403,18 @@
 
     function deleteSelectedPlot(plot) {
       if (!confirm('确认删除地块「' + plot.name + '」及其关联设备、数据和告警吗？')) return;
-      API.deletePlot(plot.id).then(function (res) {
+      var runningDevices = waterDevicesForPlot(plot.id, false).filter(function (d) { return d.running; });
+      var stopRunning = runningDevices.length
+        ? Promise.all(runningDevices.map(function (device) { return controlDevice(device, 'off'); }))
+        : Promise.resolve([]);
+      stopRunning.then(function () {
+        if (state.autoSchedule && state.autoSchedule.plotId === plot.id) {
+          clearScheduleTimers();
+          state.autoSchedule = null;
+          setIrrigationMode('manual');
+        }
+        return API.deletePlot(plot.id);
+      }).then(function (res) {
         if (!res || res.code !== 0) {
           Toast.error((res && res.msg) || '删除失败');
           return;
@@ -1142,6 +1488,24 @@
     });
     document.getElementById('refreshMap').addEventListener('click', function () { loadAll(); });
     document.getElementById('openMapAdd').addEventListener('click', function () { openAddModal(); });
+    document.querySelectorAll('#plotCreateMode button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var mode = btn.getAttribute('data-create-mode');
+        state.draft = { mode: mode, points: [] };
+        setCreateMode(mode);
+        if (mode === 'recommend') generateRecommendedDraft();
+      });
+    });
+    document.getElementById('resetDrawPlot').addEventListener('click', resetDraft);
+    document.getElementById('undoDrawPoint').addEventListener('click', undoDraftPoint);
+    document.getElementById('recommendPlot').addEventListener('click', generateRecommendedDraft);
+    document.getElementById('cqMap').addEventListener('click', function (e) {
+      if (!state.draft || state.draft.mode !== 'draw') return;
+      if (e.target.closest && e.target.closest('.cq-field-label, .drone')) return;
+      state.draft.points.push(mapPointFromEvent(e));
+      renderDraftShape();
+      e.preventDefault();
+    });
     document.getElementById('addMapDevRow').addEventListener('click', function () { addDeviceRow(); });
     document.getElementById('cancelMapAdd').addEventListener('click', closeAddModal);
     document.getElementById('confirmMapAdd').addEventListener('click', confirmAddPlot);
@@ -1153,6 +1517,7 @@
     });
 
     loadAll().then(function () {
+      if (new URLSearchParams(location.search).get('add') === '1' && canManagePlot()) openAddModal();
       requestAnimationFrame(tickDrone);
       setInterval(function () {
         loadRealtime().then(renderMap);
