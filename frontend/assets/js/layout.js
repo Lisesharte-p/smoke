@@ -107,6 +107,9 @@ window.Layout = (function () {
 
   /* 退出登录：清除本地登录态并回到登录页（切换账户） */
   function logout() {
+    if (window.API && typeof API.showPageLoader === 'function') {
+      API.showPageLoader(['正在切换账户', '正在返回登录页', '正在清理页面状态']);
+    }
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
     location.href = 'login.html';
   }
@@ -188,18 +191,60 @@ window.Layout = (function () {
     }
   }
 
+  function isPlainLeftClick(e) {
+    return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+  }
+
+  function bindFastNavigation() {
+    document.addEventListener('click', function (e) {
+      if (!isPlainLeftClick(e)) return;
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      if (a.target && a.target !== '_self') return;
+      if (a.hasAttribute('download')) return;
+
+      var href = a.getAttribute('href') || '';
+      if (!href || href.charAt(0) === '#' || /^javascript:|^mailto:|^tel:/i.test(href)) return;
+
+      var url;
+      try {
+        url = new URL(href, location.href);
+      } catch (err) {
+        return;
+      }
+      if (url.origin !== location.origin) return;
+      if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
+
+      e.preventDefault();
+      if (document.body.classList.contains('page-leaving')) return;
+      document.body.classList.add('page-leaving');
+      if (window.API && typeof API.showPageLoader === 'function') {
+        API.showPageLoader(['正在打开页面', '正在准备页面数据', '正在同步最新状态']);
+      }
+      requestAnimationFrame(function () {
+        setTimeout(function () { location.href = url.href; }, 30);
+      });
+    });
+  }
+
   /* ---------- 入口：页面加载时调用 Layout.init() ---------- */
   function init() {
     var pageKey = document.body.getAttribute('data-page') || '';
 
     // 1) 未登录 → 回登录页
     if (!isLoggedIn()) {
+      if (window.API && typeof API.showPageLoader === 'function') {
+        API.showPageLoader(['正在进入登录页', '正在准备身份验证', '正在加载页面']);
+      }
       location.replace('login.html');
       return;
     }
 
     // 2) 无权限访问当前页 → 回数据总览（所有角色均可访问）
     if (pageKey && !canAccess(pageKey)) {
+      if (window.API && typeof API.showPageLoader === 'function') {
+        API.showPageLoader(['正在返回数据总览', '正在检查访问权限', '正在加载页面']);
+      }
       location.replace('index.html');
       return;
     }
@@ -208,6 +253,7 @@ window.Layout = (function () {
     renderTopbar(pageKey);
     hideRestrictedLinks();
     startClock();
+    bindFastNavigation();
 
     // 绑定「切换账户」按钮
     var logoutBtn = document.getElementById('logoutBtn');

@@ -231,8 +231,10 @@
 
     /* ---------- ECharts 通用折线图配置（单指标，一轴一图） ---------- */
     function lineOption(title, unit, color, dates, values) {
+      var textColor = cssVar('--text') || '#e7efff';
+      var mutedColor = cssVar('--text-muted') || '#64748b';
       return {
-        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: '#e7efff' } },
+        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: textColor } },
         tooltip: {
           trigger: 'axis',
           backgroundColor: 'rgba(14, 23, 40, .96)',
@@ -252,14 +254,14 @@
           boundaryGap: false,
           axisLine: { lineStyle: { color: 'rgba(148, 163, 184, .25)' } },
           axisTick: { show: false },
-          axisLabel: { color: '#64748b', fontSize: 10, hideOverlap: true }
+          axisLabel: { color: mutedColor, fontSize: 10, hideOverlap: true }
         },
         yAxis: {
           type: 'value',
           scale: true,
           axisLine: { show: false },
           axisTick: { show: false },
-          axisLabel: { color: '#64748b', fontSize: 11 },
+          axisLabel: { color: mutedColor, fontSize: 11 },
           splitLine: { lineStyle: { color: 'rgba(148, 163, 184, .08)' } }
         },
         series: [{
@@ -567,6 +569,8 @@
       loadTrend(this.value);
     });
     window.addEventListener('agri:themechange', function () {
+      var trendPlot = document.getElementById('trendPlot');
+      if (trendPlot && trendPlot.value) loadTrend(trendPlot.value);
       renderDeviceStatus();
     });
 

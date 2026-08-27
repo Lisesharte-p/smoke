@@ -112,18 +112,19 @@ window.API = (function () {
     }, 1400);
   }
 
+  function showPageLoader(messages) {
+    clearTimeout(loaderState.hideTimer);
+    clearTimeout(loaderState.showTimer);
+    loaderState.active = Math.max(loaderState.active, 1);
+    showLoader(messages || ['正在打开页面', '正在准备数据', '正在同步状态']);
+  }
+
   function beginLoader(url, method, enabled, immediate) {
     if (!enabled) return false;
     loaderState.active += 1;
     clearTimeout(loaderState.hideTimer);
     clearTimeout(loaderState.showTimer);
-    if (immediate) {
-      showLoader(loaderMessages(url, method));
-      return true;
-    }
-    loaderState.showTimer = setTimeout(function () {
-      if (loaderState.active > 0) showLoader(loaderMessages(url, method));
-    }, 180);
+    showLoader(loaderMessages(url, method));
     return true;
   }
 
@@ -549,6 +550,7 @@ window.API = (function () {
 
   return {
     config: config,
+    showPageLoader: showPageLoader,
     login: login,
     register: register,
     getPlots: getPlots,

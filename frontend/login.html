@@ -205,6 +205,9 @@
           Layout.setUser({ username: res.data.username, name: res.data.name, roleName: res.data.roleName, role: res.data.role });
           Toast.success('欢迎，' + res.data.name);
           document.querySelector('.login-page').classList.add('success');
+          if (window.API && typeof API.showPageLoader === 'function') {
+            API.showPageLoader(['正在进入数据总览', '正在加载首页数据', '正在同步最新状态']);
+          }
           setTimeout(function () { location.href = 'index.html'; }, 550);
         } else {
           Toast.error(res.msg || '登录失败');
