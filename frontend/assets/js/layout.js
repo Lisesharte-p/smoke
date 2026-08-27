@@ -148,6 +148,7 @@ window.Layout = (function () {
             '<span class="topbar-clock" id="topbarClock">--:--:--</span>' +
             '<span class="topbar-user"><span class="avatar">' + (u.name || '农').charAt(0) + '</span>' +
             u.roleName + ' · ' + u.name + '</span>' +
+            Theme.buttonHtml() +
             '<a class="topbar-logout" id="logoutBtn" href="javascript:;" title="退出并切换账户">切换账户</a>' +
             '</div>';
     document.getElementById('topbar').innerHTML = html;
@@ -223,6 +224,82 @@ window.Layout = (function () {
     canAccess: canAccess,
     isLoggedIn: isLoggedIn
   };
+})();
+
+/* ==========================================================================
+   主题管理（浅色 / 深色切换，所有页面共享）
+   通过 <html data-theme="dark|light"> 切换；偏好持久化到 localStorage
+   ========================================================================== */
+window.Theme = (function () {
+  var KEY = 'agri_theme';
+
+  function get() {
+    try { return localStorage.getItem(KEY) || 'dark'; } catch (e) { return 'dark'; }
+  }
+
+  function isLight() { return get() === 'light'; }
+
+  function apply(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+
+  /* 刷新页面上所有主题按钮的图标 / 提示 */
+  function syncButtons(theme) {
+    var light = theme === 'light';
+    var btns = document.querySelectorAll('[data-theme-toggle]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].innerHTML = light ? '🌙' : '☀️';
+      btns[i].title = light ? '切换到深色模式' : '切换到浅色模式';
+    }
+  }
+
+  function toggle() {
+    var next = isLight() ? 'dark' : 'light';
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    apply(next);
+    syncButtons(next);
+    return next;
+  }
+
+  function init() {
+    var t = get();
+    apply(t);
+    syncButtons(t);
+  }
+
+  function bind() {
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('[data-theme-toggle]') : null;
+      if (btn) toggle();
+    });
+  }
+
+  /* 生成顶栏切换按钮 HTML（供 renderTopbar 使用） */
+  function buttonHtml() {
+    var light = isLight();
+    return '<button class="theme-toggle" data-theme-toggle title="' +
+           (light ? '切换到深色模式' : '切换到浅色模式') + '">' +
+           (light ? '🌙' : '☀️') + '</button>';
+  }
+
+  return {
+    get: get,
+    isLight: isLight,
+    toggle: toggle,
+    init: init,
+    bind: bind,
+    buttonHtml: buttonHtml
+  };
+})();
+
+/* 页面加载时自动初始化主题 + 绑定切换（layout.js 在 body 末尾加载，DOM 已就绪） */
+(function () {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { Theme.init(); Theme.bind(); });
+  } else {
+    Theme.init();
+    Theme.bind();
+  }
 })();
 
 /* ==========================================================================

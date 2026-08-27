@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>告警管理 - 智慧农业平台</title>
+  <script>
+    // 提前应用主题，避免加载闪烁（FOUC）
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('agri_theme') || 'dark'); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body data-page="alarm">
