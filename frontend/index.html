@@ -225,6 +225,10 @@
       ]);
     }
 
+    function cssVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
     /* ---------- ECharts 通用折线图配置（单指标，一轴一图） ---------- */
     function lineOption(title, unit, color, dates, values) {
       return {
@@ -471,6 +475,9 @@
       var running = devices.filter(function (d) { return d.online && d.running; }).length;
       var offline = devices.filter(function (d) { return !d.online; }).length;
       var online = total - running - offline;
+      var textColor = cssVar('--text') || '#e7efff';
+      var mutedColor = cssVar('--text-muted') || '#64748b';
+      var secondaryColor = cssVar('--text-secondary') || '#9db1cc';
 
       if (!charts.deviceStatus) charts.deviceStatus = echarts.init(dom);
       var chart = charts.deviceStatus;
@@ -488,15 +495,15 @@
           itemWidth: 10,
           itemHeight: 10,
           itemGap: 16,
-          textStyle: { color: '#9db1cc', fontSize: 12 }
+          textStyle: { color: secondaryColor, fontSize: 12 }
         },
         title: {
           text: total + '',
           subtext: '设备总数',
           left: 'center',
           top: '30%',
-          textStyle: { color: '#e7efff', fontSize: 24, fontWeight: 700 },
-          subtextStyle: { color: '#64748b', fontSize: 11 }
+          textStyle: { color: textColor, fontSize: 24, fontWeight: 700 },
+          subtextStyle: { color: mutedColor, fontSize: 11 }
         },
         series: [{
           type: 'pie',
@@ -558,6 +565,9 @@
 
     document.getElementById('trendPlot').addEventListener('change', function () {
       loadTrend(this.value);
+    });
+    window.addEventListener('agri:themechange', function () {
+      renderDeviceStatus();
     });
 
     /* ---------- 删除地块 ---------- */

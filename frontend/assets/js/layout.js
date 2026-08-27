@@ -241,6 +241,7 @@ window.Theme = (function () {
 
   function apply(theme) {
     document.documentElement.setAttribute('data-theme', theme);
+    window.dispatchEvent(new CustomEvent('agri:themechange', { detail: { theme: theme } }));
   }
 
   /* 刷新页面上所有主题按钮的图标 / 提示 */
