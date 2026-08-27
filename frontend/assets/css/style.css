@@ -1387,7 +1387,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
   border-left: 4px solid var(--primary);
   font-size: 13px;
-  color: var(--text);
+  color: #e7efff;
   animation: slide-in .25s ease;
   display: flex;
   align-items: center;
@@ -2778,6 +2778,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   width: min(620px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
   overflow: auto;
+}
+
+.irrigation-modal {
+  max-width: 520px;
 }
 
 .map-dev-rows {
