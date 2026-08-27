@@ -112,11 +112,15 @@ window.API = (function () {
     }, 1400);
   }
 
-  function beginLoader(url, method, enabled) {
+  function beginLoader(url, method, enabled, immediate) {
     if (!enabled) return false;
     loaderState.active += 1;
     clearTimeout(loaderState.hideTimer);
     clearTimeout(loaderState.showTimer);
+    if (immediate) {
+      showLoader(loaderMessages(url, method));
+      return true;
+    }
     loaderState.showTimer = setTimeout(function () {
       if (loaderState.active > 0) showLoader(loaderMessages(url, method));
     }, 180);
@@ -149,8 +153,9 @@ window.API = (function () {
       return Promise.resolve(null);
     }
     var method = options.method || 'GET';
-    var showGlobalLoader = options.loader !== false && (Date.now() <= loaderState.pageLoadUntil || method !== 'GET');
-    var loaderStarted = beginLoader(url, method, showGlobalLoader);
+    var forceLoader = options.loader === true;
+    var showGlobalLoader = forceLoader || (options.loader !== false && (Date.now() <= loaderState.pageLoadUntil || method !== 'GET'));
+    var loaderStarted = beginLoader(url, method, showGlobalLoader, forceLoader);
     return fetch(config.baseUrl + url, {
       method: method,
       headers: { 'Content-Type': 'application/json' },
@@ -202,9 +207,9 @@ window.API = (function () {
   /* ==================================================================
      地块
      ================================================================== */
-  function getPlots() {
+  function getPlots(options) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.plots });
-    return request(config.endpoints.plots);
+    return request(config.endpoints.plots, options || {});
   }
 
   /* 新增地块；data: {name, crop, area, devices?:[{name,type,ip,port},...]}，devices 为可选绑定设备 */
@@ -347,12 +352,15 @@ window.API = (function () {
   /* ==================================================================
      告警阈值
      ================================================================== */
-  function getThresholds() {
+  function getThresholds(filter) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.thresholds });
-    return request(config.endpoints.thresholds);
+    filter = filter || {};
+    var qs = [];
+    if (filter.plotId) qs.push('plotId=' + encodeURIComponent(filter.plotId));
+    return request(config.endpoints.thresholds + (qs.length ? '?' + qs.join('&') : ''), filter.loader === true ? { loader: true } : undefined);
   }
 
-  function saveThresholds(data) {
+  function saveThresholds(data, filter) {
     if (config.useMock) {
       window.MOCK.thresholds.humidityMin = data.humidityMin;
       window.MOCK.thresholds.humidityMax = data.humidityMax;
@@ -362,15 +370,21 @@ window.API = (function () {
       window.MOCK.thresholds.luxMax = data.luxMax;
       return mockDelay({ code: 0 }, 300);
     }
-    return request(config.endpoints.thresholds, { method: 'PUT', data: data });
+    filter = filter || {};
+    var qs = [];
+    if (filter.plotId) qs.push('plotId=' + encodeURIComponent(filter.plotId));
+    return request(config.endpoints.thresholds + (qs.length ? '?' + qs.join('&') : ''), { method: 'PUT', data: data });
   }
 
   /* ==================================================================
      告警记录
      ================================================================== */
-  function getAlarms() {
+  function getAlarms(filter) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.alarms });
-    return request(config.endpoints.alarms);
+    filter = filter || {};
+    var qs = [];
+    if (filter.plotId) qs.push('plotId=' + encodeURIComponent(filter.plotId));
+    return request(config.endpoints.alarms + (qs.length ? '?' + qs.join('&') : ''), filter.loader === true ? { loader: true } : undefined);
   }
 
   function updateAlarmStatus(alarmId, status, data) {
@@ -419,9 +433,12 @@ window.API = (function () {
   /* ==================================================================
      控制日志
      ================================================================== */
-  function getControlLogs() {
+  function getControlLogs(filter) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.controlLogs }, 400);
-    return request(config.endpoints.controlLogs);
+    filter = filter || {};
+    var qs = [];
+    if (filter.limit) qs.push('limit=' + encodeURIComponent(filter.limit));
+    return request(config.endpoints.controlLogs + (qs.length ? '?' + qs.join('&') : ''));
   }
 
   /* ==================================================================

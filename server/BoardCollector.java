@@ -414,13 +414,11 @@ public class BoardCollector {
         }
         markDeviceOnline(deviceId);
 
-        // 阈值告警：按设备所属地块检查 temp/humidity/lux 是否越过阈值（未处理告警自动去重）
+        // 阈值告警：按地块最新 temp/humidity/lux 统一判断，启用指标全部越界才报警。
         String plotId = Api.plotOfDevice(deviceId);
         if (plotId != null) {
             try {
-                Api.checkThresholdAlarm(plotId, "temp", new BigDecimal(reading.get("temp")));
-                Api.checkThresholdAlarm(plotId, "humidity", new BigDecimal(reading.get("humidity")));
-                Api.checkThresholdAlarm(plotId, "lux", new BigDecimal(reading.get("lux")));
+                Api.checkThresholdAlarm(plotId);
             } catch (SQLException e) {
                 System.out.println("[BoardCollector] 告警检查失败（数据已入库）：" + e);
             }

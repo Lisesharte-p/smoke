@@ -183,16 +183,13 @@
   <script>
     Layout.init();
 
-    // 以下板块用模拟数据，直接渲染（不依赖后端接口）
     renderWeather();
     renderAdvice();
-    renderDeviceStatus();
-    renderAlarmPanel();
-    renderOperationLog();
 
     var plots = [];
     var devices = [];
     var alarms = [];
+    var controlLogs = [];
     var charts = {};
     var humCharts = [];
 
@@ -461,17 +458,18 @@
       });
     }
 
-    /* ---------- 渲染设备状态环形图（模拟数据） ---------- */
+    /* ---------- 渲染设备状态环形图 ---------- */
     function renderDeviceStatus() {
       var dom = document.getElementById('deviceChart');
       if (!window.echarts || !dom) return;
 
-      var total = MOCK.devices.length;
-      var running = MOCK.devices.filter(function (d) { return d.running; }).length;
-      var offline = MOCK.devices.filter(function (d) { return !d.online; }).length;
+      var total = devices.length;
+      var running = devices.filter(function (d) { return d.online && d.running; }).length;
+      var offline = devices.filter(function (d) { return !d.online; }).length;
       var online = total - running - offline;
 
-      var chart = echarts.init(dom);
+      if (!charts.deviceStatus) charts.deviceStatus = echarts.init(dom);
+      var chart = charts.deviceStatus;
       chart.setOption({
         tooltip: {
           trigger: 'item',
@@ -512,10 +510,13 @@
       });
     }
 
-    /* ---------- 渲染实时告警面板（模拟数据） ---------- */
+    /* ---------- 渲染实时告警面板 ---------- */
     function renderAlarmPanel() {
       var html = '<div class="alarm-list">';
-      MOCK.alarms.slice(0, 5).forEach(function (a) {
+      if (!alarms.length) {
+        html += '<div class="empty-state">暂无告警记录</div>';
+      }
+      alarms.slice(0, 5).forEach(function (a) {
         var severe = a.level === '严重';
         var pending = a.status === '未处理';
         html +=
@@ -532,10 +533,13 @@
       document.getElementById('alarmPanel').innerHTML = html;
     }
 
-    /* ---------- 渲染最近操作日志（模拟数据） ---------- */
+    /* ---------- 渲染最近操作日志 ---------- */
     function renderOperationLog() {
       var html = '<div class="log-list">';
-      MOCK.controlLogs.slice(0, 5).forEach(function (l) {
+      if (!controlLogs.length) {
+        html += '<div class="empty-state">暂无控制记录</div>';
+      }
+      controlLogs.slice(0, 5).forEach(function (l) {
         var success = l.result === '成功';
         html +=
           '<div class="log-item">' +
@@ -564,6 +568,9 @@
         devices = devices.filter(function (d) { return d.plotId !== plot.id; });
         renderKpi();
         renderPlotCards();
+        renderDeviceStatus();
+        renderAlarmPanel();
+        renderOperationLog();
         fillPlotSelect();
         if (plots.length) loadTrend(plots[0].id);
         Toast.success('地块「' + plot.name + '」已删除');
@@ -678,6 +685,9 @@
           devices = r2.data;
           renderKpi();
           renderPlotCards();
+          renderDeviceStatus();
+          renderAlarmPanel();
+          renderOperationLog();
           fillPlotSelect();
           document.getElementById('trendPlot').value = np.id;
           loadTrend(np.id);
@@ -688,20 +698,39 @@
       });
     });
 
+    function refreshDashboardData() {
+      return Promise.all([
+        API.getPlots(),
+        API.getDevices(),
+        API.getAlarms(),
+        API.getControlLogs({ limit: 5 })
+      ]).then(function (all) {
+        var selectedPlot = document.getElementById('trendPlot').value;
+        plots = all[0].data || [];
+        devices = all[1].data || [];
+        alarms = all[2].data || [];
+        controlLogs = all[3].data || [];
+        fillPlotSelect();
+        if (selectedPlot) document.getElementById('trendPlot').value = selectedPlot;
+        if (!document.getElementById('trendPlot').value && plots.length) {
+          document.getElementById('trendPlot').value = plots[0].id;
+        }
+        renderKpi();
+        renderPlotCards();
+        renderDeviceStatus();
+        renderAlarmPanel();
+        renderOperationLog();
+        if (document.getElementById('trendPlot').value) {
+          loadTrend(document.getElementById('trendPlot').value);
+        }
+      });
+    }
+
     /* ---------- 初始化 ---------- */
-    API.getPlots().then(function (res) {
-      plots = res.data;
-      fillPlotSelect();
-      return API.getDevices();
-    }).then(function (res) {
-      devices = res.data;
-      return API.getAlarms();
-    }).then(function (res) {
-      alarms = res.data;
+    refreshDashboardData().then(function () {
       renderKpi();
-      renderPlotCards();
-      if (plots.length) loadTrend(plots[0].id);
     });
+    setInterval(refreshDashboardData, 15000);
   </script>
 </body>
 </html>

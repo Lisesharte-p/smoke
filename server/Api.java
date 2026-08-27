@@ -205,15 +205,15 @@ public class Api {
 
             /* ---------- 阈值 / 告警 ---------- */
             if ("GET".equals(method) && path.equals("/api/thresholds")) {
-                ok(ex, thresholdsJson());
+                ok(ex, thresholdsJson(ex.getRequestURI().getQuery()));
                 return true;
             }
             if ("PUT".equals(method) && path.equals("/api/thresholds")) {
-                ok(ex, saveThresholdsJson(ex));
+                ok(ex, saveThresholdsJson(ex, ex.getRequestURI().getQuery()));
                 return true;
             }
             if ("GET".equals(method) && path.equals("/api/alarms")) {
-                ok(ex, alarmsJson());
+                ok(ex, alarmsJson(ex.getRequestURI().getQuery()));
                 return true;
             }
             if ("PUT".equals(method) && path.matches("/api/alarms/[^/]+")) {
@@ -245,7 +245,7 @@ public class Api {
 
             /* ---------- 控制日志 ---------- */
             if ("GET".equals(method) && path.equals("/api/control-logs")) {
-                ok(ex, controlLogsJson());
+                ok(ex, controlLogsJson(ex.getRequestURI().getQuery()));
                 return true;
             }
 
@@ -1753,7 +1753,7 @@ public class Api {
      * 天气类建议因后端无气象数据源暂不生成，其余规则与前端 mock 保持一致。
      */
     private static String adviceJson() throws SQLException {
-        ThresholdConfig t = currentThresholds();
+        ThresholdConfig t = currentThresholds(null);
 
         // 先取出所有地块编号与名称，再逐地块取最新温湿度和亮度（复用 latestValue 的在线+类型过滤）
         List<String[]> plots = new ArrayList<>();
@@ -2010,19 +2010,22 @@ public class Api {
        ================================================================== */
 
     /** 当前阈值：取第一个地块的配置（每地块一行）；无配置行时使用默认上下限。 */
-    private static ThresholdConfig currentThresholds() throws SQLException {
+    private static ThresholdConfig currentThresholds(String plotId) throws SQLException {
         ThresholdConfig cfg = ThresholdConfig.defaults();
-        String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold ORDER BY plot_id LIMIT 1";
+        String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold" +
+                (plotId == null ? " ORDER BY plot_id LIMIT 1" : " WHERE plot_id = ?");
         try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) {
-                cfg.humidityMin = rs.getBigDecimal("humidity_min");
-                cfg.humidityMax = rs.getBigDecimal("humidity_max");
-                cfg.tempMin = rs.getBigDecimal("temp_min");
-                cfg.tempMax = rs.getBigDecimal("temp_max");
-                cfg.luxMin = rs.getBigDecimal("lux_min");
-                cfg.luxMax = rs.getBigDecimal("lux_max");
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (plotId != null) ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    cfg.humidityMin = rs.getBigDecimal("humidity_min");
+                    cfg.humidityMax = rs.getBigDecimal("humidity_max");
+                    cfg.tempMin = rs.getBigDecimal("temp_min");
+                    cfg.tempMax = rs.getBigDecimal("temp_max");
+                    cfg.luxMin = rs.getBigDecimal("lux_min");
+                    cfg.luxMax = rs.getBigDecimal("lux_max");
+                }
             }
         }
         return cfg;
@@ -2033,8 +2036,8 @@ public class Api {
      * 前端只有一个全局编辑器，DB 是每地块一行（plot_threshold）；
      * 这里返回当前阈值（首个地块），null 表示该类阈值已删除/禁用。
      */
-    private static String thresholdsJson() throws SQLException {
-        ThresholdConfig t = currentThresholds();
+    private static String thresholdsJson(String query) throws SQLException {
+        ThresholdConfig t = currentThresholds(trimToNull(queryParam(query, "plotId")));
         return "{\"code\":0,\"data\":{"
                 + "\"humidityMin\":" + Json.num(numLit(t.humidityMin))
                 + ",\"humidityMax\":" + Json.num(numLit(t.humidityMax))
@@ -2049,7 +2052,8 @@ public class Api {
      * PUT /api/thresholds —— 保存阈值。
      * body: {humidityMin, humidityMax, tempMin, tempMax, luxMin, luxMax}；值为 null 表示删除对应阈值。
      */
-    private static String saveThresholdsJson(HttpExchange ex) throws IOException, SQLException {
+    private static String saveThresholdsJson(HttpExchange ex, String query) throws IOException, SQLException {
+        String selectedPlotId = trimToNull(queryParam(query, "plotId"));
         Map<String, String> body = Json.parseObject(readBody(ex));
         ThresholdConfig cfg;
         try {
@@ -2074,9 +2078,13 @@ public class Api {
         try (Connection conn = DBUtil.getConnection()) {
             // 1. 收集全部地块编号
             List<String> plotIds = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
-                 ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) plotIds.add(rs.getString(1));
+            if (selectedPlotId != null) {
+                plotIds.add(selectedPlotId);
+            } else {
+                try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
+                     ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) plotIds.add(rs.getString(1));
+                }
             }
             // 2. 每个地块 upsert 一份同样的阈值
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -2130,6 +2138,22 @@ public class Api {
             return c;
         }
 
+        boolean humidityEnabled() {
+            return humidityMin != null || humidityMax != null;
+        }
+
+        boolean tempEnabled() {
+            return tempMin != null || tempMax != null;
+        }
+
+        boolean luxEnabled() {
+            return luxMin != null || luxMax != null;
+        }
+
+        boolean hasEnabledMetric() {
+            return humidityEnabled() || tempEnabled() || luxEnabled();
+        }
+
         private static BigDecimal nullableDecimal(String value) {
             if (value == null) return null;
             String v = value.trim();
@@ -2143,18 +2167,21 @@ public class Api {
      * 返回：id,time,plotId,plotName,type,value,level,status,handler,handledAt,handleLog。
      * time 格式与 mock 一致（yyyy-MM-dd HH:mm）；type 直接用库里的中文 alarm_type。
      */
-    private static String alarmsJson() throws SQLException {
+    private static String alarmsJson(String query) throws SQLException {
+        String plotId = trimToNull(queryParam(query, "plotId"));
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at, a.handled_at, a.handler, a.handle_log," +
                 " r.id AS detectionRecordId," +
                 " p.name AS plotName FROM alarm a LEFT JOIN plot p ON p.id = a.plot_id" +
                 " LEFT JOIN human_detection_record r ON r.alarm_id = a.id" +
+                (plotId == null ? "" : " WHERE a.plot_id = ?") +
                 " ORDER BY a.created_at DESC, a.id DESC";
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
         try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (plotId != null) ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
             boolean first = true;
             while (rs.next()) {
                 if (!first) sb.append(',');
@@ -2177,6 +2204,7 @@ public class Api {
                   .append("\"handleLog\":").append(Json.str(rs.getString("handle_log"))).append(',')
                   .append("\"detectionRecordId\":").append(rs.getObject("detectionRecordId") == null ? "null" : rs.getLong("detectionRecordId"))
                   .append('}');
+            }
             }
         }
         sb.append("]}");
@@ -3433,7 +3461,8 @@ public class Api {
      * GET /api/control-logs —— 灌溉控制日志列表。
      * deviceName / plotName 由 join 得出，operator 存库。
      */
-    private static String controlLogsJson() throws SQLException {
+    private static String controlLogsJson(String query) throws SQLException {
+        int limit = parseLimit(queryParam(query, "limit"), 0);
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT c.id, c.action, c.result, c.operator, c.created_at," +
@@ -3441,11 +3470,13 @@ public class Api {
                 " FROM control_log c" +
                 " LEFT JOIN device d ON d.id = c.device_id" +
                 " LEFT JOIN plot p ON p.id = d.plot_id" +
-                " ORDER BY c.created_at DESC, c.id DESC";
+                " ORDER BY c.created_at DESC, c.id DESC" +
+                (limit > 0 ? " LIMIT ?" : "");
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
         try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (limit > 0) ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
             boolean first = true;
             while (rs.next()) {
                 if (!first) sb.append(',');
@@ -3462,9 +3493,20 @@ public class Api {
                   .append("\"operator\":").append(Json.str(rs.getString("operator")))
                   .append('}');
             }
+            }
         }
         sb.append("]}");
         return sb.toString();
+    }
+
+    private static int parseLimit(String raw, int def) {
+        if (raw == null || raw.trim().isEmpty()) return def;
+        try {
+            int n = Integer.parseInt(raw.trim());
+            return n < 1 ? def : Math.min(n, 100);
+        } catch (NumberFormatException e) {
+            return def;
+        }
     }
 
     /* ==================================================================
@@ -3527,7 +3569,7 @@ public class Api {
         // 2. 阈值告警检查
         String plotId = plotOfDevice(deviceId);
         if (plotId != null) {
-            checkThresholdAlarm(plotId, metric, v);
+            checkThresholdAlarm(plotId);
         }
         return "{\"code\":0}";
     }
@@ -3544,8 +3586,13 @@ public class Api {
         }
     }
 
-    /** 越过阈值时插入一条告警（同一地块同类型未处理告警不重复插） */
+    /** 兼容旧调用：新逻辑按该地块全部最新指标统一判断。 */
     static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
+        checkThresholdAlarm(plotId);
+    }
+
+    /** 启用的全部指标都越过阈值时，插入一条综合告警。 */
+    static void checkThresholdAlarm(String plotId) throws SQLException {
         ThresholdConfig cfg = null;
         String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold WHERE plot_id = ?";
         try (Connection conn = DBUtil.getConnection();
@@ -3564,38 +3611,35 @@ public class Api {
             }
         }
         if (cfg == null) cfg = ThresholdConfig.defaults();
+        if (!cfg.hasEnabledMetric()) return;
 
-        String alarmType = null;
-        String alarmValue = null;
-        String level = null;
-        if ("humidity".equals(metric) && cfg.humidityMin != null && value.compareTo(cfg.humidityMin) < 0) {
-            alarmType = "土壤湿度过低";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "%";
-            level = "警告";
-        } else if ("humidity".equals(metric) && cfg.humidityMax != null && value.compareTo(cfg.humidityMax) > 0) {
-            alarmType = "土壤湿度过高";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "%";
-            level = "警告";
-        } else if ("temp".equals(metric) && cfg.tempMin != null && value.compareTo(cfg.tempMin) < 0) {
-            alarmType = "温度过低";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
-            level = "警告";
-        } else if ("temp".equals(metric) && cfg.tempMax != null && value.compareTo(cfg.tempMax) > 0) {
-            alarmType = "温度过高";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
-            level = "严重";
-        } else if ("lux".equals(metric) && cfg.luxMin != null && value.compareTo(cfg.luxMin) < 0) {
-            alarmType = "亮度过低";
-            alarmValue = value.stripTrailingZeros().toPlainString() + " lx";
-            level = "警告";
-        } else if ("lux".equals(metric) && cfg.luxMax != null && value.compareTo(cfg.luxMax) > 0) {
-            alarmType = "亮度过高";
-            alarmValue = value.stripTrailingZeros().toPlainString() + " lx";
-            level = "警告";
+        Map<String, BigDecimal> latest = latestMetricsForPlot(plotId);
+        List<String> details = new ArrayList<>();
+        boolean severe = false;
+        if (cfg.humidityEnabled()) {
+            MetricBreach b = breach(latest.get("humidity"), cfg.humidityMin, cfg.humidityMax,
+                    "土壤湿度过低", "土壤湿度过高", "%", false);
+            if (b == null) return;
+            details.add(b.text);
+            severe = severe || b.severe;
         }
-        if (alarmType == null) return;
+        if (cfg.tempEnabled()) {
+            MetricBreach b = breach(latest.get("temp"), cfg.tempMin, cfg.tempMax,
+                    "温度过低", "温度过高", "℃", true);
+            if (b == null) return;
+            details.add(b.text);
+            severe = severe || b.severe;
+        }
+        if (cfg.luxEnabled()) {
+            MetricBreach b = breach(latest.get("lux"), cfg.luxMin, cfg.luxMax,
+                    "亮度过低", "亮度过高", " lx", false);
+            if (b == null) return;
+            details.add(b.text);
+            severe = severe || b.severe;
+        }
 
         // 去重：同一地块同类型且未处理的告警不重复插入
+        String alarmType = "综合阈值告警";
         String dup = "SELECT 1 FROM alarm WHERE plot_id = ? AND alarm_type = ? AND status = '未处理'";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(dup)) {
@@ -3610,9 +3654,54 @@ public class Api {
              PreparedStatement ps = conn.prepareStatement(ins)) {
             ps.setString(1, plotId);
             ps.setString(2, alarmType);
-            ps.setString(3, alarmValue);
-            ps.setString(4, level);
+            ps.setString(3, String.join("；", details));
+            ps.setString(4, severe || details.size() >= 2 ? "严重" : "警告");
             ps.executeUpdate();
+        }
+    }
+
+    private static Map<String, BigDecimal> latestMetricsForPlot(String plotId) throws SQLException {
+        Map<String, BigDecimal> latest = new HashMap<>();
+        String sql =
+                "SELECT s.metric, s.value FROM sensor_data s" +
+                " JOIN device d ON d.id = s.device_id" +
+                " JOIN (" +
+                "   SELECT s2.metric, MAX(s2.id) AS max_id FROM sensor_data s2" +
+                "   JOIN device d2 ON d2.id = s2.device_id" +
+                "   WHERE d2.plot_id = ? AND s2.metric IN ('temp','humidity','lux')" +
+                "   GROUP BY s2.metric" +
+                " ) m ON m.max_id = s.id" +
+                " WHERE d.plot_id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            ps.setString(2, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) latest.put(rs.getString("metric"), rs.getBigDecimal("value"));
+            }
+        }
+        return latest;
+    }
+
+    private static MetricBreach breach(BigDecimal value, BigDecimal min, BigDecimal max,
+                                       String lowType, String highType, String unit, boolean highSevere) {
+        if (value == null) return null;
+        if (min != null && value.compareTo(min) < 0) {
+            return new MetricBreach(lowType + " " + value.stripTrailingZeros().toPlainString() + unit, false);
+        }
+        if (max != null && value.compareTo(max) > 0) {
+            return new MetricBreach(highType + " " + value.stripTrailingZeros().toPlainString() + unit, highSevere);
+        }
+        return null;
+    }
+
+    private static class MetricBreach {
+        final String text;
+        final boolean severe;
+
+        MetricBreach(String text, boolean severe) {
+            this.text = text;
+            this.severe = severe;
         }
     }
 
