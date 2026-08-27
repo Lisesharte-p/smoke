@@ -298,19 +298,9 @@
       text-overflow: ellipsis;
     }
 
-    .mower {
-      position: absolute;
-      left: -6px;
-      width: 71px;
-      height: 57px;
-      z-index: 5;
-      filter: drop-shadow(0 8px 6px rgba(0, 0, 0, .22));
-    }
-
     .plant,
     .zombie,
-    .sun-token,
-    .pea-shot {
+    .sun-token {
       position: absolute;
       z-index: 6;
       pointer-events: none;
@@ -334,7 +324,6 @@
       height: 80px;
     }
 
-    .plant.potato,
     .plant.bomb {
       width: 74px;
       height: 62px;
@@ -361,12 +350,6 @@
       pointer-events: auto;
     }
 
-    .pea-shot {
-      width: 24px;
-      height: 24px;
-      animation: pea-fly 2.4s linear infinite;
-    }
-
     .ghost-plant {
       position: absolute;
       width: 74px;
@@ -390,15 +373,6 @@
         radial-gradient(circle, rgba(255, 255, 255, .7), transparent 48%);
       box-shadow: 0 0 28px rgba(255, 91, 24, .72);
       animation: blast-pop .82s ease-out both;
-    }
-
-    .blast.mine {
-      width: 104px;
-      height: 104px;
-      background:
-        radial-gradient(circle, rgba(255, 245, 155, .98) 0 17%, rgba(142, 87, 35, .95) 18% 40%, rgba(82, 55, 32, .64) 41% 64%, rgba(82, 55, 32, 0) 72%);
-      box-shadow: 0 0 20px rgba(255, 188, 78, .65);
-      animation-duration: .64s;
     }
 
     .blast.cherry {
@@ -476,6 +450,75 @@
       color: rgba(255, 247, 202, .72);
       font-size: 12px;
       line-height: 1.35;
+    }
+
+    .plot-summary {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .plot-summary-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid rgba(255, 232, 153, .22);
+      border-radius: 8px;
+      background: rgba(19, 25, 20, .54);
+      color: rgba(255, 247, 222, .9);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .plot-summary-row strong {
+      color: #fff2a8;
+      font-size: 13px;
+    }
+
+    .plot-summary-row em {
+      color: rgba(255, 247, 202, .72);
+      font-style: normal;
+    }
+
+    .plot-summary-row .status {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(123, 213, 87, .16);
+      color: #b8f39d;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .plot-summary-row.warn .status { background: rgba(255, 205, 80, .16); color: #ffd66e; }
+    .plot-summary-row.danger .status { background: rgba(230, 91, 73, .18); color: #ff9d8e; }
+
+    .home-link {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      z-index: 15;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 2px solid rgba(255, 226, 126, .58);
+      background: rgba(52, 31, 15, .82);
+      color: #ffe99a;
+      font-size: 13px;
+      font-weight: 900;
+      text-decoration: none;
+      box-shadow: 0 10px 16px rgba(0, 0, 0, .18);
+    }
+
+    .home-link:hover,
+    .home-link:focus-visible {
+      outline: none;
+      transform: translateY(-1px);
+      filter: brightness(1.08);
     }
 
     .plot-lines,
@@ -560,12 +603,6 @@
       to { transform: rotate(360deg); }
     }
 
-    @keyframes pea-fly {
-      from { transform: translateX(0); opacity: .95; }
-      82% { opacity: .95; }
-      to { transform: translateX(330px); opacity: 0; }
-    }
-
     @keyframes blast-pop {
       0% { transform: scale(.18); opacity: 0; }
       18% { opacity: 1; }
@@ -608,10 +645,6 @@
       <main class="content pvz-page">
         <div class="pvz-hud">
           <div class="pvz-stat">
-            <div class="label">阳光能量</div>
-            <div class="value" id="energyValue">--</div>
-          </div>
-          <div class="pvz-stat">
             <div class="label">平均健康</div>
             <div class="value" id="healthValue">--</div>
           </div>
@@ -628,12 +661,12 @@
         <div class="pvz-layout">
           <section class="stage-wrap">
             <div class="pvz-stage menu-mode" id="pvzStage">
-              <div class="sun-bank" id="sunBank">--</div>
               <div class="seed-bank" id="seedBank"></div>
-              <button class="shovel-bank" id="shovelBank" type="button" aria-label="铲子">
+              <button class="shovel-bank" id="shovelBank" type="button" aria-label="铲除植物">
                 <img src="assets/pvz/images/Shovel.png" alt="">
               </button>
               <div class="level-banner" id="levelBanner">单关卡 · 真实农田同步</div>
+              <a class="home-link" href="index.html">← 返回首页</a>
               <div id="stageLayer"></div>
               <div class="menu-screen" id="menuScreen">
                 <button class="start-adventure" id="startAdventure" type="button" aria-label="开始游戏"></button>
@@ -643,15 +676,15 @@
           </section>
 
           <aside class="pvz-panel">
-            <div class="pvz-small-label">当前卡牌</div>
-            <div class="selected-card" id="selectedCard"></div>
-
-            <div class="pvz-small-label" style="margin-top:16px;">地块状态</div>
+            <div class="pvz-small-label">地块总览</div>
             <div class="plot-lines" id="plotLines"></div>
 
             <div class="camera-box" id="cameraBox">
               <img id="cameraImg" alt="摄像头实时画面">
             </div>
+
+            <div class="pvz-small-label" style="margin-top:16px;">地块状态详情</div>
+            <div class="plot-summary" id="selectedPlotCard"></div>
 
             <div class="pvz-small-label" style="margin-top:16px;">当前风险</div>
             <div class="threat-lines" id="threatLines"></div>
@@ -692,10 +725,12 @@
       hoverCell: null,
       targetCell: null,
       placedPlants: [],
+      hiddenDevicePlants: [],
+      clearedThreatRows: [],
+      clearedZombieRows: {},
       removingMapped: [],
       effects: [],
       nextEffectId: 1,
-      energy: 150,
       frame: 0,
       events: []
     };
@@ -703,13 +738,8 @@
     var plantFrames = {
       waterOn: ['images/Peashooter/Peashooter_0.png', 'images/Peashooter/Peashooter_1.png', 'images/Peashooter/Peashooter_2.png', 'images/Peashooter/Peashooter_3.png'],
       advice: ['images/Sunflower/Sunflower_0.png', 'images/Sunflower/Sunflower_1.png', 'images/Sunflower/Sunflower_2.png', 'images/Sunflower/Sunflower_3.png'],
-      waterOff: ['images/WallNut/Wallnut_0.png', 'images/WallNut/Wallnut_1.png', 'images/WallNut/Wallnut_2.png'],
-      alarmOne: ['images/PotatoMine/PotatoMineInit.png'],
       alarmAll: ['images/CherryBomb/CherryBomb-1.png', 'images/CherryBomb/CherryBomb-7.png'],
-      camera: ['images/Chomper/Chomper/Chomper_0.png', 'images/Chomper/Chomper/Chomper_1.png', 'images/Chomper/Chomper/Chomper_2.png', 'images/Chomper/Chomper/Chomper_3.png'],
-      repeater: ['images/RepeaterPea/RepeaterPea_0.png', 'images/RepeaterPea/RepeaterPea_1.png', 'images/RepeaterPea/RepeaterPea_2.png', 'images/RepeaterPea/RepeaterPea_3.png'],
-      pea: ['images/Peashooter/PeaNormal.png'],
-      sun: ['images/Sun/Sun_0.png', 'images/Sun/Sun_1.png', 'images/Sun/Sun_2.png', 'images/Sun/Sun_3.png']
+      camera: ['images/Chomper/Chomper/Chomper_0.png', 'images/Chomper/Chomper/Chomper_1.png', 'images/Chomper/Chomper/Chomper_2.png', 'images/Chomper/Chomper/Chomper_3.png']
     };
 
     var zombieFrames = {
@@ -721,9 +751,7 @@
     var cards = [
       { key: 'advice', name: '向日葵', action: 'AI 农事建议', cost: 25, card: 'images/Cards/card_sunflower.png' },
       { key: 'waterOn', name: '豌豆射手', action: '开启灌溉设备', cost: 50, card: 'images/Cards/card_peashooter.png' },
-      { key: 'waterOff', name: '坚果墙', action: '关闭灌溉设备', cost: 25, card: 'images/Cards/card_wallnut.png' },
-      { key: 'alarmOne', name: '土豆雷', action: '处理一条告警', cost: 50, card: 'images/Cards/card_potatomine.png' },
-      { key: 'alarmAll', name: '樱桃炸弹', action: '处理本行全部告警', cost: 125, card: 'images/Cards/card_cherrybomb.png' },
+      { key: 'alarmAll', name: '辣椒', action: '清理本行全部告警', cost: 125, card: 'images/Cards/card_cherrybomb.png' },
       { key: 'camera', name: '大嘴花', action: '打开摄像头哨兵', cost: 0, card: 'images/Cards/card_chomper.png' }
     ];
 
@@ -735,7 +763,6 @@
       siren: ASSET + 'sound/siren.ogg',
       shovel: ASSET + 'sound/shovel.ogg',
       cherry: ASSET + 'sound/cherrybomb.ogg',
-      mine: ASSET + 'sound/potato_mine.ogg',
       gulp: ASSET + 'sound/gulp.ogg',
       bleep: ASSET + 'sound/bleep.ogg',
       splat: [ASSET + 'sound/splat0.ogg', ASSET + 'sound/splat1.ogg', ASSET + 'sound/splat2.ogg'],
@@ -820,7 +847,7 @@
     }
 
     function devicesOf(plotId) {
-      return state.devices.filter(function (d) { return d.plotId === plotId; });
+      return state.devices.filter(function (d) { return String(d.plotId) === String(plotId); });
     }
 
     function irrigationDevice(plotId) {
@@ -840,15 +867,40 @@
     }
 
     function pendingAlarms(plotId) {
-      return state.alarms.filter(function (a) { return a.plotId === plotId && a.status === '未处理'; });
+      return state.alarms.filter(function (a) { return String(a.plotId) === String(plotId) && a.status === '未处理'; });
     }
 
-    function threat(type, label, zombie, severity, message) {
-      return { type: type, label: label, zombie: zombie, severity: severity, message: message };
+    function threatRowKey(plotId) {
+      return String(plotId);
+    }
+
+    function isThreatRowCleared(plotId) {
+      return state.clearedThreatRows.indexOf(threatRowKey(plotId)) !== -1;
+    }
+
+    function clearThreatRow(plotId) {
+      var key = threatRowKey(plotId);
+      if (state.clearedThreatRows.indexOf(key) === -1) state.clearedThreatRows.push(key);
+    }
+
+    function zombieRowKey(row) {
+      return String(row);
+    }
+
+    function clearZombiesOnRow(row) {
+      state.clearedZombieRows[zombieRowKey(row)] = true;
+    }
+
+    function areZombiesClearedOnRow(row) {
+      return !!state.clearedZombieRows[zombieRowKey(row)];
+    }
+
+    function threat(type, label, zombie, severity, message, alarmId) {
+      return { type: type, label: label, zombie: zombie, severity: severity, message: message, alarmId: alarmId || null };
     }
 
     function threatsFor(plot) {
-      if (!plot || plot.empty) return [];
+      if (!plot || plot.empty || isThreatRowCleared(plot.id)) return [];
       var t = state.thresholds || {};
       var temp = metric(plot, 'temp');
       var hum = metric(plot, 'humidity');
@@ -867,7 +919,7 @@
 
       pendingAlarms(plot.id).forEach(function (alarm) {
         var severe = alarm.level === '严重' || /人体|入侵|离线|严重/.test(alarm.type || '');
-        list.push(threat('alarm', severe ? '铁桶告警僵尸' : '告警僵尸', severe ? 'bucket' : 'normal', severe ? 22 : 14, (alarm.type || '告警') + ' · ' + (alarm.value || '-')));
+        list.push(threat('alarm', severe ? '铁桶告警僵尸' : '告警僵尸', severe ? 'bucket' : 'normal', severe ? 22 : 14, (alarm.type || '告警') + ' · ' + (alarm.value || '-'), alarm.id));
       });
 
       return list.slice(0, 3);
@@ -875,9 +927,7 @@
 
     function healthFor(plot) {
       if (!plot || plot.empty) return 0;
-      var score = 100;
-      threatsFor(plot).forEach(function (t) { score -= t.severity; });
-      return Math.max(0, Math.min(100, score));
+      return Math.max(0, Math.min(100, 100 - threatsFor(plot).reduce(function (sum, t) { return sum + t.severity; }, 0)));
     }
 
     function selectedPlot() {
@@ -897,28 +947,18 @@
 
     function cardEnabled(card) {
       var plot = selectedPlot();
-      if (!plot || plot.empty || state.energy < card.cost) return false;
-      if (card.key === 'waterOn') {
-        var onDev = irrigationDevice(plot.id);
-        return !!(onDev && onDev.online);
-      }
-      if (card.key === 'waterOff') return !!irrigationDevice(plot.id);
-      if (card.key === 'alarmOne' || card.key === 'alarmAll') return pendingAlarms(plot.id).length > 0;
-      if (card.key === 'camera') return !!cameraDevice(plot.id);
-      return true;
+      return !!(plot && !plot.empty && card);
     }
 
     function plotById(plotId) {
       var rows = visibleRows();
       for (var i = 0; i < rows.length; i++) {
-        if (rows[i].id === plotId) return rows[i];
+        if (String(rows[i].id) === String(plotId)) return rows[i];
       }
       return null;
     }
 
     function plantClassFor(key) {
-      if (key === 'waterOff') return 'wallnut';
-      if (key === 'alarmOne') return 'potato';
       if (key === 'alarmAll') return 'bomb';
       if (key === 'camera') return 'chomper';
       return '';
@@ -934,20 +974,91 @@
       return true;
     }
 
-    function placePlant(key, plot, cell, title) {
-      if (!cell || !plot || plot.empty) return;
-      state.placedPlants = state.placedPlants.filter(function (p) {
-        return !(p.plotId === plot.id && p.row === cell.row && p.col === cell.col);
-      });
-      state.placedPlants.push({
+    function visibleRowIndex(plotId) {
+      var rows = visibleRows();
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i].id) === String(plotId)) return i;
+      }
+      return -1;
+    }
+
+    function deviceForPlant(key, plot) {
+      if (key === 'waterOn') return irrigationDevice(plot.id);
+      if (key === 'camera') return cameraDevice(plot.id);
+      return null;
+    }
+
+    function plantRowKey(plotId, row, key) {
+      return String(plotId) + ':' + String(row) + ':' + String(key);
+    }
+
+    function manualPlantInRow(plot, row) {
+      for (var i = state.placedPlants.length - 1; i >= 0; i--) {
+        var plant = state.placedPlants[i];
+        if (String(plant.plotId) === String(plot.id) && plant.row === row && !plant.removing) return plant;
+      }
+      return null;
+    }
+
+    function activePlantInRow(plot, row) {
+      var manual = manualPlantInRow(plot, row);
+      if (manual) return manual;
+      var irrig = irrigationDevice(plot.id);
+      if (irrig && irrig.running && !isDevicePlantHidden(plot.id, irrig.id)) {
+        return { key: 'waterOn', plotId: plot.id, row: row, col: 2, deviceId: irrig.id, virtual: true };
+      }
+      var cam = cameraDevice(plot.id);
+      if (cam && cam.online && !isDevicePlantHidden(plot.id, cam.id)) {
+        return { key: 'camera', plotId: plot.id, row: row, col: 3, deviceId: cam.id, virtual: true };
+      }
+      return null;
+    }
+
+    function hasManualPlantTypeInRow(plot, row, key) {
+      for (var i = 0; i < state.placedPlants.length; i++) {
+        var plant = state.placedPlants[i];
+        if (String(plant.plotId) === String(plot.id) && plant.row === row && plant.key === key && !plant.removing) return true;
+      }
+      return false;
+    }
+
+    function hasPlantTypeInRow(plot, row, key) {
+      if (hasManualPlantTypeInRow(plot, row, key)) return true;
+      if (key === 'waterOn') {
+        var irrig = irrigationDevice(plot.id);
+        return !!(irrig && irrig.running && !isDevicePlantHidden(plot.id, irrig.id));
+      }
+      if (key === 'camera') {
+        var cam = cameraDevice(plot.id);
+        return !!(cam && cam.online && !isDevicePlantHidden(plot.id, cam.id));
+      }
+      return false;
+    }
+
+    function placePlant(key, plot, cell, title, device) {
+      if (!cell || !plot || plot.empty) return null;
+      if (hasPlantTypeInRow(plot, cell.row, key)) {
+        playSound('buzzer');
+        showStage('同一地块一行只能种一株' + cardByKey(key).name);
+        return null;
+      }
+      if (manualPlantAt(cell)) {
+        playSound('buzzer');
+        showStage('这个格子已经种有植物，请先用铲子清除');
+        return null;
+      }
+      var plant = {
         key: key,
         plotId: plot.id,
         row: cell.row,
         col: cell.col,
+        deviceId: device ? device.id : null,
         title: title || cardByKey(key).action,
         time: Date.now()
-      });
+      };
+      state.placedPlants.push(plant);
       renderBoard();
+      return plant;
     }
 
     function addEffect(type, row, col) {
@@ -971,17 +1082,62 @@
       renderEvents();
     }
 
-    function setTool(tool) {
-      state.tool = tool;
-      document.getElementById('pvzStage').classList.toggle('shovel-mode', tool === 'shovel');
-      var shovel = document.getElementById('shovelBank');
-      if (shovel) shovel.classList.toggle('active', tool === 'shovel');
-    }
-
     function manualPlantAt(cell) {
       for (var i = state.placedPlants.length - 1; i >= 0; i--) {
         var p = state.placedPlants[i];
-        if (p.plotId === cell.plotId && p.row === cell.row && p.col === cell.col && !p.removing) return p;
+        if (String(p.plotId) === String(cell.plotId) && p.row === cell.row && p.col === cell.col && !p.removing) return p;
+      }
+      return null;
+    }
+
+    function devicePlantKey(plotId, deviceId) {
+      return String(plotId) + ':' + String(deviceId);
+    }
+
+    function isDevicePlantHidden(plotId, deviceId) {
+      return state.hiddenDevicePlants.indexOf(devicePlantKey(plotId, deviceId)) !== -1;
+    }
+
+    function hideDevicePlant(plotId, deviceId) {
+      var key = devicePlantKey(plotId, deviceId);
+      if (state.hiddenDevicePlants.indexOf(key) === -1) state.hiddenDevicePlants.push(key);
+    }
+
+    function linkedPlantAt(cell) {
+      var direct = manualPlantAt(cell);
+      if (direct) return direct;
+
+      var rowPlants = state.placedPlants.filter(function (p) {
+        return String(p.plotId) === String(cell.plotId) && p.row === cell.row && !p.removing;
+      });
+      if (rowPlants.length) {
+        var nearest = rowPlants[0];
+        var distance = Math.abs(nearest.col - cell.col);
+        for (var i = 1; i < rowPlants.length; i++) {
+          var candidateDistance = Math.abs(rowPlants[i].col - cell.col);
+          if (candidateDistance < distance) {
+            nearest = rowPlants[i];
+            distance = candidateDistance;
+          }
+        }
+        return nearest;
+      }
+
+      var plot = plotById(cell.plotId);
+      if (!plot || plot.empty) return null;
+
+      // The camera plant is rendered from the device state rather than placedPlants.
+      // Resolve it first so it remains removable in the initial game state.
+      var cam = cameraDevice(plot.id);
+      if (cam && cam.online && !isDevicePlantHidden(plot.id, cam.id)) {
+        return { key: 'camera', plotId: plot.id, row: cell.row, col: 3, deviceId: cam.id, virtual: true };
+      }
+
+      // 初始豌豆射手由灌溉设备状态直接渲染，不在 placedPlants 中。
+      // 它仍然是可铲除对象：铲除即关闭对应灌溉设备。
+      var irrig = irrigationDevice(plot.id);
+      if (irrig && irrig.running && !isDevicePlantHidden(plot.id, irrig.id)) {
+        return { key: 'waterOn', plotId: plot.id, row: cell.row, col: 2, deviceId: irrig.id, virtual: true };
       }
       return null;
     }
@@ -997,82 +1153,99 @@
       return null;
     }
 
-    function removeManualPlant(cell) {
+    function setTool(tool) {
+      state.tool = tool;
+      state.hoverCell = null;
+      document.getElementById('pvzStage').classList.toggle('shovel-mode', tool === 'shovel');
+      var shovel = document.getElementById('shovelBank');
+      if (shovel) shovel.classList.toggle('active', tool === 'shovel');
+      if (state.phase === 'play') renderBoard();
+    }
+
+    function removeManualPlant(cell, onRemoved) {
       var plant = manualPlantAt(cell);
       if (!plant) return false;
       plant.removing = true;
       playSound('shovel');
-      addEvent('已铲除一株' + cardByKey(plant.key).name, 'warn');
       renderBoard();
       setTimeout(function () {
         state.placedPlants = state.placedPlants.filter(function (p) { return p !== plant; });
         if (state.phase === 'play') renderBoard();
+        if (onRemoved) onRemoved(plant);
       }, 480);
       return true;
     }
 
     function clearCell(cell) {
       var plot = plotById(cell.plotId);
-      if (!plot || plot.empty) {
+      var plant = linkedPlantAt(cell);
+      if (!plot || plot.empty || !plant) {
         playSound('buzzer');
-        showStage('这一行没有可清除对象');
-        return;
-      }
-      if (removeManualPlant(cell)) {
-        showStage('植物已铲除');
+        showStage('这里没有可铲除的植物');
         return;
       }
 
-      var dev = mappedDeviceAt(plot, cell.col);
-      if (!dev) {
-        playSound('buzzer');
-        showStage('这里没有可清除的设备');
+      function removeLinkedPlant() {
+        if (plant.virtual) {
+          renderBoard();
+          afterRemove();
+          return;
+        }
+        if (plant.row === cell.row && plant.col === cell.col) {
+          removeManualPlant(cell, afterRemove);
+          return;
+        }
+        plant.removing = true;
+        playSound('shovel');
+        renderBoard();
+        setTimeout(function () {
+          state.placedPlants = state.placedPlants.filter(function (p) { return p !== plant; });
+          if (state.phase === 'play') renderBoard();
+          afterRemove();
+        }, 480);
+      }
+
+      function afterRemove() {
+        if (plant.virtual && plant.deviceId) hideDevicePlant(plot.id, plant.deviceId);
+        if (plant.key === 'camera') hideCamera();
+        if (!plant.virtual) addEvent(plot.name + ' 已铲除' + cardByKey(plant.key).name, 'warn');
+        showStage(plant.key === 'waterOn' ? '灌溉设备已关闭' : '植物已铲除');
+      }
+
+      if (plant.deviceId && plant.key === 'waterOn') {
+        API.controlIrrigation(plant.deviceId, 'off').then(function (res) {
+          if (res.code !== 0) throw new Error(res.msg || '关闭灌溉设备失败');
+          removeLinkedPlant();
+          addEvent(plot.name + ' 灌溉设备已关闭', 'warn');
+          loadAll(false);
+        }).catch(function (e) {
+          playSound('buzzer');
+          addEvent(e.message || '关闭灌溉设备失败', 'danger');
+          showStage('设备关闭失败，植物未铲除');
+        });
         return;
       }
-      if (!confirm('确认从专业版解绑/删除设备「' + dev.name + '」？')) return;
 
-      var key = removingKey(plot.id, cell.col);
-      if (state.removingMapped.indexOf(key) === -1) state.removingMapped.push(key);
-      playSound('shovel');
-      renderBoard();
-      API.unbindDevice(dev.id).then(function (res) {
-        if (res.code !== 0) throw new Error(res.msg || '设备清除失败');
-        addEvent(plot.name + ' 已清除设备：' + dev.name, 'warn');
-        showStage('设备已清除');
-        state.removingMapped = state.removingMapped.filter(function (k) { return k !== key; });
-        state.placedPlants = state.placedPlants.filter(function (p) { return p.plotId !== plot.id || p.col !== cell.col; });
-        return loadAll(false);
-      }).catch(function (e) {
-        state.removingMapped = state.removingMapped.filter(function (k) { return k !== key; });
-        playSound('buzzer');
-        addEvent(e.message || '设备清除失败', 'danger');
-        renderAll();
-      });
+      removeLinkedPlant();
     }
 
     function renderStats() {
       var rows = visibleRows().filter(function (p) { return !p.empty; });
       var threatCount = 0;
-      var healthTotal = 0;
-      rows.forEach(function (plot) {
-        threatCount += threatsFor(plot).length;
-        healthTotal += healthFor(plot);
-      });
-      var avgHealth = rows.length ? Math.round(healthTotal / rows.length) : 0;
+      rows.forEach(function (plot) { threatCount += threatsFor(plot).length; });
       var online = state.devices.filter(function (d) { return d.online; }).length;
-      document.getElementById('energyValue').textContent = state.energy;
-      document.getElementById('sunBank').textContent = state.energy;
-      document.getElementById('healthValue').textContent = avgHealth;
+      document.getElementById('healthValue').textContent = '--';
       document.getElementById('threatValue').textContent = threatCount;
       document.getElementById('onlineValue').textContent = online + '/' + state.devices.length;
       document.getElementById('levelBanner').textContent = '单关卡 · ' + rows.length + ' 个真实地块';
     }
 
-    function plantSprite(kind, row, col, extraClass, title) {
+    function plantSprite(kind, row, col, extraClass, title, plotId) {
       var x = GRASS_LEFT + col * CELL_W + 6;
       var y = GRASS_TOP + row * CELL_H + 18;
       var cls = 'plant ' + (extraClass || '');
-      return '<img class="' + cls + '" src="' + esc(frame(plantFrames[kind])) + '" alt="" title="' + esc(title || '') + '" style="left:' + x + 'px;top:' + y + 'px;">';
+      var target = plotId ? ' data-plot="' + esc(plotId) + '" data-row="' + row + '" data-col="' + col + '"' : '';
+      return '<img class="' + cls + '" src="' + esc(frame(plantFrames[kind])) + '" alt="" title="' + esc(title || '') + '"' + target + ' style="left:' + x + 'px;top:' + y + 'px;">';
     }
 
     function removingKey(plotId, col) {
@@ -1094,39 +1267,17 @@
       return '<img class="zombie" src="' + esc(frame(zombieFrames[kind])) + '" alt="" title="' + esc(title || '') + '" style="left:' + x + 'px;top:' + y + 'px;animation-delay:' + delay + 's;">';
     }
 
-    function peaShot(row) {
-      var x = GRASS_LEFT + 3 * CELL_W + 42;
-      var y = GRASS_TOP + row * CELL_H + 40;
-      return '<img class="pea-shot" src="' + esc(img(plantFrames.pea[0])) + '" alt="" style="left:' + x + 'px;top:' + y + 'px;">';
-    }
-
-    function sunToken(row) {
-      var x = GRASS_LEFT + 62;
-      var y = GRASS_TOP + row * CELL_H + 12;
-      return '<img class="sun-token" data-sun="1" src="' + esc(frame(plantFrames.sun)) + '" alt="" title="收集阳光" style="left:' + x + 'px;top:' + y + 'px;">';
-    }
-
     function mappedPlants(plot, row) {
       if (!plot || plot.empty) return '';
       var html = '';
-      var devs = devicesOf(plot.id);
       var irrig = irrigationDevice(plot.id);
       var cam = cameraDevice(plot.id);
-      var alarms = pendingAlarms(plot.id);
-      var hasOnlineSensor = devs.some(function (d) { return d.online && !d.controllable; });
 
-      if (hasOnlineSensor || metric(plot, 'humidity') !== null) {
-        html += plantSprite('advice', row, 1, mappedPlantClass('', plot.id, 1), '专业版实时数据同步');
-        html += sunToken(row);
-      }
-      if (irrig) {
-        if (irrig.running) html += plantSprite('repeater', row, 2, mappedPlantClass('', plot.id, 2), '专业版灌溉状态：开启');
-        else if (irrig.online) html += plantSprite('waterOn', row, 2, mappedPlantClass('', plot.id, 2), '专业版灌溉设备：在线待命');
-        else html += plantSprite('waterOff', row, 2, mappedPlantClass('wallnut', plot.id, 2), '专业版灌溉设备：离线');
-      }
-      if (cam) html += plantSprite('camera', row, 3, mappedPlantClass('chomper', plot.id, 3), cam.online ? '专业版摄像头：在线' : '专业版摄像头：离线');
-      if (alarms.length) html += plantSprite('waterOff', row, 4, 'wallnut', '专业版未处理告警：' + alarms.length + ' 条');
-      else if (healthFor(plot) >= 85) html += plantSprite('alarmOne', row, 4, 'potato', '专业版地块健康稳定');
+      // 向日葵是固定的农田信息标识，不是可铲除的设备植物。
+      html += plantSprite('advice', row, 0, 'fixed-sunflower', '农田实时数据标识');
+      // 设备植物可与其他种类共存，但每种植物在本行只显示一株。
+      if (irrig && irrig.running && !isDevicePlantHidden(plot.id, irrig.id) && !hasManualPlantTypeInRow(plot, row, 'waterOn')) html += plantSprite('waterOn', row, 2, 'device-plant', '灌溉设备：开启');
+      if (cam && cam.online && !isDevicePlantHidden(plot.id, cam.id) && !hasManualPlantTypeInRow(plot, row, 'camera')) html += plantSprite('camera', row, 3, 'device-plant chomper', '摄像头设备：在线');
       return html;
     }
 
@@ -1135,7 +1286,7 @@
       state.placedPlants.forEach(function (plant) {
         if (plant.row !== row) return;
         var cls = plantClassFor(plant.key) + (plant.removing ? ' removing' : '');
-        html += plantSprite(plant.key, plant.row, plant.col, cls, plant.title);
+        html += plantSprite(plant.key, plant.row, plant.col, cls, plant.title, plant.plotId);
       });
       return html;
     }
@@ -1158,12 +1309,9 @@
 
       for (var r = 0; r < ROWS; r++) {
         var plot = rows[r];
-        var hp = healthFor(plot);
-        var rowTop = GRASS_TOP + r * CELL_H + 5;
         var tagTop = GRASS_TOP + r * CELL_H + 8;
-        var crop = plot.empty ? '未接入专业版地块' : ((plot.crop || '未设置作物') + ' · 健康 ' + hp);
+        var crop = plot.empty ? '未接入专业版地块' : ((plot.crop || '未设置作物') + ' · 设备 ' + devicesOf(plot.id).length + ' 台');
         html += '<div class="row-tag" style="top:' + tagTop + 'px;">' + esc(plot.name) + '<span>' + esc(crop) + '</span></div>';
-        html += '<img class="mower" src="' + esc(img('images/lawnmower.png')) + '" alt="" style="top:' + (rowTop + 25) + 'px;">';
         for (var c = 0; c < COLS; c++) {
           var selected = plot.id === state.selectedPlotId ? ' selected-row' : '';
           html += '<button class="grid-cell' + selected + '" type="button" data-plot="' + esc(plot.id) + '" data-row="' + r + '" data-col="' + c + '" style="left:' + (GRASS_LEFT + c * CELL_W) + 'px;top:' + (GRASS_TOP + r * CELL_H) + 'px;"></button>';
@@ -1171,9 +1319,8 @@
         html += mappedPlants(plot, r);
         html += placedPlantSprites(r);
 
-        var threats = threatsFor(plot);
+        var threats = areZombiesClearedOnRow(r) ? [] : threatsFor(plot);
         for (var z = 0; z < threats.length; z++) html += zombieSprite(threats[z].zombie, r, 6 + z, threats[z].message);
-        if (threats.length && irrigationDevice(plot.id)) html += peaShot(r);
         html += effectSprites(r);
       }
 
@@ -1206,19 +1353,12 @@
           var col = Number(cell.getAttribute('data-col'));
           state.targetCell = { row: row, col: col, plotId: cell.getAttribute('data-plot') };
           state.selectedPlotId = state.targetCell.plotId;
-          renderAll();
-          if (state.tool === 'shovel') clearCell(state.targetCell);
-          else applySelectedCard();
-        });
-      });
-
-      document.querySelectorAll('.sun-token').forEach(function (sun) {
-        sun.addEventListener('click', function (e) {
-          e.stopPropagation();
-          state.energy = Math.min(999, state.energy + 25);
-          playSound('tap');
-          showStage('收集阳光 +25');
-          renderAll();
+          if (state.tool === 'shovel') {
+            clearCell(state.targetCell);
+          } else {
+            renderAll();
+            applySelectedCard();
+          }
         });
       });
     }
@@ -1227,19 +1367,13 @@
       var bank = document.getElementById('seedBank');
       bank.innerHTML = cards.map(function (card) {
         var active = state.tool === 'plant' && card.key === state.selectedCard ? ' selected' : '';
-        var disabled = state.energy < card.cost ? ' disabled' : '';
-        return '<button class="seed-card' + active + '" type="button" data-key="' + card.key + '" data-cost="' + card.cost + '"' + disabled + ' title="' + esc(card.name + ' · ' + card.action) + '">' +
+        return '<button class="seed-card' + active + '" type="button" data-key="' + card.key + '" data-cost="' + card.cost + '" title="' + esc(card.name + ' · ' + card.action) + '">' +
           '<img src="' + esc(img(card.card)) + '" alt="' + esc(card.name) + '">' +
         '</button>';
       }).join('');
 
       bank.querySelectorAll('.seed-card').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          if (btn.disabled) {
-            playSound('buzzer');
-            showStage('阳光不足');
-            return;
-          }
           state.selectedCard = btn.getAttribute('data-key');
           setTool('plant');
           playSound('select');
@@ -1254,17 +1388,11 @@
       var card = cardByKey(state.selectedCard);
       var detail = document.getElementById('plotLines');
       var threats = document.getElementById('threatLines');
-      var selected = document.getElementById('selectedCard');
+      var selected = document.getElementById('selectedPlotCard');
 
-      if (state.tool === 'shovel') {
-        selected.innerHTML =
-          '<img src="' + esc(img('images/Shovel.png')) + '" alt="铲子">' +
-          '<div><b>铲子</b><span>清除已种植物；点真实设备植物可解绑设备</span></div>';
-      } else {
-        selected.innerHTML =
-          '<img src="' + esc(img(card.card)) + '" alt="' + esc(card.name) + '">' +
-          '<div><b>' + esc(card.name) + '</b><span>' + esc(card.action) + ' · ' + card.cost + ' 阳光</span></div>';
-      }
+      selected.innerHTML =
+        '<img src="' + esc(img(card.card)) + '" alt="' + esc(card.name) + '">' +
+        '<div><b>' + esc(card.name) + '</b><span>' + esc(card.action) + '</span></div>';
 
       if (!plot || plot.empty) {
         detail.innerHTML = '<div class="plot-line"><span>状态</span><b>未绑定</b></div>';
@@ -1273,6 +1401,7 @@
         return;
       }
 
+      var rows = visibleRows().filter(function (p) { return !p.empty; });
       var temp = metric(plot, 'temp');
       var hum = metric(plot, 'humidity');
       var lux = metric(plot, 'lux');
@@ -1281,8 +1410,25 @@
       var alarms = pendingAlarms(plot.id);
       var irrig = irrigationDevice(plot.id);
 
-      detail.innerHTML =
-        '<div class="plot-line"><span>地块</span><b>' + esc(plot.name) + '</b></div>' +
+      detail.innerHTML = rows.map(function (item) {
+        var itemTemp = metric(item, 'temp');
+        var itemHum = metric(item, 'humidity');
+        var itemLux = metric(item, 'lux');
+        var itemDevs = devicesOf(item.id);
+        var itemOnline = itemDevs.filter(function (d) { return d.online; }).length;
+        var itemAlarms = pendingAlarms(item.id).length;
+        return '<div class="plot-summary-row">' +
+          '<strong>' + esc(item.name) + '</strong>' +
+          '<em>湿度 ' + (itemHum === null ? '--' : itemHum.toFixed(1) + '%') + ' · 温度 ' + (itemTemp === null ? '--' : itemTemp.toFixed(1) + '℃') + ' · 亮度 ' + (itemLux === null ? '--' : Math.round(itemLux) + ' lx') + ' · 告警 ' + itemAlarms + '</em>' +
+          '<span class="status">' + itemOnline + '/' + itemDevs.length + '</span>' +
+        '</div>';
+      }).join('');
+
+      selected.innerHTML =
+        '<img src="' + esc(img('images/Sun/Sun_0.png')) + '" alt="地块状态">' +
+        '<div><b>' + esc(plot.name) + '</b><span>湿度 ' + (hum === null ? '--' : hum.toFixed(1) + '%') + ' · 温度 ' + (temp === null ? '--' : temp.toFixed(1) + '℃') + ' · 亮度 ' + (lux === null ? '--' : Math.round(lux) + ' lx') + ' · 告警 ' + alarms.length + ' 条</span></div>';
+
+      var summary = '<div class="plot-line"><span>地块</span><b>' + esc(plot.name) + '</b></div>' +
         '<div class="plot-line"><span>作物</span><b>' + esc(plot.crop || '未设置') + '</b></div>' +
         '<div class="plot-line"><span>温度</span><b>' + (temp === null ? '--' : temp.toFixed(1) + '℃') + '</b></div>' +
         '<div class="plot-line"><span>湿度</span><b>' + (hum === null ? '--' : hum.toFixed(1) + '%') + '</b></div>' +
@@ -1290,6 +1436,7 @@
         '<div class="plot-line"><span>设备</span><b>' + online + '/' + devs.length + '</b></div>' +
         '<div class="plot-line"><span>灌溉</span><b>' + (irrig ? (irrig.running ? '开启' : (irrig.online ? '待命' : '离线')) : '无') + '</b></div>' +
         '<div class="plot-line"><span>告警</span><b>' + alarms.length + ' 条</b></div>';
+      detail.innerHTML += summary;
 
       var ts = threatsFor(plot);
       threats.innerHTML = ts.length
@@ -1300,7 +1447,7 @@
     function renderEvents() {
       var box = document.getElementById('eventLines');
       if (!state.events.length) {
-        box.innerHTML = '<div class="event-line">等待真实数据同步</div>';
+        box.innerHTML = '<div class="event-line">等待实时数据同步</div>';
         return;
       }
       box.innerHTML = state.events.map(function (e) {
@@ -1329,22 +1476,11 @@
       showStage('准备，安放，开战！');
     }
 
-    function spend(cost) {
-      if (state.energy < cost) {
-        playSound('buzzer');
-        showStage('阳光不足');
-        return false;
-      }
-      state.energy -= cost;
-      renderStats();
-      renderCards();
+    function spend() {
       return true;
     }
 
-    function refund(cost) {
-      state.energy += cost;
-      renderAll();
-    }
+    function refund() {}
 
     function applySelectedCard() {
       var card = cardByKey(state.selectedCard);
@@ -1356,140 +1492,116 @@
         return;
       }
       if (!canPlantOnCell(cell)) return;
-      if (!cardEnabled(card)) {
+      if (hasPlantTypeInRow(plot, cell.row, card.key)) {
         playSound('buzzer');
-        showStage('当前地块暂时不能使用这张卡');
-        renderAll();
+        showStage('同一地块一行只能种一株' + card.name);
+        return;
+      }
+      if (manualPlantAt(cell)) {
+        playSound('buzzer');
+        showStage('这里已经种有植物，请先用铲子清除');
         return;
       }
 
-      if (card.key === 'advice') return useAdvice(plot, card, cell);
-      if (card.key === 'waterOn') return useIrrigation(plot, card, 'on', cell);
-      if (card.key === 'waterOff') return useIrrigation(plot, card, 'off', cell);
-      if (card.key === 'alarmOne') return useAlarmOne(plot, card, cell);
-      if (card.key === 'alarmAll') return useAlarmAll(plot, card, cell);
-      if (card.key === 'camera') return useCamera(plot, card, cell);
-    }
+      if (card.key === 'waterOn') return plantIrrigation(plot, card, cell);
+      if (card.key === 'camera') return plantCamera(plot, card, cell);
+      if (card.key === 'alarmAll') return plantChili(plot, card, cell);
 
-    function useAdvice(plot, card, cell) {
       if (!spend(card.cost)) return;
-      playSound('bleep');
       playSound('plant');
       placePlant(card.key, plot, cell, card.action);
-      API.getAdvice().then(function (res) {
-        if (res.code !== 0) throw new Error(res.msg || '建议生成失败');
-        var advice = (res.data || [])[0];
-        addEvent(plot.name + ' 生成建议：' + (advice ? advice.tag : '农事') + '防线', 'warn');
-        showStage('向日葵生成了农事建议');
-      }).catch(function (e) {
-        refund(card.cost);
-        addEvent(e.message || '建议生成失败', 'danger');
-        playSound('buzzer');
-      });
+      addEvent(plot.name + ' 已种植' + card.name, 'success');
+      showStage(card.name + ' 已种植');
     }
 
-    function useIrrigation(plot, card, action, cell) {
+    function plantIrrigation(plot, card, cell) {
       var dev = irrigationDevice(plot.id);
-      if (!dev) {
+      if (!dev || !dev.online) {
         playSound('buzzer');
-        showStage('该地块没有灌溉设备');
+        showStage('该地块没有在线灌溉设备');
         return;
       }
-      if (action === 'on' && !dev.online) {
-        playSound('buzzer');
-        showStage('灌溉设备离线');
-        return;
-      }
-      var text = action === 'on' ? '开启' : '关闭';
-      if (!confirm('确认对「' + plot.name + '」' + text + '灌溉设备？')) return;
       if (!spend(card.cost)) return;
-      API.controlIrrigation(dev.id, action).then(function (res) {
-        if (res.code !== 0) throw new Error(res.msg || '设备控制失败');
+      API.controlIrrigation(dev.id, 'on').then(function (res) {
+        if (res.code !== 0) throw new Error(res.msg || '开启灌溉设备失败');
         playSound('plant');
-        if (action === 'on') playSound('splat');
-        placePlant(card.key, plot, cell, card.action);
-        addEvent(plot.name + ' 已' + text + '灌溉', 'success');
-        showStage(card.name + ' 已落位');
+        if (!placePlant(card.key, plot, cell, '已开启：' + dev.name, dev)) return;
+        addEvent(plot.name + ' 豌豆射手已开启灌溉设备', 'success');
+        showStage('灌溉设备已开启');
         return loadAll(false);
       }).catch(function (e) {
         refund(card.cost);
-        addEvent(e.message || '设备控制失败', 'danger');
         playSound('buzzer');
+        addEvent(e.message || '开启灌溉设备失败', 'danger');
+        showStage('设备开启失败，未种植植物');
       });
     }
 
-    function useAlarmOne(plot, card, cell) {
-      var alarms = pendingAlarms(plot.id);
-      if (!alarms.length) {
+    function plantCamera(plot, card, cell) {
+      var dev = cameraDevice(plot.id);
+      if (!dev || !dev.online) {
         playSound('buzzer');
-        showStage('当前地块没有未处理告警');
-        return;
-      }
-      if (!confirm('确认处理「' + plot.name + '」的一条告警？')) return;
-      if (!spend(card.cost)) return;
-      API.updateAlarmStatus(alarms[0].id, '已处理').then(function (res) {
-        if (res.code !== 0) throw new Error(res.msg || '告警处理失败');
-        playSound('mine');
-        placePlant(card.key, plot, cell, card.action);
-        addEffect('mine', cell.row, Math.min(6, cell.col + 1));
-        addEvent(plot.name + ' 已处理告警：' + alarms[0].type, 'success');
-        showStage('土豆雷清除了一只告警僵尸');
-        return loadAll(false);
-      }).catch(function (e) {
-        refund(card.cost);
-        addEvent(e.message || '告警处理失败', 'danger');
-        playSound('buzzer');
-      });
-    }
-
-    function useAlarmAll(plot, card, cell) {
-      var alarms = pendingAlarms(plot.id);
-      if (!alarms.length) {
-        playSound('buzzer');
-        showStage('当前地块没有未处理告警');
-        return;
-      }
-      if (!confirm('确认把「' + plot.name + '」的 ' + alarms.length + ' 条告警全部标记为已处理？')) return;
-      if (!spend(card.cost)) return;
-      Promise.all(alarms.map(function (alarm) {
-        return API.updateAlarmStatus(alarm.id, '已处理');
-      })).then(function (all) {
-        for (var i = 0; i < all.length; i++) {
-          if (all[i].code !== 0) throw new Error(all[i].msg || '告警处理失败');
-        }
-        playSound('cherry');
-        playSound('siren');
-        placePlant(card.key, plot, cell, card.action);
-        addEffect('cherry', cell.row, Math.min(6, cell.col + 2));
-        addEvent(plot.name + ' 已批量处理 ' + alarms.length + ' 条告警', 'success');
-        showStage('樱桃炸弹清场完成');
-        return loadAll(false);
-      }).catch(function (e) {
-        refund(card.cost);
-        addEvent(e.message || '批量处理失败', 'danger');
-        playSound('buzzer');
-      });
-    }
-
-    function useCamera(plot, card, cell) {
-      var cam = cameraDevice(plot.id);
-      if (!cam) {
-        playSound('buzzer');
-        showStage('该地块没有摄像头');
+        showStage('该地块没有在线摄像头');
         return;
       }
       if (!spend(card.cost)) return;
       var box = document.getElementById('cameraBox');
-      var imgEl = document.getElementById('cameraImg');
-      imgEl.src = API.isSimulatorMode()
-        ? API.getSimulatorCameraSource()
-        : 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+      var image = document.getElementById('cameraImg');
+      image.src = API.isSimulatorMode() ? API.getSimulatorCameraSource() : 'api/camera/mjpeg?deviceId=' + encodeURIComponent(dev.id) + '&_=' + Date.now();
       box.style.display = 'block';
-      playSound('plant');
       playSound('chomp');
-      placePlant(card.key, plot, cell, card.action);
-      addEvent(plot.name + ' 已打开摄像头哨兵', 'success');
-      showStage('大嘴花开始盯防');
+      if (!placePlant(card.key, plot, cell, '已启用：' + dev.name, dev)) return;
+      addEvent(plot.name + ' 大嘴花已启用摄像头哨兵', 'success');
+      showStage('摄像头哨兵已开启');
+    }
+
+    function plantChili(plot, card, cell) {
+      var row = visibleRowIndex(plot.id);
+      if (row < 0) {
+        playSound('buzzer');
+        showStage('无法定位当前地块所在战场行');
+        return;
+      }
+      var alarms = pendingAlarms(plot.id);
+      if (!spend(card.cost)) return;
+
+      function finishClear(message) {
+        playSound('cherry');
+        playSound('siren');
+        clearThreatRow(plot.id);
+        clearZombiesOnRow(row);
+        var bomb = placePlant(card.key, plot, cell, message);
+        if (!bomb) return;
+        for (var col = 1; col <= 8; col += 2) addEffect('cherry', row, col);
+        setTimeout(function () {
+          state.placedPlants = state.placedPlants.filter(function (p) { return p !== bomb; });
+          if (state.phase === 'play') renderBoard();
+        }, 220);
+        addEvent(plot.name + ' 樱桃炸弹已清空整行僵尸', 'success');
+        showStage('樱桃炸弹爆炸，整排僵尸已清除');
+        renderAll();
+      }
+
+      // The battle rule is row clearing. No backend-data mismatch may leave a zombie behind.
+      if (!alarms.length) {
+        finishClear('已清空本行僵尸');
+        return;
+      }
+
+      Promise.all(alarms.map(function (alarm) {
+        return API.updateAlarmStatus(alarm.id, '已处理');
+      })).then(function (all) {
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].code !== 0) throw new Error(all[i].msg || '批量处理告警失败');
+        }
+        finishClear('已清空 ' + alarms.length + ' 条告警');
+        return loadAll(false);
+      }).catch(function (e) {
+        // Keep the visual combat rule deterministic even if a stale backend alarm
+        // cannot be updated; report the sync failure without resurrecting zombies.
+        finishClear('已清空本行僵尸');
+        addEvent(e.message || '告警同步失败，已完成战场清除', 'warn');
+      });
     }
 
     function hideCamera() {
@@ -1529,15 +1641,9 @@
     }
 
     setInterval(function () {
-      state.energy = Math.min(999, state.energy + 5);
-      renderStats();
-      renderCards();
-    }, 5000);
-
-    setInterval(function () {
       state.frame += 1;
       if (state.phase === 'play') renderBoard();
-    }, 420);
+    }, 180);
 
     setInterval(function () {
       loadAll(false);
@@ -1550,7 +1656,6 @@
       playSound('select');
       renderAll();
     });
-
     playMusic('menu');
     loadAll(false);
   </script>
