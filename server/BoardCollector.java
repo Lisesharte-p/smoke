@@ -87,6 +87,28 @@ public class BoardCollector {
 
     private BoardCollector() {}
 
+    /** 判断某个地址当前是否已有可用长连接。 */
+    public static boolean hasLiveConnection(String host, int port) {
+        if (host == null || host.trim().isEmpty() || port <= 0) return false;
+        String key = host.trim() + ":" + port;
+        synchronized (connectors) {
+            DeviceConn conn = connectors.get(key);
+            return conn != null && conn.hasLiveSocket();
+        }
+    }
+
+    /** 快速探测普通板载设备地址是否能建立 TCP 连接。 */
+    public static boolean probeAddress(String host, int port) {
+        if (host == null || host.trim().isEmpty() || port <= 0) return false;
+        if (hasLiveConnection(host, port)) return true;
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(host.trim(), port), CONNECT_TIMEOUT_MS);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** 启动后台监控线程：立即扫描一次，之后每 30 秒扫描设备表，动态建连/断连 */
     public static void start() {
         Thread monitor = new Thread(() -> {
@@ -107,6 +129,15 @@ public class BoardCollector {
         monitor.setDaemon(true);
         monitor.start();
         System.out.println("[BoardCollector] 常驻长连接模式已启动：同一块板子（ip:port）共享一条 TCP 连接，数据写入所有关联传感器");
+    }
+
+    /** 设备地址变更后供 API 主动触发一次扫描，避免等后台 30 秒轮询。 */
+    public static void rescanNow() {
+        try {
+            ensureConnectors();
+        } catch (Exception e) {
+            System.out.println("[BoardCollector] 设备列表即时扫描失败: " + e);
+        }
     }
 
     /** 供 API 手动刷新调用：通过板子长连接发送 query，再返回最近一次捕获的读数。 */
@@ -222,7 +253,7 @@ public class BoardCollector {
     }
 
     /** 扫描设备表：无地址设备置离线；同一 <ip:port> 只建一条长连接（多个设备共享） */
-    private static void ensureConnectors() throws SQLException {
+    private static synchronized void ensureConnectors() throws SQLException {
         // 1. 无 ip/port 的设备不可能在线
         try (Connection c = DBUtil.getConnection();
              PreparedStatement ps = c.prepareStatement(
@@ -255,6 +286,20 @@ public class BoardCollector {
                 } catch (NumberFormatException ex) {
                     runningConns.remove(key);
                 }
+            }
+        }
+        markLiveConnectorsOnline(byAddr.keySet());
+    }
+
+    /** 已存在的长连接无需等下一条读数，重扫后立刻把挂到该地址的设备同步为在线。 */
+    private static void markLiveConnectorsOnline(Iterable<String> keys) {
+        for (String key : keys) {
+            DeviceConn conn;
+            synchronized (connectors) {
+                conn = connectors.get(key);
+            }
+            if (conn != null && conn.hasLiveSocket()) {
+                setOnlineFor(key, true);
             }
         }
     }

@@ -45,7 +45,7 @@ window.API = (function () {
     textTimer: null,
     shownAt: 0,
     messageIndex: 0,
-    pageLoadUntil: Date.now() + 2600,
+    pageLoadUntil: Date.now() + 450,
     messages: ['正在连接设备', '正在分析数据', '正在同步状态']
   };
 
@@ -109,7 +109,7 @@ window.API = (function () {
     loaderState.textTimer = setInterval(function () {
       loaderState.messageIndex += 1;
       setLoaderText();
-    }, 1400);
+    }, 900);
   }
 
   function showPageLoader(messages) {
@@ -137,7 +137,7 @@ window.API = (function () {
     var el = document.getElementById('pageLoader');
     if (!el || !el.classList.contains('show')) return;
 
-    var wait = Math.max(0, 420 - (Date.now() - loaderState.shownAt));
+    var wait = Math.max(0, 120 - (Date.now() - loaderState.shownAt));
     loaderState.hideTimer = setTimeout(function () {
       if (loaderState.active > 0) return;
       el.classList.remove('show');
@@ -155,7 +155,8 @@ window.API = (function () {
     }
     var method = options.method || 'GET';
     var forceLoader = options.loader === true;
-    var showGlobalLoader = forceLoader || (options.loader !== false && (Date.now() <= loaderState.pageLoadUntil || method !== 'GET'));
+    var suppressLoader = options.loader === false || url.indexOf('/api/assistant') === 0;
+    var showGlobalLoader = forceLoader || (!suppressLoader && (Date.now() <= loaderState.pageLoadUntil || method !== 'GET'));
     var loaderStarted = beginLoader(url, method, showGlobalLoader, forceLoader);
     return fetch(config.baseUrl + url, {
       method: method,
@@ -295,6 +296,23 @@ window.API = (function () {
       return mockDelay({ code: 0, data: d }, 300);
     }
     return request(config.endpoints.devices, { method: 'POST', data: data });
+  }
+
+  function updateDevice(deviceId, data) {
+    if (config.useMock) {
+      var arr = window.MOCK.devices;
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i].id === deviceId) {
+          arr[i].ip = data.ip;
+          arr[i].port = data.port;
+          arr[i].online = false;
+          arr[i].running = false;
+          return mockDelay({ code: 0, data: arr[i] }, 300);
+        }
+      }
+      return mockDelay({ code: 1, msg: '设备不存在' }, 300);
+    }
+    return request(config.endpoints.devices + '/' + deviceId, { method: 'PUT', data: data });
   }
 
   function unbindDevice(deviceId) {
@@ -516,6 +534,7 @@ window.API = (function () {
     }
     return request(config.endpoints.chat, {
       method: 'POST',
+      loader: false,
       data: { user: user, conversationId: conversationId, messages: messages }
     });
   }
@@ -558,6 +577,7 @@ window.API = (function () {
     deletePlot: deletePlot,
     getDevices: getDevices,
     addDevice: addDevice,
+    updateDevice: updateDevice,
     unbindDevice: unbindDevice,
     getRealtime: getRealtime,
     getHistory: getHistory,

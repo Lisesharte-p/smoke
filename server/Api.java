@@ -10,19 +10,14 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.math.BigDecimal;
-import java.net.URI;
 import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -133,6 +128,10 @@ public class Api {
             }
             if ("POST".equals(method) && path.equals("/api/devices")) {
                 ok(ex, addDeviceJson(ex));
+                return true;
+            }
+            if ("PUT".equals(method) && path.matches("/api/devices/[^/]+")) {
+                ok(ex, updateDeviceJson(path.substring("/api/devices/".length()), ex));
                 return true;
             }
             if ("DELETE".equals(method) && path.matches("/api/devices/[^/]+")) {
@@ -593,7 +592,8 @@ public class Api {
                     if (!first) sb.append(',');
                     first = false;
                     String type = rs.getString("type");
-                    Map<String, BigDecimal> vals = latest.get(rs.getString("id"));
+                    boolean online = rs.getInt("online") == 1;
+                    Map<String, BigDecimal> vals = online ? latest.get(rs.getString("id")) : null;
                     sb.append('{')
                       .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
                       .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
@@ -605,7 +605,7 @@ public class Api {
                       .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
                       .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
                       .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
-                      .append("\"online\":").append(rs.getInt("online") == 1).append(',')
+                      .append("\"online\":").append(online).append(',')
                       .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
                       .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
                       .append("\"lux\":").append(numOrNull(vals, "lux")).append(',')
@@ -701,6 +701,63 @@ public class Api {
         return "{\"code\":0,\"data\":" + deviceJson(id) + "}";
     }
 
+    /** PUT /api/devices/{id} —— 修改设备 IP/端口，并立刻触发在线状态重扫 */
+    private static String updateDeviceJson(String id, HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String ip = trimToNull(body.get("ip"));
+        String portStr = trimToNull(body.get("port"));
+        if (id == null || id.trim().isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少设备编号") + "}";
+        }
+        if (ip == null || portStr == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：ip/port 必填") + "}";
+        }
+        int port;
+        try {
+            port = Integer.parseInt(portStr);
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 必须是数字") + "}";
+        }
+        if (port < 1 || port > 65535) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 需在 1-65535 之间") + "}";
+        }
+
+        String type;
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT type FROM device WHERE id = ?")) {
+            ps.setString(1, id.trim());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "{\"code\":1,\"msg\":" + Json.str("设备不存在：" + id.trim()) + "}";
+                }
+                type = rs.getString("type");
+            }
+        }
+        if (sameTypeAddrExistsExcept(type, ip, port, id.trim())) {
+            return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换地址") + "}";
+        }
+
+        String sql = "UPDATE device SET ip = ?, port = ?, online = 0, running = 0, last_heartbeat = NULL WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ip);
+            ps.setInt(2, port);
+            ps.setString(3, id.trim());
+            ps.executeUpdate();
+        }
+        boolean connected;
+        if ("摄像头".equals(type)) {
+            connected = probeCamera(cameraConfig(id.trim()));
+            updateDeviceOnline(id.trim(), connected);
+            scheduleCameraOnlineRefresh(true);
+        } else {
+            connected = BoardCollector.probeAddress(ip, port);
+            updateDeviceOnline(id.trim(), connected);
+            BoardCollector.rescanNow();
+        }
+        return "{\"code\":0,\"data\":" + deviceJson(id.trim()) + "}";
+    }
+
     /** DELETE /api/devices/{id} —— 解绑设备 */
     private static String deleteDeviceJson(String id) throws SQLException {
         String sql = "DELETE FROM device WHERE id = ?";
@@ -752,7 +809,8 @@ public class Api {
             ps.setString(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return "null";
-                Map<String, BigDecimal> vals = latestByDevice(conn).get(id);
+                boolean online = rs.getInt("online") == 1;
+                Map<String, BigDecimal> vals = online ? latestByDevice(conn).get(id) : null;
                 return "{\"id\":" + Json.str(rs.getString("id"))
                         + ",\"name\":" + Json.str(rs.getString("name"))
                         + ",\"type\":" + Json.str(typeMap(rs.getString("type")))
@@ -763,7 +821,7 @@ public class Api {
                         + ",\"protocol\":" + Json.str(rs.getString("protocol"))
                         + ",\"username\":" + Json.str(rs.getString("username"))
                         + ",\"password\":" + Json.str(rs.getString("password"))
-                        + ",\"online\":" + (rs.getInt("online") == 1)
+                        + ",\"online\":" + online
                         + ",\"temp\":" + numOrNull(vals, "temp")
                         + ",\"humidity\":" + numOrNull(vals, "humidity")
                         + ",\"lux\":" + numOrNull(vals, "lux")
@@ -911,9 +969,14 @@ public class Api {
 
     /** 页面列表接口只触发后台刷新，避免离线摄像头探测阻塞页面切换。 */
     private static void scheduleCameraOnlineRefresh() {
+        scheduleCameraOnlineRefresh(false);
+    }
+
+    /** force=true 用于设备地址刚修改后，绕过间隔限制立即检查一次。 */
+    private static void scheduleCameraOnlineRefresh(boolean force) {
         long now = System.currentTimeMillis();
         synchronized (CAMERA_ONLINE_REFRESH_LOCK) {
-            if (now - lastCameraOnlineRefreshAt < CAMERA_ONLINE_REFRESH_INTERVAL_MS) return;
+            if (!force && now - lastCameraOnlineRefreshAt < CAMERA_ONLINE_REFRESH_INTERVAL_MS) return;
             lastCameraOnlineRefreshAt = now;
         }
         if (!CAMERA_ONLINE_REFRESH_RUNNING.compareAndSet(false, true)) return;
@@ -1943,20 +2006,64 @@ public class Api {
     }
 
     /** 简易 HTTP GET，返回响应体（UTF-8） */
-    private static String httpGet(String url) throws IOException, InterruptedException {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(5))
-                .header("Accept", "application/json")
-                .header("Accept-Encoding", "identity")
-                .GET()
-                .build();
-        HttpResponse<byte[]> res = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            throw new IOException("HTTP " + res.statusCode());
+    private static String httpGet(String url) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setRequestProperty("Accept-Encoding", "identity");
+        try {
+            int status = conn.getResponseCode();
+            String body = readHttpBody(conn, status);
+            if (status < 200 || status >= 300) {
+                throw new IOException("HTTP " + status);
+            }
+            return body;
+        } finally {
+            conn.disconnect();
         }
-        byte[] body = res.body();
-        String encoding = res.headers().firstValue("Content-Encoding").orElse("");
+    }
+
+    private static String httpPostJson(String url, String payload, String bearerToken,
+                                       int connectTimeoutMs, int readTimeoutMs) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setConnectTimeout(connectTimeoutMs);
+        conn.setReadTimeout(readTimeoutMs);
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setRequestProperty("Accept-Encoding", "identity");
+        if (bearerToken != null && !bearerToken.isEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
+        byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+        conn.setFixedLengthStreamingMode(bytes.length);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(bytes);
+        }
+        try {
+            int status = conn.getResponseCode();
+            String body = readHttpBody(conn, status);
+            if (status < 200 || status >= 300) {
+                throw new IOException("HTTP " + status + ": "
+                        + (body != null && body.length() > 200 ? body.substring(0, 200) : body));
+            }
+            return body;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    private static String readHttpBody(HttpURLConnection conn, int status) throws IOException {
+        InputStream raw = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+        if (raw == null) return "";
+        byte[] body;
+        try (InputStream in = raw) {
+            body = in.readAllBytes();
+        }
+        String encoding = conn.getContentEncoding();
         if ("gzip".equalsIgnoreCase(encoding)) {
             try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(body))) {
                 body = gzip.readAllBytes();
@@ -3002,23 +3109,7 @@ public class Api {
         }
         req.append("]}");
 
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(SMART_QA_URL))
-                .timeout(Duration.ofSeconds(15))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + SMART_QA_API_KEY)
-                .POST(HttpRequest.BodyPublishers.ofString(req.toString(), StandardCharsets.UTF_8))
-                .build();
-
-        HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        String body = resp.body();
-        if (resp.statusCode() != 200) {
-            throw new IOException("HTTP " + resp.statusCode() + ": "
-                    + (body != null && body.length() > 200 ? body.substring(0, 200) : body));
-        }
+        String body = httpPostJson(SMART_QA_URL, req.toString(), SMART_QA_API_KEY, 5000, 15000);
         String content = Json.strValue(body, "content");
         if (content == null) {
             throw new IOException("响应解析失败，未找到 content 字段");
@@ -3328,12 +3419,23 @@ public class Api {
 
     /** 是否存在同类型且同 IP/端口的设备（同类型设备不能共享同一个板子地址） */
     private static boolean sameTypeAddrExists(String type, String ip, int port) throws SQLException {
+        return sameTypeAddrExistsExcept(type, ip, port, null);
+    }
+
+    /** 修改设备地址时排除当前设备自身，避免原地址保存被误判为重复。 */
+    private static boolean sameTypeAddrExistsExcept(String type, String ip, int port, String excludeId) throws SQLException {
         String sql = "SELECT 1 FROM device WHERE type = ? AND ip = ? AND port = ?";
+        if (excludeId != null && !excludeId.trim().isEmpty()) {
+            sql += " AND id <> ?";
+        }
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, type);
             ps.setString(2, ip);
             ps.setInt(3, port);
+            if (excludeId != null && !excludeId.trim().isEmpty()) {
+                ps.setString(4, excludeId.trim());
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }

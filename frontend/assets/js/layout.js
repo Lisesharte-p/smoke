@@ -221,9 +221,7 @@ window.Layout = (function () {
       if (window.API && typeof API.showPageLoader === 'function') {
         API.showPageLoader(['正在打开页面', '正在准备页面数据', '正在同步最新状态']);
       }
-      requestAnimationFrame(function () {
-        setTimeout(function () { location.href = url.href; }, 30);
-      });
+      location.href = url.href;
     });
   }
 
