@@ -1481,7 +1481,9 @@
       if (!spend(card.cost)) return;
       var box = document.getElementById('cameraBox');
       var imgEl = document.getElementById('cameraImg');
-      imgEl.src = 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+      imgEl.src = API.isSimulatorMode()
+        ? API.getSimulatorCameraSource()
+        : 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
       box.style.display = 'block';
       playSound('plant');
       playSound('chomp');
@@ -1517,7 +1519,7 @@
         return loadRealtimeForPlots();
       }).then(function () {
         renderAll();
-        if (!state.events.length) addEvent('真实数据已同步到五行草坪', 'success');
+        if (!state.events.length) addEvent(API.isSimulatorMode() ? '模拟数据已加载到五行草坪' : '真实数据已同步到五行草坪', 'success');
         if (showToast) Toast.success('游戏版数据已刷新');
       }).catch(function (e) {
         addEvent(e.message || '数据同步失败', 'danger');

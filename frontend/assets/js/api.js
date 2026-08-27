@@ -12,7 +12,7 @@ window.API = (function () {
 
   var config = {
     baseUrl: '',            // 后端地址；由 WebServer 同源托管时留空，分开部署时填 'http://localhost:8080'
-    useMock: false,         // false=走真实后端接口（数据存 MySQL）
+    useMock: false,         // 默认真实接口；模拟模式由 URL / 本地设置显式开启
     endpoints: {
       login:      '/api/auth/login',
       register:   '/api/auth/register',
@@ -38,13 +38,33 @@ window.API = (function () {
     }
   };
 
-  /* 通用请求函数：mock 模式下走本地数据，否则走真实 fetch */
+  /* ---------- 模拟器模式：真实接口为默认，显式开启后所有请求留在浏览器 ---------- */
+  var MODE_KEY = 'agri_simulator_mode';
+  var queryMode = new URLSearchParams(window.location.search).get('simulator');
+  if (queryMode === '1' || queryMode === '0') {
+    try { localStorage.setItem(MODE_KEY, queryMode === '1' ? '1' : '0'); } catch (e) {}
+  }
+  try { config.useMock = localStorage.getItem(MODE_KEY) === '1'; } catch (e) { config.useMock = queryMode === '1'; }
+
+  function isSimulatorMode() { return !!config.useMock; }
+
+  function setSimulatorMode(enabled) {
+    config.useMock = !!enabled;
+    try { localStorage.setItem(MODE_KEY, config.useMock ? '1' : '0'); } catch (e) {}
+  }
+
+  function resetSimulator() {
+    if (window.MOCK && typeof window.MOCK.reset === 'function') window.MOCK.reset();
+  }
+
+  function simulatorCameraSource() {
+    return 'assets/pvz/images/Backgroundfull.png';
+  }
+
+  /* 通用请求函数：模拟模式下硬性阻断，避免未来新增接口意外访问后端 */
   function request(url, options) {
     options = options || {};
-    if (config.useMock) {
-      // mock 模式不会真正走这里，各方法内已直接返回 mock Promise
-      return Promise.resolve(null);
-    }
+    if (isSimulatorMode()) return Promise.reject(new Error('模拟模式已阻断后端请求'));
     return fetch(config.baseUrl + url, {
       method: options.method || 'GET',
       headers: { 'Content-Type': 'application/json' },
@@ -70,22 +90,21 @@ window.API = (function () {
   /* ==================================================================
      登录
      ================================================================== */
-  function login(username, password, role) {
+  function login(username, password) {
     if (config.useMock) {
-      var users = {
-        'farmer':   { username: 'farmer01', name: '张老三', roleName: '农户',       role: 'farmer' },
-        'admin':    { username: 'admin01',  name: '李四',   roleName: '农场管理员', role: 'admin' },
-        'sysadmin': { username: 'sysadmin01', name: '王五', roleName: '系统管理员', role: 'sysadmin' }
-      };
-      var u = users[role] || users.farmer;
-      return mockDelay({ code: 0, msg: 'ok', data: { token: 'mock-token-' + role, username: u.username, name: u.name, roleName: u.roleName, role: u.role } }, 600);
+      var u = window.MOCK.login(username, password);
+      if (!u) return mockDelay({ code: 1, msg: '账号或密码错误', data: null }, 400);
+      return mockDelay({ code: 0, msg: 'ok', data: { token: 'simulator-token-' + u.username, username: u.username, name: u.name, roleName: u.roleName, role: u.role } }, 400);
     }
-    return request(config.endpoints.login, { method: 'POST', data: { username: username, password: password, role: role } });
+    return request(config.endpoints.login, { method: 'POST', data: { username: username, password: password } });
   }
 
-  /* 注册：前端仅预留接口，后端接入前 mock 返回占位提示 */
+  /* 注册：模拟模式创建待审核申请；真实模式保持原接口 */
   function register(data) {
-    if (config.useMock) return mockDelay({ code: 0, msg: '注册接口已预留，待后端接入', data: null }, 400);
+    if (config.useMock) {
+      var req = window.MOCK.register(data);
+      return mockDelay(req.error ? { code: 1, msg: req.error, data: null } : { code: 0, msg: '注册申请已提交，请等待管理员审核', data: req }, 300);
+    }
     return request(config.endpoints.register, { method: 'POST', data: data });
   }
 
@@ -99,39 +118,7 @@ window.API = (function () {
 
   /* 新增地块；data: {name, crop, area, devices?:[{name,type,ip,port},...]}，devices 为可选绑定设备 */
   function addPlot(data) {
-    if (config.useMock) {
-      var id = 'P' + (100 + window.MOCK.plots.length + 1);
-      var devs = data.devices || [];
-      var plot = {
-        id: id,
-        name: data.name,
-        crop: data.crop,
-        area: data.area + '亩',
-        temp: null,
-        humidity: null,
-        deviceCount: devs.length,
-        onlineCount: devs.length
-      };
-      window.MOCK.plots.push(plot);
-      devs.forEach(function (d) {
-        window.MOCK.devices.push({
-          id: 'D' + (100 + window.MOCK.devices.length + 1),
-          name: d.name,
-          type: d.type,
-          plotId: id,
-          plotName: data.name,
-          ip: d.ip,
-          port: d.port,
-          protocol: d.protocol || null,
-          username: d.username || null,
-          password: d.password || null,
-          online: true,
-          controllable: d.type === '灌溉设备',
-          running: false
-        });
-      });
-      return mockDelay({ code: 0, data: plot }, 300);
-    }
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.savePlot(data) }, 300);
     var payload = data || {};
     payload.role = currentRole();   // 权限：仅管理员/系统管理员可新增地块
     return request(config.endpoints.plots, { method: 'POST', data: payload });
@@ -139,14 +126,7 @@ window.API = (function () {
 
   /* 删除地块（后端级联删除其设备与关联数据） */
   function deletePlot(plotId) {
-    if (config.useMock) {
-      var arr = window.MOCK.plots;
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === plotId) { arr.splice(i, 1); break; }
-      }
-      window.MOCK.devices = window.MOCK.devices.filter(function (d) { return d.plotId !== plotId; });
-      return mockDelay({ code: 0 }, 300);
-    }
+    if (config.useMock) return mockDelay({ code: window.MOCK.removePlot(plotId) ? 0 : 1, msg: '地块不存在' }, 300);
     return request(config.endpoints.plot.replace('{plotId}', plotId) + '?role=' + encodeURIComponent(currentRole()), { method: 'DELETE' });
   }
 
@@ -159,36 +139,12 @@ window.API = (function () {
   }
 
   function addDevice(data) {
-    if (config.useMock) {
-      var d = {
-        id: 'D' + (100 + window.MOCK.devices.length + 1),
-        name: data.name,
-        type: data.type,
-        plotId: data.plotId,
-        plotName: data.plotName,
-        ip: data.ip,
-        port: data.port,
-        protocol: data.protocol || null,
-        username: data.username || null,
-        password: data.password || null,
-        online: true,
-        controllable: data.type === '灌溉设备',
-        running: false
-      };
-      window.MOCK.devices.push(d);
-      return mockDelay({ code: 0, data: d }, 300);
-    }
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.saveDevice(data) }, 300);
     return request(config.endpoints.devices, { method: 'POST', data: data });
   }
 
   function unbindDevice(deviceId) {
-    if (config.useMock) {
-      var arr = window.MOCK.devices;
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === deviceId) { arr.splice(i, 1); break; }
-      }
-      return mockDelay({ code: 0 }, 300);
-    }
+    if (config.useMock) return mockDelay({ code: window.MOCK.removeDevice(deviceId) ? 0 : 1, msg: '设备不存在' }, 300);
     return request(config.endpoints.devices + '/' + deviceId, { method: 'DELETE' });
   }
 
@@ -201,7 +157,7 @@ window.API = (function () {
   }
 
   function getHistory(plotId, days, win) {
-    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getHistory(plotId, days) }, 500);
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getHistory(plotId, days, win) }, 500);
     // win 为短时窗口（1m/30m/24h）时走 ?window=，否则走 ?days=
     var url = win
       ? config.endpoints.history.replace('{plotId}', plotId) + '?window=' + win
@@ -221,13 +177,9 @@ window.API = (function () {
      ================================================================== */
   function controlIrrigation(deviceId, action) {
     if (config.useMock) {
-      var arr = window.MOCK.devices;
-      var dev = null;
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === deviceId) { dev = arr[i]; break; }
-      }
-      if (dev) { dev.running = (action === 'on'); }
-      return mockDelay({ code: 0, data: dev }, 600);
+      var operator = window.Layout && Layout.getUser ? (Layout.getUser().roleName + '·' + Layout.getUser().name) : '模拟用户';
+      var dev = window.MOCK.setIrrigation(deviceId, action, operator);
+      return mockDelay(dev ? { code: 0, data: dev } : { code: 1, msg: '设备不存在', data: null }, 450);
     }
     return request(config.endpoints.control.replace('{deviceId}', deviceId), {
       method: 'POST', data: { action: action }
@@ -244,12 +196,7 @@ window.API = (function () {
 
   function saveThresholds(data) {
     if (config.useMock) {
-      window.MOCK.thresholds.humidityMin = data.humidityMin;
-      window.MOCK.thresholds.humidityMax = data.humidityMax;
-      window.MOCK.thresholds.tempMin = data.tempMin;
-      window.MOCK.thresholds.tempMax = data.tempMax;
-      window.MOCK.thresholds.luxMin = data.luxMin;
-      window.MOCK.thresholds.luxMax = data.luxMax;
+      window.MOCK.setThresholds(data);
       return mockDelay({ code: 0 }, 300);
     }
     return request(config.endpoints.thresholds, { method: 'PUT', data: data });
@@ -264,13 +211,7 @@ window.API = (function () {
   }
 
   function updateAlarmStatus(alarmId, status) {
-    if (config.useMock) {
-      var arr = window.MOCK.alarms;
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === alarmId) { arr[i].status = status; break; }
-      }
-      return mockDelay({ code: 0 }, 300);
-    }
+    if (config.useMock) return mockDelay({ code: window.MOCK.setAlarmStatus(alarmId, status) ? 0 : 1, msg: '告警不存在' }, 300);
     return request(config.endpoints.alarms + '/' + alarmId, { method: 'PUT', data: { status: status } });
   }
 
@@ -285,7 +226,11 @@ window.API = (function () {
   /* 审核：status='已通过'|'已拒绝'；通过可带 name（显示名），拒绝可带 rejectReason */
   function reviewRegisterRequest(id, status, extra) {
     extra = extra || {};
-    if (config.useMock) return mockDelay({ code: 0 }, 300);
+    if (config.useMock) {
+      var reviewer = window.Layout && Layout.getUser ? Layout.getUser().name : '模拟管理员';
+      var request = window.MOCK.reviewRequest(id, status, extra, reviewer);
+      return mockDelay(request ? { code: 0, data: request } : { code: 1, msg: '申请不存在或已审核' }, 300);
+    }
     var data = { status: status };
     if (extra.name) data.name = extra.name;
     if (extra.rejectReason) data.rejectReason = extra.rejectReason;
@@ -325,15 +270,13 @@ window.API = (function () {
   }
 
   function getDetectionStatus(deviceId) {
-    if (config.useMock) {
-      return mockDelay({ code: 0, data: { deviceId: deviceId, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30, preSeconds: 5, postSeconds: 10 } }, 200);
-    }
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getDetection(deviceId) }, 200);
     var url = config.endpoints.detectionStatus + (deviceId ? '?deviceId=' + encodeURIComponent(deviceId) : '');
     return request(url);
   }
 
   function saveDetectionSettings(data) {
-    if (config.useMock) return mockDelay({ code: 0, data: data }, 250);
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.saveDetection(data) }, 250);
     return request(config.endpoints.detectionSettings, { method: 'POST', data: data });
   }
 
@@ -369,8 +312,9 @@ window.API = (function () {
         if (messages[i].role === 'user') { q = messages[i].content; break; }
       }
       var reply = window.MOCK.getChatReply(q);
-      reply.conversationId = conversationId || 999001;
-      return mockDelay({ code: 0, data: reply }, 800);
+      var conv = window.MOCK.saveConversation(user, messages, conversationId, reply);
+      reply.conversationId = conv.id;
+      return mockDelay({ code: 0, data: reply }, 500);
     }
     return request(config.endpoints.chat, {
       method: 'POST',
@@ -380,34 +324,31 @@ window.API = (function () {
 
   /* 当前用户的对话历史列表（按用户隔离） */
   function getConversations(user) {
-    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.conversations || [] }, 300);
+    if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.conversations.filter(function (c) { return c.user === user; }) }, 300);
     return request(config.endpoints.conversations + '?user=' + encodeURIComponent(user));
   }
 
   /* 加载某次对话的完整上下文（消息列表） */
   function getConversationMessages(conversationId, user) {
     if (config.useMock) {
-      var arr = window.MOCK.conversations || [];
-      var c = null;
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === conversationId) { c = arr[i]; break; }
-      }
-      return mockDelay({ code: 0, data: c || { id: conversationId, title: '', messages: [] } }, 300);
+      var c = window.MOCK.conversations.filter(function (x) { return String(x.id) === String(conversationId) && x.user === user; })[0];
+      return mockDelay({ code: c ? 0 : 1, data: c || null, msg: c ? 'ok' : '对话不存在' }, 300);
     }
     return request(config.endpoints.conversation.replace('{id}', conversationId) + '?user=' + encodeURIComponent(user));
   }
 
   /* 删除某次对话 */
   function deleteConversation(conversationId, user) {
-    if (config.useMock) {
-      window.MOCK.conversations = (window.MOCK.conversations || []).filter(function (c) { return c.id !== conversationId; });
-      return mockDelay({ code: 0 }, 300);
-    }
+    if (config.useMock) return mockDelay({ code: window.MOCK.deleteConversation(conversationId, user) ? 0 : 1, msg: '对话不存在' }, 300);
     return request(config.endpoints.conversation.replace('{id}', conversationId) + '?user=' + encodeURIComponent(user), { method: 'DELETE' });
   }
 
   return {
     config: config,
+    isSimulatorMode: isSimulatorMode,
+    setSimulatorMode: setSimulatorMode,
+    resetSimulator: resetSimulator,
+    getSimulatorCameraSource: simulatorCameraSource,
     login: login,
     register: register,
     getPlots: getPlots,

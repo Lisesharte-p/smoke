@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>数据总览 - 智慧农业平台</title>
   <link rel="stylesheet" href="assets/css/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <script src="assets/vendor/echarts.min.js"></script>
 </head>
 <body data-page="dashboard">
 
@@ -183,16 +183,14 @@
   <script>
     Layout.init();
 
-    // 以下板块用模拟数据，直接渲染（不依赖后端接口）
+    // 以下板块由 API 统一加载；模拟模式也不会访问后端
     renderWeather();
     renderAdvice();
-    renderDeviceStatus();
-    renderAlarmPanel();
-    renderOperationLog();
 
     var plots = [];
     var devices = [];
     var alarms = [];
+    var controlLogs = [];
     var charts = {};
     var humCharts = [];
 
@@ -466,9 +464,9 @@
       var dom = document.getElementById('deviceChart');
       if (!window.echarts || !dom) return;
 
-      var total = MOCK.devices.length;
-      var running = MOCK.devices.filter(function (d) { return d.running; }).length;
-      var offline = MOCK.devices.filter(function (d) { return !d.online; }).length;
+      var total = devices.length;
+      var running = devices.filter(function (d) { return d.running; }).length;
+      var offline = devices.filter(function (d) { return !d.online; }).length;
       var online = total - running - offline;
 
       var chart = echarts.init(dom);
@@ -515,7 +513,7 @@
     /* ---------- 渲染实时告警面板（模拟数据） ---------- */
     function renderAlarmPanel() {
       var html = '<div class="alarm-list">';
-      MOCK.alarms.slice(0, 5).forEach(function (a) {
+      alarms.slice(0, 5).forEach(function (a) {
         var severe = a.level === '严重';
         var pending = a.status === '未处理';
         html +=
@@ -535,7 +533,7 @@
     /* ---------- 渲染最近操作日志（模拟数据） ---------- */
     function renderOperationLog() {
       var html = '<div class="log-list">';
-      MOCK.controlLogs.slice(0, 5).forEach(function (l) {
+      controlLogs.slice(0, 5).forEach(function (l) {
         var success = l.result === '成功';
         html +=
           '<div class="log-item">' +
@@ -698,8 +696,14 @@
       return API.getAlarms();
     }).then(function (res) {
       alarms = res.data;
+      return API.getControlLogs();
+    }).then(function (res) {
+      controlLogs = res.data || [];
       renderKpi();
       renderPlotCards();
+      renderDeviceStatus();
+      renderAlarmPanel();
+      renderOperationLog();
       if (plots.length) loadTrend(plots[0].id);
     });
   </script>

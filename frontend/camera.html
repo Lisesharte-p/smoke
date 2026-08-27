@@ -141,6 +141,7 @@
     }
 
     function cameraUrl(cam) {
+      if (API.isSimulatorMode()) return API.getSimulatorCameraSource();
       return 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
     }
 
@@ -184,7 +185,7 @@
         return;
       }
 
-      setPlaceholder('正在连接摄像头', selectedCamera.ip + ':' + selectedCamera.port);
+      setPlaceholder(API.isSimulatorMode() ? '正在载入本地模拟画面' : '正在连接摄像头', API.isSimulatorMode() ? '模拟模式不会连接摄像头或后端服务。' : selectedCamera.ip + ':' + selectedCamera.port);
       img.onload = hidePlaceholder;
       img.onerror = function () {
         setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');

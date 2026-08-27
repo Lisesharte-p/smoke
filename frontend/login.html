@@ -66,7 +66,7 @@
 
         <button class="btn btn-primary btn-block" id="registerBtn">注 册</button>
 
-        <div class="login-hint">注册功能仅预留接口，待后端接入后开放</div>
+        <div class="login-hint">模拟模式可提交注册申请并由管理员审核；真实模式按后端规则处理</div>
         <div class="login-switch">已有账号？<a id="toLogin">返回登录</a></div>
       </div>
     </div>
@@ -247,7 +247,7 @@
         btn.disabled = false;
         btn.classList.remove('loading');
         if (res.code === 0) {
-          Toast.info(res.msg || '注册接口已预留，待后端接入');
+          Toast.info(res.msg || '注册申请已提交');
           showLogin();
         } else {
           Toast.error(res.msg || '注册失败');

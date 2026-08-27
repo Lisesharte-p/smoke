@@ -139,17 +139,24 @@
         // 只有指令下发成功才切换设备运行状态；失败保持原状
         if (dev && success) dev.running = (action === 'on');
 
-        // 插入一条控制日志
-        var user = Layout.getUser();
-        logs.unshift({
-          time: MOCK.nowDate(),
-          deviceName: dev ? dev.name : id,
-          plotName: dev ? dev.plotName : '-',
-          action: action === 'on' ? '开启' : '关闭',
-          result: success ? '成功' : '失败',
-          operator: user.roleName + '·' + user.name
-        });
+        if (success && !API.isSimulatorMode()) {
+          var user = Layout.getUser();
+          logs.unshift({
+            time: (res.data && res.data.time) || new Date().toLocaleString(),
+            deviceName: dev ? dev.name : id,
+            plotName: dev ? dev.plotName : '-',
+            action: action === 'on' ? '开启' : '关闭',
+            result: '成功',
+            operator: user.roleName + '·' + user.name
+          });
+        }
 
+        if (success && API.isSimulatorMode()) {
+          API.getControlLogs().then(function (logRes) {
+            logs = logRes.data || [];
+            renderLogs();
+          });
+        }
         renderLogs();
         renderDevices(); // 刷新卡片状态
         if (success) {

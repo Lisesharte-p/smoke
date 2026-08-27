@@ -77,22 +77,33 @@ window.Layout = (function () {
 
   /* ---------- 用户信息（登录页写入，其余页面读取） ---------- */
   var STORAGE_KEY = 'agri_user';
+  var SIM_STORAGE_KEY = 'agri_simulator_user';
+
+  function storageKey() {
+    return window.API && API.isSimulatorMode && API.isSimulatorMode() ? SIM_STORAGE_KEY : STORAGE_KEY;
+  }
 
   function getUser() {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { name: '张老三', roleName: '农户', role: 'farmer' };
+      return JSON.parse(localStorage.getItem(storageKey())) || { name: '张老三', roleName: '农户', role: 'farmer' };
     } catch (e) {
       return { name: '张老三', roleName: '农户', role: 'farmer' };
     }
   }
 
   function setUser(u) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); } catch (e) { /* 存储不可用时静默降级 */ }
+    try { localStorage.setItem(storageKey(), JSON.stringify(u)); } catch (e) { /* 存储不可用时静默降级 */ }
   }
 
-  /* 是否已登录（localStorage 里存在用户信息） */
+  /* 是否已登录（模拟模式与真实模式使用独立登录态） */
   function isLoggedIn() {
-    try { return !!localStorage.getItem(STORAGE_KEY); } catch (e) { return false; }
+    try { return !!localStorage.getItem(storageKey()); } catch (e) { return false; }
+  }
+
+  /* 退出登录：清除当前模式的登录态并回到登录页（切换账户） */
+  function logout() {
+    try { localStorage.removeItem(storageKey()); } catch (e) {}
+    location.href = 'login.html';
   }
 
   /* 当前角色：farmer 农户 / admin 农场管理员 / sysadmin 系统管理员 */
@@ -104,12 +115,6 @@ window.Layout = (function () {
   function canAccess(key) {
     var allowed = ROLE_NAV[getRole()] || ROLE_NAV.farmer;
     return allowed.indexOf(key) !== -1;
-  }
-
-  /* 退出登录：清除本地登录态并回到登录页（切换账户） */
-  function logout() {
-    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-    location.href = 'login.html';
   }
 
   /* ---------- 渲染顶部导航（标题 + 选项） ---------- */
@@ -142,6 +147,10 @@ window.Layout = (function () {
     var u = getUser();
     var title = TITLES[pageKey] || '智慧农业平台';
     var isGame = pageKey === 'game';
+    var isSimulator = window.API && API.isSimulatorMode && API.isSimulatorMode();
+    var modeHtml = isSimulator
+      ? '<span class="simulator-mode">模拟模式 · 不连接后端</span><a class="topbar-logout" id="resetSimulatorBtn" href="javascript:;">重置模拟数据</a><a class="topbar-logout" id="switchRealBtn" href="javascript:;">切换真实接口</a>'
+      : '<a class="topbar-logout" id="switchSimulatorBtn" href="javascript:;">进入模拟模式</a>';
     var html = '<div class="topbar-left">' +
                '<span class="topbar-title">' + title + '</span>' +
                '<span class="topbar-breadcrumb">首页 / ' + title + '</span>' +
@@ -154,6 +163,7 @@ window.Layout = (function () {
             '<span class="topbar-clock" id="topbarClock">--:--:--</span>' +
             '<span class="topbar-user"><span class="avatar">' + (u.name || '农').charAt(0) + '</span>' +
             u.roleName + ' · ' + u.name + '</span>' +
+            modeHtml +
             '<a class="topbar-logout" id="logoutBtn" href="javascript:;" title="退出并切换账户">切换账户</a>' +
             '</div>';
     document.getElementById('topbar').innerHTML = html;
@@ -217,6 +227,24 @@ window.Layout = (function () {
     // 绑定「切换账户」按钮
     var logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
+
+    var switchSimulatorBtn = document.getElementById('switchSimulatorBtn');
+    if (switchSimulatorBtn) switchSimulatorBtn.addEventListener('click', function () {
+      API.setSimulatorMode(true);
+      location.href = 'login.html';
+    });
+    var switchRealBtn = document.getElementById('switchRealBtn');
+    if (switchRealBtn) switchRealBtn.addEventListener('click', function () {
+      API.setSimulatorMode(false);
+      location.href = 'login.html';
+    });
+    var resetSimulatorBtn = document.getElementById('resetSimulatorBtn');
+    if (resetSimulatorBtn) resetSimulatorBtn.addEventListener('click', function () {
+      if (!confirm('确认重置全部模拟数据吗？此操作不会影响真实后端数据。')) return;
+      API.resetSimulator();
+      try { localStorage.removeItem(SIM_STORAGE_KEY); } catch (e) {}
+      location.href = 'login.html';
+    });
   }
 
   return {

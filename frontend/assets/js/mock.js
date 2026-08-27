@@ -11,7 +11,7 @@ window.MOCK = (function () {
      地块数据（数据总览 / 数据监测用，供同伴页面调用）
      ------------------------------------------------------------------ */
   var plots = [
-    { id: 'P001', name: '一号大棚', crop: '番茄',    area: '2.5亩', temp: 26.4, humidity: 62, deviceCount: 3, onlineCount: 3 },
+    { id: 'P001', name: '一号大棚', crop: '番茄',    area: '2.5亩', temp: 26.4, humidity: 62, deviceCount: 4, onlineCount: 4 },
     { id: 'P002', name: '二号大棚', crop: '黄瓜',    area: '1.8亩', temp: 24.1, humidity: 55, deviceCount: 3, onlineCount: 3 },
     { id: 'P003', name: '三号菜地', crop: '生菜',    area: '3.0亩', temp: 28.7, humidity: 41, deviceCount: 2, onlineCount: 1 },
     { id: 'P004', name: '四号果园', crop: '草莓',    area: '1.2亩', temp: 22.8, humidity: 68, deviceCount: 3, onlineCount: 3 }
@@ -30,7 +30,8 @@ window.MOCK = (function () {
     { id: 'D005', name: '温度传感器-02',     type: '温度',       plotId: 'P002', plotName: '二号大棚', online: true,  controllable: false },
     { id: 'D006', name: '灌溉电磁阀-02',     type: '灌溉设备',   plotId: 'P002', plotName: '二号大棚', ip: '192.168.70.167', port: 8888, online: true,  controllable: true,  running: true  },
     { id: 'D007', name: '土壤湿度传感器-03', type: '土壤湿度',   plotId: 'P003', plotName: '三号菜地', online: false, controllable: false },
-    { id: 'D008', name: '灌溉电磁阀-03',     type: '灌溉设备',   plotId: 'P004', plotName: '四号果园', online: true,  controllable: true,  running: false }
+    { id: 'D008', name: '灌溉电磁阀-03',     type: '灌溉设备',   plotId: 'P004', plotName: '四号果园', online: true,  controllable: true,  running: false },
+    { id: 'D009', name: '大棚摄像头-01',     type: '摄像头',     plotId: 'P001', plotName: '一号大棚', ip: '192.168.70.168', port: 8080, protocol: 'mjpeg', online: true, controllable: false }
   ];
 
   /* ------------------------------------------------------------------
@@ -81,6 +82,189 @@ window.MOCK = (function () {
       { day: '周日', icon: '☁️', text: '阴',      high: 24, low: 18 }
     ]
   };
+
+  /* ------------------------------------------------------------------
+     持久化模拟器仓库
+     只在 API 的模拟模式下使用；真实模式不会读取或写入这些本地数据。
+     ------------------------------------------------------------------ */
+  var STATE_KEY = 'agri_simulator_state_v1';
+  var seed = {
+    plots: JSON.parse(JSON.stringify(plots)),
+    devices: JSON.parse(JSON.stringify(devices)),
+    thresholds: JSON.parse(JSON.stringify(thresholds)),
+    alarms: JSON.parse(JSON.stringify(alarms)),
+    controlLogs: JSON.parse(JSON.stringify(controlLogs)),
+    weather: JSON.parse(JSON.stringify(weather)),
+    users: [
+      { username: 'farmer01', password: '123456', name: '张老三', roleName: '农户', role: 'farmer' },
+      { username: 'admin01', password: '123456', name: '李四', roleName: '农场管理员', role: 'admin' },
+      { username: 'sysadmin01', password: '123456', name: '王五', roleName: '系统管理员', role: 'sysadmin' }
+    ],
+    registerRequests: [],
+    detectionSettings: {},
+    conversations: []
+  };
+
+  var users = [];
+  var registerRequests = [];
+  var detectionSettings = {};
+  var conversations = [];
+
+  function clone(data) { return JSON.parse(JSON.stringify(data)); }
+
+  function restore(data) {
+    plots = data.plots || clone(seed.plots);
+    devices = data.devices || clone(seed.devices);
+    thresholds = data.thresholds || clone(seed.thresholds);
+    alarms = data.alarms || clone(seed.alarms);
+    controlLogs = data.controlLogs || clone(seed.controlLogs);
+    weather = data.weather || clone(seed.weather);
+    users = data.users || clone(seed.users);
+    registerRequests = data.registerRequests || [];
+    detectionSettings = data.detectionSettings || {};
+    conversations = data.conversations || [];
+  }
+
+  function snapshot() {
+    return { version: 1, plots: plots, devices: devices, thresholds: thresholds,
+      alarms: alarms, controlLogs: controlLogs, weather: weather, users: users,
+      registerRequests: registerRequests, detectionSettings: detectionSettings, conversations: conversations };
+  }
+
+  function persist() {
+    try { localStorage.setItem(STATE_KEY, JSON.stringify(snapshot())); } catch (e) { /* 存储不可用时仍可临时演示 */ }
+  }
+
+  function hydrate() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STATE_KEY)); } catch (e) {}
+    restore(saved && saved.version === 1 ? saved : clone(seed));
+  }
+
+  function reset() {
+    try { localStorage.removeItem(STATE_KEY); } catch (e) {}
+    restore(clone(seed));
+    persist();
+  }
+
+  function findById(list, id) {
+    for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i];
+    return null;
+  }
+
+  function roleName(role) {
+    return role === 'admin' ? '农场管理员' : (role === 'sysadmin' ? '系统管理员' : '农户');
+  }
+
+  function login(username, password) {
+    var user = users.filter(function (u) { return u.username === username && u.password === password; })[0];
+    return user ? clone(user) : null;
+  }
+
+  function register(data) {
+    var used = users.some(function (u) { return u.username === data.username; }) ||
+      registerRequests.some(function (r) { return r.username === data.username && r.status === '待审核'; });
+    if (used) return { error: '账号已存在或正在审核中' };
+    var id = registerRequests.reduce(function (max, r) { return Math.max(max, Number(r.id) || 0); }, 1000) + 1;
+    var req = { id: id, username: data.username, password: data.password, role: data.role || 'farmer',
+      roleName: roleName(data.role), status: '待审核', createdAt: nowDate(), reviewer: '', reviewedAt: '', rejectReason: '' };
+    registerRequests.unshift(req);
+    persist();
+    return clone(req);
+  }
+
+  function reviewRequest(id, status, extra, reviewer) {
+    var req = findById(registerRequests, id);
+    if (!req || req.status !== '待审核') return null;
+    extra = extra || {};
+    req.status = status;
+    req.reviewer = reviewer || '模拟管理员';
+    req.reviewedAt = nowDate();
+    if (status === '已拒绝') req.rejectReason = extra.rejectReason || '';
+    if (status === '已通过') {
+      users.push({ username: req.username, password: req.password, name: extra.name || req.username,
+        role: req.role, roleName: roleName(req.role) });
+    }
+    persist();
+    return clone(req);
+  }
+
+  function saveDevice(data) {
+    var device = clone(data);
+    device.id = 'D' + (100 + devices.length + 1);
+    device.online = true;
+    device.controllable = device.type === '灌溉设备';
+    device.running = false;
+    devices.push(device);
+    var plot = findById(plots, device.plotId);
+    if (plot) { plot.deviceCount = (plot.deviceCount || 0) + 1; plot.onlineCount = (plot.onlineCount || 0) + 1; }
+    persist();
+    return clone(device);
+  }
+
+  function removeDevice(id) {
+    var device = findById(devices, id);
+    if (!device) return false;
+    devices.splice(devices.indexOf(device), 1);
+    var plot = findById(plots, device.plotId);
+    if (plot) { plot.deviceCount = Math.max(0, (plot.deviceCount || 1) - 1); if (device.online) plot.onlineCount = Math.max(0, (plot.onlineCount || 1) - 1); }
+    persist();
+    return true;
+  }
+
+  function savePlot(data) {
+    var plot = { id: 'P' + (100 + plots.length + 1), name: data.name, crop: data.crop, area: data.area + '亩', temp: null, humidity: null, deviceCount: 0, onlineCount: 0 };
+    plots.push(plot);
+    (data.devices || []).forEach(function (d) { saveDevice({ name: d.name, type: d.type, plotId: plot.id, plotName: plot.name, ip: d.ip, port: d.port, protocol: d.protocol, username: d.username, password: d.password }); });
+    persist();
+    return clone(plot);
+  }
+
+  function removePlot(id) {
+    var plot = findById(plots, id);
+    if (!plot) return false;
+    plots.splice(plots.indexOf(plot), 1);
+    devices = devices.filter(function (d) { return d.plotId !== id; });
+    alarms = alarms.filter(function (a) { return a.plotId !== id; });
+    persist();
+    return true;
+  }
+
+  function setIrrigation(id, action, operator) {
+    var device = findById(devices, id);
+    if (!device) return null;
+    device.running = action === 'on';
+    controlLogs.unshift({ id: 'L' + (1000 + controlLogs.length + 1), time: nowDate(), deviceId: device.id,
+      deviceName: device.name, plotName: device.plotName, action: device.running ? '开启' : '关闭', result: '成功', operator: operator || '模拟用户' });
+    persist();
+    return clone(device);
+  }
+
+  function setThresholds(data) { thresholds = clone(data); persist(); }
+  function setAlarmStatus(id, status) { var alarm = findById(alarms, id); if (alarm) { alarm.status = status; persist(); } return alarm ? clone(alarm) : null; }
+  function saveDetection(data) { detectionSettings[data.deviceId] = clone(data); persist(); return clone(detectionSettings[data.deviceId]); }
+  function getDetection(deviceId) { return clone(detectionSettings[deviceId] || { deviceId: deviceId, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30, workerOnline: false, workerStatus: 'simulator', workerMessage: '本地模拟模式' }); }
+
+  function saveConversation(user, messages, conversationId, reply) {
+    var conv = conversationId ? findById(conversations, conversationId) : null;
+    if (!conv) { conv = { id: String(900000 + conversations.length + 1), user: user, title: (messages[0] && messages[0].content || '新对话').slice(0, 18), messages: [] }; conversations.unshift(conv); }
+    conv.messages = clone(messages);
+    conv.messages.push({ role: 'assistant', content: reply.answer });
+    conv.messageCount = conv.messages.length;
+    conv.updatedAt = nowDate();
+    persist();
+    return clone(conv);
+  }
+
+  function deleteConversation(id, user) {
+    var conv = conversations.filter(function (c) { return String(c.id) === String(id) && c.user === user; })[0];
+    if (!conv) return false;
+    conversations.splice(conversations.indexOf(conv), 1);
+    persist();
+    return true;
+  }
+
+  hydrate();
 
   /* ------------------------------------------------------------------
      农事建议（数据总览用）
@@ -204,16 +388,30 @@ window.MOCK = (function () {
      历史数据（历史趋势用，供同伴页面调用）
      生成近 N 天、每天 4 个采样点（6/12/18/24 时）的温湿度
      ------------------------------------------------------------------ */
-  function getHistory(plotId, days) {
-    days = days || 7;
+  function getHistory(plotId, days, win) {
     var plot = plots.filter(function (p) { return p.id === plotId; })[0] || plots[0];
     var dates = [];
     var temp = [];
     var humidity = [];
     var lux = [];
-    var baseTemp = plot.temp;
-    var baseHum = plot.humidity;
+    var baseTemp = plot.temp == null ? 25 : plot.temp;
+    var baseHum = plot.humidity == null ? 55 : plot.humidity;
 
+    if (win) {
+      var count = win === '1m' ? 12 : (win === '30m' ? 30 : 24);
+      var minutes = win === '1m' ? 5 : (win === '30m' ? 1 : 60);
+      for (var n = count - 1; n >= 0; n--) {
+        var point = new Date();
+        point.setMinutes(point.getMinutes() - n * minutes);
+        dates.push((point.getMonth() + 1) + '/' + point.getDate() + ' ' + ('0' + point.getHours()).slice(-2) + ':' + ('0' + point.getMinutes()).slice(-2));
+        temp.push(Math.round((baseTemp + (Math.random() * 1.2 - 0.6)) * 10) / 10);
+        humidity.push(Math.round(Math.max(20, Math.min(90, baseHum + (Math.random() * 3 - 1.5))) * 10) / 10);
+        lux.push(Math.round(Math.max(0, Math.min(1200, 520 + (Math.random() * 90 - 45)))));
+      }
+      return { dates: dates, temp: temp, humidity: humidity, lux: lux };
+    }
+
+    days = days || 7;
     for (var i = days - 1; i >= 0; i--) {
       var d = new Date();
       d.setDate(d.getDate() - i);
@@ -412,12 +610,29 @@ window.MOCK = (function () {
      对外暴露
      ------------------------------------------------------------------ */
   return {
-    plots: plots,
-    devices: devices,
-    thresholds: thresholds,
-    alarms: alarms,
-    controlLogs: controlLogs,
-    weather: weather,
+    get plots() { return plots; },
+    get devices() { return devices; },
+    get thresholds() { return thresholds; },
+    get alarms() { return alarms; },
+    get controlLogs() { return controlLogs; },
+    get weather() { return weather; },
+    get registerRequests() { return registerRequests; },
+    get conversations() { return conversations; },
+    reset: reset,
+    login: login,
+    register: register,
+    reviewRequest: reviewRequest,
+    savePlot: savePlot,
+    removePlot: removePlot,
+    saveDevice: saveDevice,
+    removeDevice: removeDevice,
+    setIrrigation: setIrrigation,
+    setThresholds: setThresholds,
+    setAlarmStatus: setAlarmStatus,
+    saveDetection: saveDetection,
+    getDetection: getDetection,
+    saveConversation: saveConversation,
+    deleteConversation: deleteConversation,
     getAdvice: getAdvice,
     getRealtime: getRealtime,
     getHistory: getHistory,
