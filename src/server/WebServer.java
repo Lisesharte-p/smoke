@@ -76,6 +76,9 @@ public class WebServer {
         // 启动板子数据采集器（后台守护线程，周期读板子数据写入 sensor_data）
         BoardCollector.start();
 
+        // 启动飞书机器人长连接（未配置时自动跳过，不影响本地网页服务）
+        FeishuBotService.start();
+
         System.out.println("=============================================");
         System.out.println("  WebServer 已启动");
         System.out.println("  监听地址: http://localhost:" + port);

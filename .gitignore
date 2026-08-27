@@ -15,6 +15,7 @@ out/
 bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
+target/
 
 ### NetBeans ###
 /nbproject/private/
@@ -56,6 +57,9 @@ tools/ffmpeg*/
 ### PVZ 游戏本地打包产物 / Claude 本地配置 ###
 PVZ/Python_PVZ.exe
 .claude/
+
+### 飞书机器人本机密钥配置（不要提交 App Secret） ###
+config/feishu.local.properties
 
 ### Office 临时锁文件 ###
 ~$*

@@ -3566,6 +3566,7 @@ public class Api {
             ps.setString(4, level);
             ps.executeUpdate();
         }
+        FeishuBotService.pushAlarmAsync(plotId, alarmType, alarmValue, level);
     }
 
     /* ==================================================================
