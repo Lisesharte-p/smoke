@@ -54,6 +54,7 @@ window.Layout = (function () {
     history:    '历史趋势',
     map:        '重庆巡田',
     camera:     '视频监控',
+    game:       '农场守卫战',
     control:    '设备控制',
     alarm:      '告警管理',
     assistant:  '智能问答',
@@ -63,9 +64,9 @@ window.Layout = (function () {
 
   /* ---------- 角色权限配置：每个角色可访问的导航项 key ---------- */
   var ROLE_NAV = {
-    farmer:   ['dashboard', 'monitoring', 'history', 'map', 'camera', 'control', 'alarm', 'assistant'],
-    admin:    ['dashboard', 'monitoring', 'history', 'map', 'camera', 'control', 'alarm', 'assistant', 'devices', 'review'],
-    sysadmin: ['dashboard', 'monitoring', 'history', 'map', 'camera', 'control', 'alarm', 'assistant', 'devices', 'review']
+    farmer:   ['dashboard', 'monitoring', 'history', 'map', 'camera', 'game', 'control', 'alarm', 'assistant'],
+    admin:    ['dashboard', 'monitoring', 'history', 'map', 'camera', 'game', 'control', 'alarm', 'assistant', 'devices', 'review'],
+    sysadmin: ['dashboard', 'monitoring', 'history', 'map', 'camera', 'game', 'control', 'alarm', 'assistant', 'devices', 'review']
   };
 
   /* 文件名 → 页面 key，用于隐藏当前角色无权限访问的页内跳转链接 */
@@ -140,11 +141,16 @@ window.Layout = (function () {
   function renderTopbar(pageKey) {
     var u = getUser();
     var title = TITLES[pageKey] || '智慧农业平台';
+    var isGame = pageKey === 'game';
     var html = '<div class="topbar-left">' +
                '<span class="topbar-title">' + title + '</span>' +
                '<span class="topbar-breadcrumb">首页 / ' + title + '</span>' +
                '</div>';
     html += '<div class="topbar-right">' +
+            '<div class="version-switch" aria-label="前端版本切换">' +
+              '<a class="version-link' + (!isGame ? ' active' : '') + '" href="index.html">专业版</a>' +
+              '<a class="version-link' + (isGame ? ' active' : '') + '" href="game.html">游戏版</a>' +
+            '</div>' +
             '<span class="topbar-clock" id="topbarClock">--:--:--</span>' +
             '<span class="topbar-user"><span class="avatar">' + (u.name || '农').charAt(0) + '</span>' +
             u.roleName + ' · ' + u.name + '</span>' +

@@ -52,3 +52,10 @@ __pycache__/
 data/detections/
 tools/ffmpeg*/
 *.pt
+
+### PVZ 游戏本地打包产物 / Claude 本地配置 ###
+PVZ/Python_PVZ.exe
+.claude/
+
+### Office 临时锁文件 ###
+~$*
