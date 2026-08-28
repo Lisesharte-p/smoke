@@ -82,6 +82,7 @@
                   </label>
                 </div>
                 <button class="btn btn-primary btn-sm" id="saveDetectionSettings" type="button">保存识别设置</button>
+                <button class="btn btn-outline btn-sm" id="startDetectionWorker" type="button">启动 worker</button>
                 <div class="panel-text" id="detectionStatus">识别状态加载中</div>
               </div>
             </div>
@@ -133,6 +134,7 @@
     var initialRecordId = new URLSearchParams(location.search).get('recordId');
     var cameraReloadTimer = null;
     var cameraStreamSeq = 0;
+    var cameraUseProxy = false;
 
     function esc(s) {
       return String(s == null ? '' : s)
@@ -142,8 +144,22 @@
         .replace(/"/g, '&quot;');
     }
 
-    function cameraUrl(cam) {
+    function proxyCameraUrl(cam) {
       return 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+    }
+
+    function cameraAuth(cam) {
+      var username = cam && cam.username && cam.username !== 'null' ? cam.username : '';
+      var password = cam && cam.password && cam.password !== 'null' ? cam.password : '';
+      return username ? encodeURIComponent(username) + ':' + encodeURIComponent(password) + '@' : '';
+    }
+
+    function directCameraUrl(cam) {
+      return 'http://' + cameraAuth(cam) + cam.ip + ':' + cam.port + '/video?_=' + Date.now();
+    }
+
+    function cameraUrl(cam) {
+      return cameraUseProxy ? proxyCameraUrl(cam) : directCameraUrl(cam);
     }
 
     function setPlaceholder(title, sub) {
@@ -177,6 +193,12 @@
       };
       img.onerror = function () {
         if (seq !== cameraStreamSeq) return;
+        if (!cameraUseProxy) {
+          cameraUseProxy = true;
+          setPlaceholder('正在切换备用通道', '手机直连失败，正在使用同源代理。');
+          attachCameraStream(false);
+          return;
+        }
         setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');
       };
       img.src = cameraUrl(selectedCamera);
@@ -199,6 +221,7 @@
     function playCamera(cam) {
       stopCameraStream();
       selectedCamera = cam || null;
+      cameraUseProxy = false;
       renderCameraInfo(selectedCamera);
       loadDetectionStatus();
       loadDetectionRecords();
@@ -216,8 +239,8 @@
 
       attachCameraStream(true);
       cameraReloadTimer = setInterval(function () {
-        attachCameraStream(false);
-      }, 6500);
+        if (cameraUseProxy) attachCameraStream(false);
+      }, 12000);
     }
 
     function loadDetectionStatus() {
@@ -281,6 +304,25 @@
         loadDetectionStatus();
       }).catch(function (e) {
         Toast.error(e.message || '保存失败');
+      });
+    }
+
+    function startDetectionWorker() {
+      var btn = document.getElementById('startDetectionWorker');
+      btn.disabled = true;
+      btn.textContent = '正在启动...';
+      API.startDetectionWorker().then(function (res) {
+        if (!res || res.code !== 0) {
+          Toast.error((res && res.msg) || 'worker 启动失败');
+          return;
+        }
+        Toast.success((res && res.msg) || 'worker 已启动');
+        setTimeout(loadDetectionStatus, 1200);
+      }).catch(function (e) {
+        Toast.error(e.message || 'worker 启动失败');
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = '启动 worker';
       });
     }
 
@@ -412,6 +454,7 @@
       loadDetectionRecords();
     });
     document.getElementById('saveDetectionSettings').addEventListener('click', saveDetectionSettings);
+    document.getElementById('startDetectionWorker').addEventListener('click', startDetectionWorker);
     document.getElementById('recordDate').addEventListener('change', loadDetectionRecords);
     document.getElementById('clearRecordDate').addEventListener('click', function () {
       document.getElementById('recordDate').value = '';

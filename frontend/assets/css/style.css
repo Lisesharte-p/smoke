@@ -1286,6 +1286,11 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .modal-mask.show { display: flex; }
 
+#irrigationScheduleModal {
+  z-index: 240;
+  background: rgba(4, 8, 16, .72);
+}
+
 .modal {
   width: 100%;
   max-width: 440px;

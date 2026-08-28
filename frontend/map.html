@@ -25,10 +25,6 @@
               <span class="toggle-dot"></span>
               <span id="droneToggleText">无人机巡航中</span>
             </button>
-            <div class="mode-switch" id="irrigationMode">
-              <button type="button" data-mode="auto">自动灌溉</button>
-              <button class="active" type="button" data-mode="manual">手动灌溉</button>
-            </div>
             <button class="btn btn-outline btn-sm" id="refreshMap" type="button">刷新数据</button>
             <button class="btn btn-primary btn-sm" id="openMapAdd" type="button">添加地块</button>
             <button class="btn btn-primary btn-sm" id="openDroneAdd" type="button">添加无人机</button>
@@ -69,11 +65,7 @@
             </div>
 
             <div class="map-panel">
-              <div class="panel-kicker">AUTO IRRIGATION</div>
-              <div class="panel-text" id="irrigationScheduleStatus">当前未设置自动灌溉定时。</div>
-              <div class="panel-actions">
-                <button class="btn btn-outline btn-sm" id="stopAutoIrrigation" type="button">关闭自动灌溉</button>
-              </div>
+              <div class="panel-kicker">FLIGHT LOG</div>
               <div class="flight-log" id="flightLog"></div>
             </div>
           </aside>
@@ -199,6 +191,7 @@
       <div class="modal-actions">
         <button class="btn btn-outline" id="droneViewCamera" type="button">查看当前地块状况</button>
         <button class="btn btn-primary" id="droneAutoIrrigate" type="button">自动灌溉</button>
+        <button class="btn btn-outline" id="droneStopIrrigate" type="button">停止灌溉</button>
         <button class="btn btn-danger" id="deleteDrone" type="button">删除无人机</button>
         <button class="btn btn-outline" id="closeDroneDetail" type="button">关闭</button>
       </div>
@@ -256,9 +249,11 @@
       lastPanelUpdate: 0,
       droneVideoTimer: null,
       droneVideoSeq: 0,
+      droneVideoUseProxy: false,
       activeJobs: {},
       scheduleTimers: {},
       autoSchedule: null,
+      pendingIrrigationDroneId: null,
       battery: 96,
       draft: null,
       drones: [],
@@ -1027,6 +1022,21 @@
       });
     }
 
+    function setDronesSprayingForPlot(plotId, on) {
+      var changed = false;
+      state.drones.forEach(function (drone) {
+        if (drone.plotId === plotId && drone.spraying !== !!on) {
+          drone.spraying = !!on;
+          changed = true;
+        }
+      });
+      if (changed) saveDrones();
+      renderDrones();
+      if (document.getElementById('droneDetailModal').classList.contains('show')) {
+        renderDroneDetail();
+      }
+    }
+
     function controlDevice(device, action) {
       return API.controlIrrigation(device.id, action).then(function (res) {
         if (res && res.code === 0) {
@@ -1197,6 +1207,18 @@
       var img = document.getElementById('droneVideoStream');
       var placeholder = document.getElementById('droneVideoPlaceholder');
       document.getElementById('droneVideoTitle').textContent = plot.name + ' · ' + cam.name;
+      state.droneVideoUseProxy = false;
+      function camAuth() {
+        var username = cam.username && cam.username !== 'null' ? cam.username : '';
+        var password = cam.password && cam.password !== 'null' ? cam.password : '';
+        return username ? encodeURIComponent(username) + ':' + encodeURIComponent(password) + '@' : '';
+      }
+      function streamUrl() {
+        if (state.droneVideoUseProxy) {
+          return 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+        }
+        return 'http://' + camAuth() + cam.ip + ':' + cam.port + '/video?_=' + Date.now();
+      }
       function attach(showConnecting) {
         var seq = ++state.droneVideoSeq;
         if (showConnecting) {
@@ -1209,10 +1231,17 @@
         };
         img.onerror = function () {
           if (seq !== state.droneVideoSeq) return;
+          if (!state.droneVideoUseProxy) {
+            state.droneVideoUseProxy = true;
+            placeholder.style.display = 'grid';
+            placeholder.textContent = '正在切换备用通道...';
+            attach(false);
+            return;
+          }
           placeholder.style.display = 'grid';
           placeholder.textContent = '摄像头画面连接失败';
         };
-        img.src = 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+        img.src = streamUrl();
         if (showConnecting) {
           setTimeout(function () {
             if (seq === state.droneVideoSeq && img.getAttribute('src')) placeholder.style.display = 'none';
@@ -1222,8 +1251,8 @@
       clearInterval(state.droneVideoTimer);
       attach(true);
       state.droneVideoTimer = setInterval(function () {
-        attach(false);
-      }, 6500);
+        if (state.droneVideoUseProxy) attach(false);
+      }, 12000);
       document.getElementById('droneVideoModal').classList.add('show');
     }
 
@@ -1255,31 +1284,45 @@
         Toast.error('当前地块灌溉设备离线');
         return;
       }
-      drone.spraying = true;
-      saveDrones();
-      setFieldIrrigating(plot.id, true);
-      renderDrones();
-      Promise.all(online.map(function (device) { return controlDevice(device, 'on'); })).then(function (results) {
-        var ok = results.some(Boolean);
-        if (!ok) {
-          drone.spraying = false;
-          setFieldIrrigating(plot.id, false);
-          renderDrones();
-          Toast.error('灌溉设备控制失败');
+      openIrrigationScheduleModal(plot.id, drone.id);
+    }
+
+    function droneStopIrrigate() {
+      var drone = droneById(state.selectedDroneId);
+      var plot = drone && plotById(drone.plotId);
+      if (!drone || !plot) {
+        Toast.error('请先选择绑定地块');
+        return;
+      }
+      var schedule = state.autoSchedule;
+      if (schedule && schedule.plotId === plot.id) {
+        clearScheduleTimers();
+        if (schedule.running) {
+          stopScheduledIrrigation(plot).then(function () {
+            pushLog(drone.name + ' 已手动停止 ' + plot.name + ' 的自动灌溉。', 'good');
+          });
           return;
         }
-        pushLog(drone.name + ' 已打开 ' + plot.name + ' 的灌溉设备。', 'warn');
-        Toast.success('自动灌溉已启动');
+        state.autoSchedule = null;
+        setIrrigationMode('manual');
+        setDronesSprayingForPlot(plot.id, false);
+        setFieldIrrigating(plot.id, false);
+        pushLog(drone.name + ' 已取消 ' + plot.name + ' 的自动灌溉定时。', 'good');
+        Toast.success('自动灌溉定时已取消');
+        return;
+      }
+      var runningDevices = waterDevicesForPlot(plot.id, false).filter(function (d) { return d.running; });
+      if (!runningDevices.length && !drone.spraying) {
+        Toast.error('当前地块未在灌溉');
+        return;
+      }
+      Promise.all(runningDevices.map(function (device) { return controlDevice(device, 'off'); })).finally(function () {
+        state.activeJobs[plot.id] = false;
+        setDronesSprayingForPlot(plot.id, false);
+        setFieldIrrigating(plot.id, false);
+        pushLog(drone.name + ' 已停止 ' + plot.name + ' 的灌溉。', 'good');
+        Toast.success('灌溉已停止');
         renderSelected();
-        setTimeout(function () {
-          Promise.all(online.map(function (device) { return controlDevice(device, 'off'); })).finally(function () {
-            drone.spraying = false;
-            setFieldIrrigating(plot.id, false);
-            saveDrones();
-            renderMap();
-            pushLog(drone.name + ' 已完成 ' + plot.name + ' 喷水演示。', 'good');
-          });
-        }, 12000);
       });
     }
 
@@ -1329,10 +1372,10 @@
       updateDronePanel();
     }
 
-    function fillSchedulePlotOptions() {
+    function fillSchedulePlotOptions(fixedPlotId) {
       var sel = document.getElementById('schedulePlotSelect');
       sel.innerHTML = '';
-      var preferred = state.selectedPlotId;
+      var preferred = fixedPlotId || state.selectedPlotId;
       var firstWithWater = null;
       state.plots.forEach(function (plot) {
         var count = waterDevicesForPlot(plot.id, true).length;
@@ -1343,23 +1386,30 @@
         sel.appendChild(opt);
       });
       sel.value = preferred || firstWithWater || (state.plots[0] && state.plots[0].id) || '';
+      sel.disabled = !!fixedPlotId;
     }
 
-    function openIrrigationScheduleModal() {
+    function openIrrigationScheduleModal(plotId, droneId) {
       if (!state.plots.length) {
         Toast.error('暂无地块，无法设置自动灌溉');
         return;
       }
-      fillSchedulePlotOptions();
+      state.pendingIrrigationDroneId = droneId || null;
+      fillSchedulePlotOptions(plotId);
       var now = new Date();
       now.setSeconds(0, 0);
       var later = new Date(now.getTime() + 30 * 60 * 1000);
       document.getElementById('scheduleStartTime').value = state.autoSchedule ? state.autoSchedule.startTime : timeValue(now);
       document.getElementById('scheduleEndTime').value = state.autoSchedule ? state.autoSchedule.endTime : timeValue(later);
+      var hint = document.getElementById('scheduleHint');
+      var plot = plotById(plotId);
+      hint.textContent = (plot ? '当前将为「' + plot.name + '」设置定时灌溉。' : '') + '灌溉只控制设备启停，湿度数值仍以传感器采集为准。';
       document.getElementById('irrigationScheduleModal').classList.add('show');
     }
 
     function closeIrrigationScheduleModal() {
+      state.pendingIrrigationDroneId = null;
+      document.getElementById('schedulePlotSelect').disabled = false;
       document.getElementById('irrigationScheduleModal').classList.remove('show');
     }
 
@@ -1376,6 +1426,7 @@
         if (ok) {
           if (state.autoSchedule) state.autoSchedule.running = true;
           setFieldIrrigating(plot.id, true);
+          setDronesSprayingForPlot(plot.id, true);
           pushLog(plot.name + ' 定时自动灌溉已启动，湿度仍以传感器实时采集为准。', 'warn');
           Toast.success('自动灌溉已启动');
           renderSelected();
@@ -1393,6 +1444,7 @@
         if (state.autoSchedule) state.autoSchedule.running = false;
         state.activeJobs[plot.id] = false;
         setFieldIrrigating(plot.id, false);
+        setDronesSprayingForPlot(plot.id, false);
         pushLog(plot.name + ' 定时自动灌溉已结束，湿度数据未被灌溉逻辑改写。', 'good');
         if (state.autoSchedule && state.autoSchedule.plotId === plot.id) {
           state.autoSchedule = null;
@@ -1460,7 +1512,8 @@
     }
 
     function confirmIrrigationSchedule() {
-      var plotId = document.getElementById('schedulePlotSelect').value;
+      var drone = droneById(state.pendingIrrigationDroneId);
+      var plotId = drone && drone.plotId ? drone.plotId : document.getElementById('schedulePlotSelect').value;
       var startTime = document.getElementById('scheduleStartTime').value;
       var endTime = document.getElementById('scheduleEndTime').value;
       var plot = plotById(plotId);
@@ -1479,6 +1532,7 @@
       }
       state.autoSchedule = {
         plotId: plot.id,
+        droneId: drone ? drone.id : null,
         startTime: startTime,
         endTime: endTime,
         startAt: dates.startAt.getTime(),
@@ -1488,7 +1542,7 @@
       setIrrigationMode('auto');
       armIrrigationSchedule();
       closeIrrigationScheduleModal();
-      pushLog(plot.name + ' 已设置自动灌溉定时：' + startTime + '-' + endTime + '。', 'good');
+      pushLog((drone ? drone.name + ' 已为 ' : '') + plot.name + ' 设置自动灌溉定时：' + startTime + '-' + endTime + '。', 'good');
       Toast.success('自动灌溉定时已保存');
     }
 
@@ -1945,18 +1999,6 @@
       renderDrones();
       updateDronePanel();
     });
-    document.querySelectorAll('#irrigationMode button').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var mode = btn.getAttribute('data-mode');
-        if (mode === 'auto') {
-          openIrrigationScheduleModal();
-          return;
-        }
-        cancelIrrigationSchedule(true);
-        setIrrigationMode('manual');
-        pushLog('已切换为手动灌溉模式，自动定时任务已取消。', 'good');
-      });
-    });
     document.getElementById('refreshMap').addEventListener('click', function () { loadAll(); });
     document.getElementById('openMapAdd').addEventListener('click', function () { openAddModal(); });
     document.getElementById('openDroneAdd').addEventListener('click', openDroneAddModal);
@@ -1968,6 +2010,7 @@
     });
     document.getElementById('droneViewCamera').addEventListener('click', openDroneCameraView);
     document.getElementById('droneAutoIrrigate').addEventListener('click', droneAutoIrrigate);
+    document.getElementById('droneStopIrrigate').addEventListener('click', droneStopIrrigate);
     document.getElementById('deleteDrone').addEventListener('click', deleteSelectedDrone);
     document.getElementById('closeDroneVideo').addEventListener('click', closeDroneVideoModal);
     document.getElementById('droneAddModal').addEventListener('click', function (e) {
@@ -2000,7 +2043,6 @@
     document.getElementById('addMapDevRow').addEventListener('click', function () { addDeviceRow(); });
     document.getElementById('cancelMapAdd').addEventListener('click', closeAddModal);
     document.getElementById('confirmMapAdd').addEventListener('click', confirmAddPlot);
-    document.getElementById('stopAutoIrrigation').addEventListener('click', stopAutoIrrigationNow);
     document.getElementById('cancelIrrigationSchedule').addEventListener('click', closeIrrigationScheduleModal);
     document.getElementById('confirmIrrigationSchedule').addEventListener('click', confirmIrrigationSchedule);
     document.getElementById('irrigationScheduleModal').addEventListener('click', function (e) {

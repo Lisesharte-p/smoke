@@ -32,6 +32,7 @@ window.API = (function () {
       detectionRecords: '/api/camera/detection-records',
       detectionStatus:  '/api/camera/detection/status',
       detectionSettings:'/api/camera/detection/settings',
+      detectionWorkerStart: '/api/camera/detection/worker/start',
       chat:       '/api/assistant/chat',
       conversations: '/api/conversations',
       conversation:   '/api/conversations/{id}'
@@ -505,6 +506,11 @@ window.API = (function () {
     return request(config.endpoints.detectionSettings, { method: 'POST', data: data });
   }
 
+  function startDetectionWorker() {
+    if (config.useMock) return mockDelay({ code: 0, data: { running: true }, msg: 'worker 已启动' }, 300);
+    return request(config.endpoints.detectionWorkerStart, { method: 'POST' });
+  }
+
   /* ==================================================================
      农事建议（根据实时数据动态生成）
      ================================================================== */
@@ -602,6 +608,7 @@ window.API = (function () {
     getDetectionRecord: getDetectionRecord,
     getDetectionStatus: getDetectionStatus,
     saveDetectionSettings: saveDetectionSettings,
+    startDetectionWorker: startDetectionWorker,
     getAdvice: getAdvice,
     getWeather: getWeather,
     getChatReply: getChatReply,

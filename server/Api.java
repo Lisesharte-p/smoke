@@ -98,6 +98,8 @@ public class Api {
     private static final Path DETECTION_STORAGE = Paths.get(env("DETECTION_STORAGE_DIR", "data/detections"))
             .toAbsolutePath().normalize();
     private static final String DETECTION_WORKER_TOKEN = env("DETECTION_WORKER_TOKEN", "");
+    private static final Object DETECTION_WORKER_LOCK = new Object();
+    private static volatile Process detectionWorkerProcess = null;
 
     /** 处理 /api/* 请求，返回 true 表示已处理（false 交给 WebServer 走静态页面） */
     public static boolean handle(HttpExchange ex) throws IOException {
@@ -168,6 +170,10 @@ public class Api {
             }
             if ("POST".equals(method) && path.equals("/api/camera/detection/settings")) {
                 ok(ex, saveDetectionSettingsJson(ex));
+                return true;
+            }
+            if ("POST".equals(method) && path.equals("/api/camera/detection/worker/start")) {
+                ok(ex, startDetectionWorkerJson(ex));
                 return true;
             }
             if ("GET".equals(method) && path.equals("/api/internal/camera-configs")) {
@@ -1380,6 +1386,52 @@ public class Api {
             ps.executeUpdate();
         }
         return detectionStatusJson("deviceId=" + deviceId);
+    }
+
+    /** POST /api/camera/detection/worker/start —— 从页面启动本机人体识别 worker。 */
+    private static String startDetectionWorkerJson(HttpExchange ex) {
+        synchronized (DETECTION_WORKER_LOCK) {
+            if (detectionWorkerProcess != null && detectionWorkerProcess.isAlive()) {
+                return "{\"code\":0,\"msg\":" + Json.str("worker 已在运行") +
+                        ",\"data\":{\"running\":true,\"pid\":" + detectionWorkerProcess.pid() + "}}";
+            }
+
+            Path root = Paths.get("").toAbsolutePath().normalize();
+            Path python = root.resolve(".venv-detection").resolve("Scripts").resolve("python.exe");
+            Path script = root.resolve("workers").resolve("human_detection_worker.py");
+            Path outLog = root.resolve("worker.run.out.log");
+            Path errLog = root.resolve("worker.run.err.log");
+            Path ffmpeg = root.resolve("tools").resolve("ffmpeg-9.0.1-essentials_build").resolve("bin").resolve("ffmpeg.exe");
+
+            if (!Files.exists(python)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到 worker Python 环境：" + python) + "}";
+            }
+            if (!Files.exists(script)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到 worker 脚本：" + script) + "}";
+            }
+
+            try {
+                ProcessBuilder pb = new ProcessBuilder(python.toString(), "-u", script.toString());
+                pb.directory(root.toFile());
+                Map<String, String> procEnv = pb.environment();
+                procEnv.put("SERVER_URL", "http://localhost:" + ex.getLocalAddress().getPort());
+                procEnv.put("DETECTION_STORAGE_DIR", env("DETECTION_STORAGE_DIR", root.resolve("data").resolve("detections").toString()));
+                procEnv.put("YOLO_MODEL", env("YOLO_MODEL", root.resolve("models").resolve("yolov8n.pt").toString()));
+                if (Files.exists(ffmpeg)) {
+                    procEnv.put("FFMPEG_PATH", env("FFMPEG_PATH", ffmpeg.toString()));
+                }
+                if (!DETECTION_WORKER_TOKEN.isEmpty()) {
+                    procEnv.put("DETECTION_WORKER_TOKEN", DETECTION_WORKER_TOKEN);
+                }
+                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(outLog.toFile()));
+                pb.redirectError(ProcessBuilder.Redirect.appendTo(errLog.toFile()));
+                detectionWorkerProcess = pb.start();
+                return "{\"code\":0,\"msg\":" + Json.str("worker 启动中") +
+                        ",\"data\":{\"running\":true,\"pid\":" + detectionWorkerProcess.pid() + "}}";
+            } catch (IOException e) {
+                return "{\"code\":1,\"msg\":" + Json.str("worker 启动失败：" + e.getMessage()) + "}";
+            }
+        }
     }
 
     private static class DetectionSetting {
