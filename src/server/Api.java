@@ -3848,13 +3848,15 @@ public class Api {
                 if (rs.next()) return;
             }
         }
+        String alarmValue = String.join("；", details);
+        String level = severe || details.size() >= 2 ? "严重" : "警告";
         String ins = "INSERT INTO alarm(plot_id, alarm_type, value, level, status) VALUES (?, ?, ?, ?, '未处理')";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(ins)) {
             ps.setString(1, plotId);
             ps.setString(2, alarmType);
-            ps.setString(3, String.join("；", details));
-            ps.setString(4, severe || details.size() >= 2 ? "严重" : "警告");
+            ps.setString(3, alarmValue);
+            ps.setString(4, level);
             ps.executeUpdate();
         }
         FeishuBotService.pushAlarmAsync(plotId, alarmType, alarmValue, level);
