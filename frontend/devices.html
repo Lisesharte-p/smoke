@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>设备管理 - 智慧农业平台</title>
+  <script>
+    // 提前应用主题，避免加载闪烁（FOUC）
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('agri_theme') || 'dark'); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body data-page="devices">
@@ -108,6 +112,31 @@
     </div>
   </div>
 
+  <!-- 修改设备地址弹窗 -->
+  <div class="modal-mask" id="editModal">
+    <div class="modal">
+      <div class="modal-title">修改设备地址</div>
+      <div class="form-group">
+        <label class="form-label">设备</label>
+        <input type="text" class="form-control" id="editDevName" disabled>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">设备 IP</label>
+          <input type="text" class="form-control" id="editDevIp" placeholder="如 192.168.43.95">
+        </div>
+        <div class="form-group">
+          <label class="form-label">设备端口</label>
+          <input type="number" class="form-control" id="editDevPort" min="1" max="65535" placeholder="如 8888">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelEdit">取消</button>
+        <button class="btn btn-primary" id="confirmEdit">保存修改</button>
+      </div>
+    </div>
+  </div>
+
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
@@ -117,6 +146,8 @@
 
     var devices = [];
     var plots = [];
+    var editingDevice = null;
+    var statusRefreshTimers = [];
 
     /* ---------- 类型徽章 ---------- */
     function typeBadge(type) {
@@ -143,11 +174,12 @@
       devices.forEach(function (dev) {
         var status = dev.online
           ? '<span class="badge badge-online"><span class="dot"></span>在线</span>'
-          : '<span class="badge badge-offline"><span class="dot"></span>离线</span>';
+          : '<span class="badge badge-offline"><span class="dot"></span>连接失败</span>';
 
         var controlBtn = dev.controllable
           ? '<a class="btn btn-sm btn-outline" href="control.html">🎛️ 去控制</a>'
           : '';
+        var editBtn = '<button class="btn btn-sm btn-primary" data-edit-id="' + dev.id + '">修改</button>';
 
         var tr = document.createElement('tr');
         tr.innerHTML =
@@ -158,15 +190,48 @@
           '<td>' + protocolLabel(dev) + '</td>' +
           '<td>' + status + '</td>' +
           '<td><div class="flex gap-8">' + controlBtn +
-          '<button class="btn btn-sm btn-danger" data-id="' + dev.id + '">解绑</button></div></td>';
+          editBtn +
+          '<button class="btn btn-sm btn-danger" data-unbind-id="' + dev.id + '">解绑</button></div></td>';
         body.appendChild(tr);
       });
 
-      body.querySelectorAll('button[data-id]').forEach(function (btn) {
+      body.querySelectorAll('button[data-edit-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          handleUnbind(btn.getAttribute('data-id'));
+          openEditModal(btn.getAttribute('data-edit-id'));
         });
       });
+      body.querySelectorAll('button[data-unbind-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          handleUnbind(btn.getAttribute('data-unbind-id'));
+        });
+      });
+    }
+
+    function refreshDevices() {
+      return API.getDevices().then(function (res) {
+        if (res.code !== 0) {
+          Toast.error(res.msg || '设备状态刷新失败');
+          return;
+        }
+        devices = res.data || [];
+        renderDevices();
+      });
+    }
+
+    function scheduleStatusRefresh() {
+      statusRefreshTimers.forEach(function (timer) { clearTimeout(timer); });
+      statusRefreshTimers = [1500, 4000, 8000].map(function (delay) {
+        return setTimeout(refreshDevices, delay);
+      });
+    }
+
+    function openEditModal(id) {
+      editingDevice = devices.filter(function (d) { return d.id === id; })[0] || null;
+      if (!editingDevice) return;
+      document.getElementById('editDevName').value = editingDevice.name + '（' + editingDevice.id + '）';
+      document.getElementById('editDevIp').value = editingDevice.ip || '';
+      document.getElementById('editDevPort').value = editingDevice.port || '';
+      document.getElementById('editModal').classList.add('show');
     }
 
     /* ---------- 解绑设备 ---------- */
@@ -196,6 +261,7 @@
 
     /* ---------- 弹窗控制 ---------- */
     var modal = document.getElementById('addModal');
+    var editModal = document.getElementById('editModal');
     function toggleCameraFields() {
       var isCamera = document.getElementById('devType').value === '摄像头';
       document.getElementById('cameraFields').style.display = isCamera ? 'block' : 'none';
@@ -214,6 +280,10 @@
     });
     document.getElementById('cancelAdd').addEventListener('click', function () {
       modal.classList.remove('show');
+    });
+    document.getElementById('cancelEdit').addEventListener('click', function () {
+      editModal.classList.remove('show');
+      editingDevice = null;
     });
 
     /* ---------- 确认添加 ---------- */
@@ -251,11 +321,43 @@
       });
     });
 
-    /* ---------- 初始化 ---------- */
-    API.getDevices().then(function (res) {
-      devices = res.data;
-      renderDevices();
+    /* ---------- 确认修改 ---------- */
+    document.getElementById('confirmEdit').addEventListener('click', function () {
+      if (!editingDevice) return;
+      var currentDevice = editingDevice;
+      var ip = document.getElementById('editDevIp').value.trim();
+      var port = parseInt(document.getElementById('editDevPort').value.trim(), 10);
+      var btn = document.getElementById('confirmEdit');
+
+      if (!ip) { Toast.error('请输入设备 IP'); return; }
+      if (isNaN(port) || port < 1 || port > 65535) { Toast.error('请输入 1-65535 之间的端口'); return; }
+
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+      API.updateDevice(currentDevice.id, { ip: ip, port: port }).then(function (res) {
+        if (res.code !== 0) { Toast.error(res.msg || '修改失败'); return; }
+        var updated = res.data;
+        devices = devices.map(function (dev) {
+          return dev.id === currentDevice.id ? updated : dev;
+        });
+        renderDevices();
+        editModal.classList.remove('show');
+        editingDevice = null;
+        if (updated && updated.online) {
+          Toast.success('地址已更新，设备在线');
+        } else {
+          Toast.error('地址已保存，但连接失败，设备已标记为离线');
+        }
+        refreshDevices();
+        scheduleStatusRefresh();
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = '保存修改';
+      });
     });
+
+    /* ---------- 初始化 ---------- */
+    refreshDevices();
     API.getPlots().then(function (res) {
       plots = res.data;
       fillPlotSelect();

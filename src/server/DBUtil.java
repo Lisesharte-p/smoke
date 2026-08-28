@@ -20,7 +20,7 @@ import java.sql.Statement;
 public class DBUtil {
 
     // ================== 连接配置（默认连共享库，可用环境变量覆盖） ==================
-    public static final String HOST = env("DB_HOST", "192.168.70.188");
+    public static final String HOST = env("DB_HOST", "192.168.70.189");
     public static final int    PORT = Integer.parseInt(env("DB_PORT", "3306"));
     public static final String DB   = env("DB_NAME", "farm");
     public static final String USER = env("DB_USER", "newuser");
@@ -167,6 +167,41 @@ public class DBUtil {
             System.out.println("[DBUtil] 设备摄像头接入字段已就绪");
         } catch (SQLException e) {
             System.out.println("[DBUtil] 检查设备摄像头接入字段失败: " + e.getMessage());
+        }
+    }
+
+    /** 确保地块表包含巡田地图轮廓与作物样式字段（旧库自动补列）。 */
+    public static void ensurePlotMapColumns() {
+        try (Connection conn = getConnection();
+             Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "plot", "map_shape")) {
+                st.execute("ALTER TABLE plot ADD COLUMN map_shape TEXT DEFAULT NULL COMMENT '重庆巡田地图轮廓 JSON' AFTER area");
+            }
+            if (!columnExists(conn, "plot", "crop_style")) {
+                st.execute("ALTER TABLE plot ADD COLUMN crop_style VARCHAR(20) DEFAULT NULL COMMENT '地图作物形态' AFTER map_shape");
+            }
+            System.out.println("[DBUtil] 地块巡田地图字段已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 检查地块巡田地图字段失败: " + e.getMessage());
+        }
+    }
+
+    /** 确保告警表包含处理日志字段（旧库自动补列）。 */
+    public static void ensureAlarmHandleColumns() {
+        try (Connection conn = getConnection();
+             Statement st = conn.createStatement()) {
+            if (!columnExists(conn, "alarm", "handled_at")) {
+                st.execute("ALTER TABLE alarm ADD COLUMN handled_at DATETIME DEFAULT NULL COMMENT '处理时间' AFTER status");
+            }
+            if (!columnExists(conn, "alarm", "handler")) {
+                st.execute("ALTER TABLE alarm ADD COLUMN handler VARCHAR(50) DEFAULT NULL COMMENT '处理人' AFTER handled_at");
+            }
+            if (!columnExists(conn, "alarm", "handle_log")) {
+                st.execute("ALTER TABLE alarm ADD COLUMN handle_log TEXT DEFAULT NULL COMMENT '处理日志' AFTER handler");
+            }
+            System.out.println("[DBUtil] 告警处理字段已就绪");
+        } catch (SQLException e) {
+            System.out.println("[DBUtil] 检查告警处理字段失败: " + e.getMessage());
         }
     }
 

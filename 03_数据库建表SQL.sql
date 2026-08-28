@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS `alarm` (
     `created_at` DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '触发时间',
     `handled_at` DATETIME     DEFAULT NULL COMMENT '处理时间',
     `handler`    VARCHAR(50)  DEFAULT NULL COMMENT '处理人',
+    `handle_log` TEXT         DEFAULT NULL COMMENT '处理日志',
     KEY `idx_plot_time` (`plot_id`, `created_at`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '告警表';
 

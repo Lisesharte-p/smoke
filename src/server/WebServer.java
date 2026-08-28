@@ -68,6 +68,8 @@ public class WebServer {
         DBUtil.ensureKnowledgeTables();
         DBUtil.ensureThresholdColumns();
         DBUtil.ensureDeviceCameraColumns();
+        DBUtil.ensurePlotMapColumns();
+        DBUtil.ensureAlarmHandleColumns();
         DBUtil.ensureDetectionTables();
 
         // 加载智能问答知识库（RAG 检索用，启动时预载入内存）

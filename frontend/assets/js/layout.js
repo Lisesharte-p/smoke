@@ -102,6 +102,9 @@ window.Layout = (function () {
 
   /* 退出登录：清除当前模式的登录态并回到登录页（切换账户） */
   function logout() {
+    if (window.API && typeof API.showPageLoader === 'function') {
+      API.showPageLoader(['正在切换账户', '正在返回登录页', '正在清理页面状态']);
+    }
     try { localStorage.removeItem(storageKey()); } catch (e) {}
     location.href = 'login.html';
   }
@@ -164,6 +167,7 @@ window.Layout = (function () {
             '<span class="topbar-user"><span class="avatar">' + (u.name || '农').charAt(0) + '</span>' +
             u.roleName + ' · ' + u.name + '</span>' +
             modeHtml +
+            Theme.buttonHtml() +
             '<a class="topbar-logout" id="logoutBtn" href="javascript:;" title="退出并切换账户">切换账户</a>' +
             '</div>';
     document.getElementById('topbar').innerHTML = html;
@@ -203,18 +207,58 @@ window.Layout = (function () {
     }
   }
 
+  function isPlainLeftClick(e) {
+    return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+  }
+
+  function bindFastNavigation() {
+    document.addEventListener('click', function (e) {
+      if (!isPlainLeftClick(e)) return;
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      if (a.target && a.target !== '_self') return;
+      if (a.hasAttribute('download')) return;
+
+      var href = a.getAttribute('href') || '';
+      if (!href || href.charAt(0) === '#' || /^javascript:|^mailto:|^tel:/i.test(href)) return;
+
+      var url;
+      try {
+        url = new URL(href, location.href);
+      } catch (err) {
+        return;
+      }
+      if (url.origin !== location.origin) return;
+      if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
+
+      e.preventDefault();
+      if (document.body.classList.contains('page-leaving')) return;
+      document.body.classList.add('page-leaving');
+      if (window.API && typeof API.showPageLoader === 'function') {
+        API.showPageLoader(['正在打开页面', '正在准备页面数据', '正在同步最新状态']);
+      }
+      location.href = url.href;
+    });
+  }
+
   /* ---------- 入口：页面加载时调用 Layout.init() ---------- */
   function init() {
     var pageKey = document.body.getAttribute('data-page') || '';
 
     // 1) 未登录 → 回登录页
     if (!isLoggedIn()) {
+      if (window.API && typeof API.showPageLoader === 'function') {
+        API.showPageLoader(['正在进入登录页', '正在准备身份验证', '正在加载页面']);
+      }
       location.replace('login.html');
       return;
     }
 
     // 2) 无权限访问当前页 → 回数据总览（所有角色均可访问）
     if (pageKey && !canAccess(pageKey)) {
+      if (window.API && typeof API.showPageLoader === 'function') {
+        API.showPageLoader(['正在返回数据总览', '正在检查访问权限', '正在加载页面']);
+      }
       location.replace('index.html');
       return;
     }
@@ -223,6 +267,7 @@ window.Layout = (function () {
     renderTopbar(pageKey);
     hideRestrictedLinks();
     startClock();
+    bindFastNavigation();
 
     // 绑定「切换账户」按钮
     var logoutBtn = document.getElementById('logoutBtn');
@@ -257,6 +302,83 @@ window.Layout = (function () {
     canAccess: canAccess,
     isLoggedIn: isLoggedIn
   };
+})();
+
+/* ==========================================================================
+   主题管理（浅色 / 深色切换，所有页面共享）
+   通过 <html data-theme="dark|light"> 切换；偏好持久化到 localStorage
+   ========================================================================== */
+window.Theme = (function () {
+  var KEY = 'agri_theme';
+
+  function get() {
+    try { return localStorage.getItem(KEY) || 'dark'; } catch (e) { return 'dark'; }
+  }
+
+  function isLight() { return get() === 'light'; }
+
+  function apply(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    window.dispatchEvent(new CustomEvent('agri:themechange', { detail: { theme: theme } }));
+  }
+
+  /* 刷新页面上所有主题按钮的图标 / 提示 */
+  function syncButtons(theme) {
+    var light = theme === 'light';
+    var btns = document.querySelectorAll('[data-theme-toggle]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].innerHTML = light ? '🌙' : '☀️';
+      btns[i].title = light ? '切换到深色模式' : '切换到浅色模式';
+    }
+  }
+
+  function toggle() {
+    var next = isLight() ? 'dark' : 'light';
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    apply(next);
+    syncButtons(next);
+    return next;
+  }
+
+  function init() {
+    var t = get();
+    apply(t);
+    syncButtons(t);
+  }
+
+  function bind() {
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('[data-theme-toggle]') : null;
+      if (btn) toggle();
+    });
+  }
+
+  /* 生成顶栏切换按钮 HTML（供 renderTopbar 使用） */
+  function buttonHtml() {
+    var light = isLight();
+    return '<button class="theme-toggle" data-theme-toggle title="' +
+           (light ? '切换到深色模式' : '切换到浅色模式') + '">' +
+           (light ? '🌙' : '☀️') + '</button>';
+  }
+
+  return {
+    get: get,
+    isLight: isLight,
+    toggle: toggle,
+    init: init,
+    bind: bind,
+    buttonHtml: buttonHtml
+  };
+})();
+
+/* 页面加载时自动初始化主题 + 绑定切换（layout.js 在 body 末尾加载，DOM 已就绪） */
+(function () {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { Theme.init(); Theme.bind(); });
+  } else {
+    Theme.init();
+    Theme.bind();
+  }
 })();
 
 /* ==========================================================================

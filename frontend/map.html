@@ -25,58 +25,21 @@
               <span class="toggle-dot"></span>
               <span id="droneToggleText">无人机巡航中</span>
             </button>
-            <div class="mode-switch" id="irrigationMode">
-              <button class="active" type="button" data-mode="auto">自动灌溉</button>
-              <button type="button" data-mode="manual">手动灌溉</button>
-            </div>
             <button class="btn btn-outline btn-sm" id="refreshMap" type="button">刷新数据</button>
             <button class="btn btn-primary btn-sm" id="openMapAdd" type="button">添加地块</button>
+            <button class="btn btn-primary btn-sm" id="openDroneAdd" type="button">添加无人机</button>
           </div>
         </div>
 
         <div class="map-workspace">
           <section class="cq-map-shell">
             <div class="cq-map" id="cqMap">
-              <svg class="cq-terrain" viewBox="0 0 1000 640" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <linearGradient id="landGlow" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0" stop-color="#16301f"/>
-                    <stop offset=".48" stop-color="#0f2b35"/>
-                    <stop offset="1" stop-color="#123421"/>
-                  </linearGradient>
-                  <linearGradient id="riverGlow" x1="0" x2="1" y1="0" y2="0">
-                    <stop offset="0" stop-color="#0ea5e9"/>
-                    <stop offset=".5" stop-color="#67e8f9"/>
-                    <stop offset="1" stop-color="#22d3ee"/>
-                  </linearGradient>
-                </defs>
-                <path class="cq-boundary" d="M101,356 C89,260 147,165 256,126 C346,91 437,113 507,80 C604,35 707,63 788,130 C878,203 927,321 894,426 C862,529 746,582 619,560 C530,545 458,592 354,562 C244,530 118,470 101,356 Z" />
-                <path class="cq-ridge ridge-a" d="M172 214 C279 166 360 189 446 148 C540 102 654 112 760 176" />
-                <path class="cq-ridge ridge-b" d="M154 445 C250 390 347 420 437 374 C545 320 652 337 828 278" />
-                <path class="cq-river river-a" d="M60 378 C168 350 225 294 326 302 C464 314 516 407 650 398 C775 390 843 324 960 312" />
-                <path class="cq-river river-b" d="M222 70 C268 169 315 246 423 291 C505 326 547 389 579 525" />
-                <path class="cq-road" d="M135 316 C253 265 401 253 520 285 C643 318 721 386 870 395" />
-                <path class="cq-road road-b" d="M290 520 C346 415 433 365 551 336 C637 315 717 242 823 193" />
-              </svg>
-
-              <div class="map-grid-lines"></div>
-              <div class="map-label city-a">嘉陵江</div>
-              <div class="map-label city-b">长江</div>
-              <div class="map-label city-c">两江新区</div>
-              <div class="map-scan"></div>
-              <div class="add-slot-layer" id="slotLayer"></div>
+              <div class="map-photo-layer" aria-hidden="true"></div>
+              <svg class="field-layer-svg" id="fieldLayerSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
               <div class="field-layer" id="fieldLayer"></div>
-
-              <div class="drone active" id="drone" aria-hidden="true">
-                <span class="rotor rotor-nw"></span>
-                <span class="rotor rotor-ne"></span>
-                <span class="rotor rotor-sw"></span>
-                <span class="rotor rotor-se"></span>
-                <span class="drone-body">
-                  <span class="drone-eye"></span>
-                </span>
-                <span class="drone-beam"></span>
-              </div>
+              <svg class="plot-draw-layer" id="drawLayer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <div class="map-draw-tip" id="mapDrawTip">在地图上点击勾勒地块轮廓，至少 3 个点。</div>
+              <div class="drone-layer" id="droneLayer"></div>
 
               <div class="map-empty" id="mapEmpty">
                 <div class="empty-title">暂无地块接入巡田地图</div>
@@ -102,7 +65,7 @@
             </div>
 
             <div class="map-panel">
-              <div class="panel-kicker">AUTO IRRIGATION</div>
+              <div class="panel-kicker">FLIGHT LOG</div>
               <div class="flight-log" id="flightLog"></div>
             </div>
           </aside>
@@ -130,9 +93,19 @@
           <input type="number" class="form-control" id="mapPlotArea" min="0.1" step="0.1" placeholder="如：2.4">
         </div>
         <div class="form-group">
-          <label class="form-label">地图点位</label>
-          <select class="form-control" id="mapSlotSelect"></select>
+          <label class="form-label">生成方式</label>
+          <div class="mode-switch plot-create-mode" id="plotCreateMode">
+            <button class="active" type="button" data-create-mode="draw">手绘轮廓</button>
+            <button type="button" data-create-mode="recommend">推荐地块</button>
+          </div>
         </div>
+      </div>
+      <select class="form-control" id="mapSlotSelect" style="display:none"></select>
+      <div class="plot-shape-tools">
+        <button class="btn btn-outline btn-sm" id="undoDrawPoint" type="button">撤销点</button>
+        <button class="btn btn-outline btn-sm" id="resetDrawPlot" type="button">一键清空</button>
+        <button class="btn btn-outline btn-sm" id="recommendPlot" type="button">推荐地块</button>
+        <span id="shapeStatus">请在地图上点击勾勒轮廓。</span>
       </div>
       <div class="form-group mb-0">
         <label class="form-label">作物形态</label>
@@ -155,6 +128,101 @@
       <div class="modal-actions">
         <button class="btn btn-outline" id="cancelMapAdd" type="button">取消</button>
         <button class="btn btn-primary" id="confirmMapAdd" type="button">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="irrigationScheduleModal">
+    <div class="modal irrigation-modal">
+      <div class="modal-title">自动灌溉定时</div>
+      <div class="form-group">
+        <label class="form-label">执行地块</label>
+        <select class="form-control" id="schedulePlotSelect"></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group mb-0">
+          <label class="form-label">开始时间</label>
+          <input type="time" class="form-control" id="scheduleStartTime" step="60">
+        </div>
+        <div class="form-group mb-0">
+          <label class="form-label">结束时间</label>
+          <input type="time" class="form-control" id="scheduleEndTime" step="60">
+        </div>
+      </div>
+      <div class="form-hint mt-12" id="scheduleHint">灌溉只控制设备启停，湿度数值仍以传感器采集为准。</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelIrrigationSchedule" type="button">取消</button>
+        <button class="btn btn-primary" id="confirmIrrigationSchedule" type="button">确认定时</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="droneAddModal">
+    <div class="modal drone-form-modal">
+      <div class="modal-title">添加无人机</div>
+      <div class="form-group">
+        <label class="form-label">无人机名称</label>
+        <input type="text" class="form-control" id="droneNameInput" placeholder="如：巡田无人机-02">
+      </div>
+      <label class="check-row">
+        <input type="checkbox" id="droneCameraInput" checked>
+        <span>添加摄像头查看能力</span>
+      </label>
+      <div class="form-group mb-0">
+        <label class="form-label">绑定地块</label>
+        <select class="form-control" id="droneAddPlotSelect"></select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelDroneAdd" type="button">取消</button>
+        <button class="btn btn-primary" id="confirmDroneAdd" type="button">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="droneDetailModal">
+    <div class="modal drone-detail-modal">
+      <div class="modal-title" id="droneDetailTitle">无人机详情</div>
+      <div class="form-group">
+        <label class="form-label">重新绑定地块</label>
+        <select class="form-control" id="dronePlotSelect"></select>
+      </div>
+      <div class="drone-detail-grid" id="droneDetailGrid"></div>
+      <div class="threshold-state good" id="droneAlarmState">当前状态正常</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="droneViewCamera" type="button">查看当前地块状况</button>
+        <button class="btn btn-primary" id="droneAutoIrrigate" type="button">自动灌溉</button>
+        <button class="btn btn-outline" id="droneStopIrrigate" type="button">停止灌溉</button>
+        <button class="btn btn-danger" id="deleteDrone" type="button">删除无人机</button>
+        <button class="btn btn-outline" id="closeDroneDetail" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="dronePatrolModal">
+    <div class="modal drone-patrol-modal">
+      <div class="modal-title">关闭无人机巡航</div>
+      <div class="form-group">
+        <label class="form-label">选择无人机</label>
+        <select class="form-control" id="patrolDroneSelect"></select>
+      </div>
+      <div class="form-hint" id="patrolDroneHint">可选择单架无人机，也可以选择全部关闭。</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelDronePatrol" type="button">取消</button>
+        <button class="btn btn-primary" id="resumeDronePatrol" type="button">恢复巡航</button>
+        <button class="btn btn-danger" id="confirmDronePatrolStop" type="button">关闭巡航</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="droneVideoModal">
+    <div class="modal drone-video-modal">
+      <div class="modal-title" id="droneVideoTitle">当前地块画面</div>
+      <div class="drone-video-frame">
+        <img id="droneVideoStream" alt="当前地块摄像头画面">
+        <div class="camera-placeholder" id="droneVideoPlaceholder">正在连接摄像头...</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="closeDroneVideo" type="button">关闭</button>
       </div>
     </div>
   </div>
@@ -189,16 +257,30 @@
       slotMap: {},
       selectedPlotId: null,
       droneOn: true,
-      irrigationMode: 'auto',
+      irrigationMode: 'manual',
       dronePos: { x: 48, y: 38 },
       droneTarget: 0,
       lastTs: 0,
+      lastDroneSave: 0,
+      lastPanelUpdate: 0,
+      droneVideoTimer: null,
+      droneVideoSeq: 0,
+      droneVideoUseProxy: false,
       activeJobs: {},
-      battery: 96
+      scheduleTimers: {},
+      autoSchedule: null,
+      pendingIrrigationDroneId: null,
+      battery: 96,
+      draft: null,
+      drones: [],
+      selectedDroneId: null,
+      alarms: []
     };
 
     var SLOT_KEY = 'agri_cq_map_slots_v1';
     var CROP_KEY = 'agri_cq_crop_styles_v1';
+    var DRONE_KEY = 'agri_cq_drones_v1';
+    var AREA_SCALE = 0.028;
     var cropStyles = loadJson(CROP_KEY, {});
 
     function canManagePlot() {
@@ -232,6 +314,14 @@
       return Number(v).toFixed(1).replace(/\.0$/, '') + (unit || '');
     }
 
+    function pad2(n) {
+      return (n < 10 ? '0' : '') + n;
+    }
+
+    function timeValue(date) {
+      return pad2(date.getHours()) + ':' + pad2(date.getMinutes());
+    }
+
     function areaNumber(area) {
       var m = String(area || '').match(/[\d.]+/);
       return m ? Number(m[0]) : 1;
@@ -243,6 +333,313 @@
 
     function plotById(id) {
       return state.plots.filter(function (p) { return p.id === id; })[0] || null;
+    }
+
+    function defaultDrones() {
+      return [{
+        id: 'DRONE-001',
+        name: '巡田无人机-01',
+        hasCamera: true,
+        plotId: null,
+        pos: { x: 48, y: 38 },
+        routeIndex: 0,
+        patrolOn: true,
+        spraying: false,
+        battery: 96
+      }];
+    }
+
+    function normalizeDrones(list) {
+      if (!Array.isArray(list)) return defaultDrones();
+      if (!list.length) return [];
+      return list.map(function (d, idx) {
+        return {
+          id: d.id || ('DRONE-' + String(idx + 1).padStart(3, '0')),
+          name: d.name || ('巡田无人机-' + String(idx + 1).padStart(2, '0')),
+          hasCamera: d.hasCamera !== false,
+          plotId: d.plotId || null,
+          pos: d.pos || { x: 48 + idx * 3, y: 38 + idx * 3 },
+          routeIndex: d.routeIndex || 0,
+          patrolOn: d.patrolOn !== false,
+          spraying: !!d.spraying,
+          battery: d.battery == null ? 96 : d.battery
+        };
+      });
+    }
+
+    function saveDrones() {
+      saveJson(DRONE_KEY, state.drones);
+    }
+
+    function droneById(id) {
+      return state.drones.filter(function (d) { return d.id === id; })[0] || null;
+    }
+
+    function removeDronesForPlot(plotId) {
+      var removed = state.drones.filter(function (d) { return d.plotId === plotId; });
+      if (!removed.length) return 0;
+      state.drones = state.drones.filter(function (d) { return d.plotId !== plotId; });
+      if (removed.some(function (d) { return d.id === state.selectedDroneId; })) {
+        state.selectedDroneId = null;
+        closeDroneDetailModal();
+      }
+      saveDrones();
+      renderDrones();
+      updateDronePanel();
+      return removed.length;
+    }
+
+    function nonCameraDevicesForPlot(plotId) {
+      return state.devices.filter(function (d) {
+        return d.plotId === plotId && d.type !== '摄像头';
+      });
+    }
+
+    function hasRealOnlineDevice(plotId) {
+      var plot = plotById(plotId);
+      if (plot && Number(plot.onlineCount || 0) > 0) return true;
+      return nonCameraDevicesForPlot(plotId).some(function (d) {
+        return d.online && d.ip && d.port;
+      });
+    }
+
+    function simulatedRealtime(plot) {
+      var seed = String(plot && plot.id || '').split('').reduce(function (sum, ch) {
+        return sum + ch.charCodeAt(0);
+      }, 0);
+      var wave = Math.sin(Date.now() / 45000 + seed);
+      return {
+        temp: 25 + (seed % 6) + wave * 1.8,
+        humidity: 48 + (seed % 13) - wave * 2.4,
+        lux: 420 + (seed % 9) * 18 + wave * 35,
+        simulated: true
+      };
+    }
+
+    function realtimeForPlot(plot) {
+      if (!plot) return {};
+      return hasRealOnlineDevice(plot.id) ? (state.realtime[plot.id] || plot) : simulatedRealtime(plot);
+    }
+
+    function camerasForPlot(plotId) {
+      return state.devices.filter(function (d) {
+        return d.plotId === plotId && d.type === '摄像头' && d.ip && d.port;
+      });
+    }
+
+    function latestUnhandledAlarm(plotId) {
+      var list = (state.alarms || []).filter(function (a) {
+        return a.plotId === plotId && a.status === '未处理';
+      });
+      return list[0] || null;
+    }
+
+    function rectShape(slot) {
+      var wobble = (slot.id.charCodeAt(slot.id.length - 1) % 5) * 0.35;
+      return {
+        points: [
+          { x: slot.x - slot.w / 2 + wobble, y: slot.y - slot.h / 2 + 0.7 },
+          { x: slot.x + slot.w / 2 - 0.9, y: slot.y - slot.h / 2 + wobble },
+          { x: slot.x + slot.w / 2 - wobble, y: slot.y + slot.h / 2 - 0.5 },
+          { x: slot.x + 1.2, y: slot.y + slot.h / 2 + 0.4 },
+          { x: slot.x - slot.w / 2 + 0.6, y: slot.y + slot.h / 2 - wobble }
+        ]
+      };
+    }
+
+    function shapeForPlot(plot) {
+      if (plot && plot.mapShape && plot.mapShape.points && plot.mapShape.points.length >= 3) {
+        return normalizeShape(plot.mapShape);
+      }
+      return rectShape(slotById(state.slotMap[plot.id]));
+    }
+
+    function pointsText(points) {
+      return points.map(function (p) { return p.x.toFixed(2) + ',' + p.y.toFixed(2); }).join(' ');
+    }
+
+    function orderedPolygonPoints(points) {
+      var clean = [];
+      (points || []).forEach(function (p) {
+        var point = { x: Number(p.x), y: Number(p.y) };
+        if (isNaN(point.x) || isNaN(point.y)) return;
+        var duplicated = clean.some(function (existing) {
+          return Math.abs(existing.x - point.x) < 0.01 && Math.abs(existing.y - point.y) < 0.01;
+        });
+        if (!duplicated) clean.push(point);
+      });
+      if (clean.length < 3) return clean;
+      var center = clean.reduce(function (acc, p) {
+        acc.x += p.x;
+        acc.y += p.y;
+        return acc;
+      }, { x: 0, y: 0 });
+      center.x /= clean.length;
+      center.y /= clean.length;
+      return clean.map(function (p) {
+        return {
+          point: p,
+          angle: Math.atan2(p.y - center.y, p.x - center.x),
+          distance: Math.pow(p.x - center.x, 2) + Math.pow(p.y - center.y, 2)
+        };
+      }).sort(function (a, b) {
+        return a.angle === b.angle ? a.distance - b.distance : a.angle - b.angle;
+      }).map(function (item) {
+        return item.point;
+      });
+    }
+
+    function normalizeShape(shape) {
+      return {
+        points: orderedPolygonPoints(shape && shape.points),
+        source: shape && shape.source
+      };
+    }
+
+    function pathD(points) {
+      if (!points || !points.length) return '';
+      return points.map(function (p, idx) {
+        return (idx ? 'L' : 'M') + p.x.toFixed(2) + ',' + p.y.toFixed(2);
+      }).join(' ') + ' Z';
+    }
+
+    function shapeCenter(shape) {
+      var points = shape.points;
+      var signed = 0;
+      var cx = 0;
+      var cy = 0;
+      for (var i = 0; i < points.length; i++) {
+        var a = points[i];
+        var b = points[(i + 1) % points.length];
+        var cross = a.x * b.y - b.x * a.y;
+        signed += cross;
+        cx += (a.x + b.x) * cross;
+        cy += (a.y + b.y) * cross;
+      }
+      if (Math.abs(signed) < 0.0001) {
+        var bounds = shapeBounds(shape);
+        return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+      }
+      signed *= 0.5;
+      return { x: cx / (6 * signed), y: cy / (6 * signed) };
+    }
+
+    function fieldSvgDefs() {
+      return '' +
+        '<defs>' +
+          '<pattern id="fieldPattern-leaf" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(-18)">' +
+            '<rect width="5" height="5" fill="#6b3f1f"/><path d="M0 3.8 Q2.6 1 5 3.8" fill="none" stroke="#83d45b" stroke-width=".6" opacity=".95"/>' +
+          '</pattern>' +
+          '<pattern id="fieldPattern-fruit" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-12)">' +
+            '<rect width="6" height="6" fill="#70411f"/><circle cx="1.6" cy="2.2" r=".55" fill="#ef4444"/><circle cx="4.6" cy="4.1" r=".5" fill="#f97316"/><path d="M0 5.4 L6 4.3" stroke="#65a30d" stroke-width=".55" opacity=".8"/>' +
+          '</pattern>' +
+          '<pattern id="fieldPattern-grain" width="4" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(7)">' +
+            '<rect width="4" height="6" fill="#7a4a22"/><path d="M.9 0 L1.2 6 M2.8 0 L3 6" stroke="#facc15" stroke-width=".42" opacity=".92"/>' +
+          '</pattern>' +
+          '<pattern id="fieldPattern-vine" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-24)">' +
+            '<rect width="7" height="7" fill="#61391d"/><path d="M-1 4 C2 1 4 7 8 3" fill="none" stroke="#22c55e" stroke-width=".55"/><circle cx="3.2" cy="3.2" r=".6" fill="#86efac"/>' +
+          '</pattern>' +
+        '</defs>';
+    }
+
+    function polygonArea(points) {
+      if (!points || points.length < 3) return 0;
+      var sum = 0;
+      for (var i = 0; i < points.length; i++) {
+        var a = points[i];
+        var b = points[(i + 1) % points.length];
+        sum += a.x * b.y - b.x * a.y;
+      }
+      return Math.abs(sum) / 2;
+    }
+
+    function areaFromShape(shape) {
+      return Math.max(0.1, polygonArea(shape.points) * AREA_SCALE);
+    }
+
+    function shapeBounds(shape) {
+      var minX = 100, minY = 100, maxX = 0, maxY = 0;
+      shape.points.forEach(function (p) {
+        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+      });
+      return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+    }
+
+    function pointInPolygon(point, poly) {
+      var inside = false;
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var pi = poly[i], pj = poly[j];
+        var intersect = ((pi.y > point.y) !== (pj.y > point.y)) &&
+          (point.x < (pj.x - pi.x) * (point.y - pi.y) / ((pj.y - pi.y) || 0.0001) + pi.x);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function ccw(a, b, c) {
+      return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+    }
+
+    function segmentsIntersect(a, b, c, d) {
+      return ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+    }
+
+    function shapesOverlap(a, b) {
+      var ab = shapeBounds(a), bb = shapeBounds(b);
+      if (ab.maxX <= bb.minX || bb.maxX <= ab.minX || ab.maxY <= bb.minY || bb.maxY <= ab.minY) return false;
+      for (var i = 0; i < a.points.length; i++) {
+        var a1 = a.points[i], a2 = a.points[(i + 1) % a.points.length];
+        for (var j = 0; j < b.points.length; j++) {
+          if (segmentsIntersect(a1, a2, b.points[j], b.points[(j + 1) % b.points.length])) return true;
+        }
+      }
+      return pointInPolygon(a.points[0], b.points) || pointInPolygon(b.points[0], a.points);
+    }
+
+    function overlapsExisting(shape, exceptPlotId) {
+      return state.plots.some(function (plot) {
+        return plot.id !== exceptPlotId && shapesOverlap(shape, shapeForPlot(plot));
+      });
+    }
+
+    function clampPoint(p) {
+      return { x: Math.max(6, Math.min(94, p.x)), y: Math.max(8, Math.min(92, p.y)) };
+    }
+
+    function recommendedShape(area, preferredSlotId) {
+      var target = Math.max(6, Number(area || 1) / AREA_SCALE);
+      var candidates = preferredSlotId ? [slotById(preferredSlotId)] : [];
+      slots.forEach(function (slot) {
+        if (!preferredSlotId || slot.id !== preferredSlotId) candidates.push(slot);
+      });
+      for (var i = 0; i < candidates.length; i++) {
+        var slot = candidates[i];
+        var w = Math.max(7, Math.min(17, Math.sqrt(target * 1.45)));
+        var h = Math.max(5, Math.min(12, target / w));
+        var shape = {
+          points: [
+            clampPoint({ x: slot.x - w * .52, y: slot.y - h * .34 }),
+            clampPoint({ x: slot.x - w * .10, y: slot.y - h * .58 }),
+            clampPoint({ x: slot.x + w * .50, y: slot.y - h * .32 }),
+            clampPoint({ x: slot.x + w * .44, y: slot.y + h * .42 }),
+            clampPoint({ x: slot.x + w * .04, y: slot.y + h * .58 }),
+            clampPoint({ x: slot.x - w * .48, y: slot.y + h * .36 })
+          ],
+          source: 'recommend'
+        };
+        if (!overlapsExisting(shape)) {
+          document.getElementById('mapSlotSelect').value = slot.id;
+          return shape;
+        }
+      }
+      return null;
+    }
+
+    function waterDevicesForPlot(plotId, onlineOnly) {
+      return state.devices.filter(function (d) {
+        return d.plotId === plotId && d.controllable && (!onlineOnly || d.online);
+      });
     }
 
     function syncSlotMap() {
@@ -270,27 +667,13 @@
     }
 
     function cropType(plot) {
-      var chosen = cropStyles[plot.id];
+      var chosen = cropStyles[plot.id] || plot.cropStyle;
       if (chosen && chosen !== 'auto') return chosen;
       var crop = String(plot.crop || '');
       if (/瓜|藤|葡萄|黄瓜/.test(crop)) return 'vine';
       if (/稻|麦|玉米|谷|高粱/.test(crop)) return 'grain';
       if (/番茄|辣椒|茄|草莓|果/.test(crop)) return 'fruit';
       return 'leaf';
-    }
-
-    function cropHtml(plot) {
-      var type = cropType(plot);
-      var rows = type === 'grain' ? 5 : 4;
-      var html = '<div class="crop crop-' + type + '">';
-      for (var r = 0; r < rows; r++) {
-        html += '<span class="crop-row">';
-        for (var i = 0; i < 7; i++) {
-          html += '<i></i>';
-        }
-        html += '</span>';
-      }
-      return html + '</div>';
     }
 
     function thresholdIssues(rt) {
@@ -308,61 +691,83 @@
       return issues;
     }
 
+    function plotVisualState(plot) {
+      var rt = realtimeForPlot(plot);
+      var issues = thresholdIssues(rt);
+      var hasRunningWater = state.devices.some(function (d) {
+        return d.plotId === plot.id && d.controllable && d.running;
+      });
+      return {
+        issues: issues,
+        hasRunningWater: hasRunningWater,
+        pathClass: 'cq-field-path crop-' + cropType(plot) + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : ''),
+        labelClass: 'cq-field-label' + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : '')
+      };
+    }
+
+    function refreshMapState() {
+      state.plots.forEach(function (plot) {
+        var visual = plotVisualState(plot);
+        var path = document.querySelector('.cq-field-path[data-plot-id="' + plot.id + '"]');
+        var label = document.querySelector('.cq-field-label[data-plot-id="' + plot.id + '"]');
+        if (path) path.setAttribute('class', visual.pathClass);
+        if (label) {
+          label.className = visual.labelClass;
+          var alarm = label.querySelector('.field-alarm');
+          if (visual.issues.length && !alarm) {
+            alarm = document.createElement('span');
+            alarm.className = 'field-alarm';
+            alarm.textContent = '阈值';
+            label.appendChild(alarm);
+          } else if (!visual.issues.length && alarm) {
+            alarm.remove();
+          }
+        }
+      });
+      renderDrones();
+      renderSelected();
+    }
+
     function renderMap() {
       var fieldLayer = document.getElementById('fieldLayer');
-      var slotLayer = document.getElementById('slotLayer');
+      var svgLayer = document.getElementById('fieldLayerSvg');
       fieldLayer.innerHTML = '';
-      slotLayer.innerHTML = '';
+      svgLayer.innerHTML = fieldSvgDefs();
 
       document.getElementById('mapEmpty').style.display = state.plots.length ? 'none' : 'block';
       document.getElementById('openMapAdd').style.display = canManagePlot() ? 'inline-flex' : 'none';
 
-      var usedSlots = {};
       state.plots.forEach(function (plot) {
-        usedSlots[state.slotMap[plot.id]] = true;
-        var slot = slotById(state.slotMap[plot.id]);
-        var rt = state.realtime[plot.id] || plot;
-        var issues = thresholdIssues(rt);
-        var hasRunningWater = state.devices.some(function (d) {
-          return d.plotId === plot.id && d.controllable && d.running;
+        var shape = shapeForPlot(plot);
+        var center = shapeCenter(shape);
+        var visual = plotVisualState(plot);
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathD(shape.points));
+        path.setAttribute('class', visual.pathClass);
+        path.setAttribute('fill', 'url(#fieldPattern-' + cropType(plot) + ')');
+        path.setAttribute('data-plot-id', plot.id);
+        path.addEventListener('click', function () {
+          selectPlot(plot.id);
         });
+        svgLayer.appendChild(path);
+
         var field = document.createElement('button');
         field.type = 'button';
-        field.className = 'cq-field' + (issues.length ? ' alert' : '') + (hasRunningWater ? ' irrigating' : '') + (state.selectedPlotId === plot.id ? ' selected' : '');
+        field.className = visual.labelClass;
         field.setAttribute('data-plot-id', plot.id);
-        field.style.left = slot.x + '%';
-        field.style.top = slot.y + '%';
-        field.style.width = slot.w + '%';
-        field.style.height = slot.h + '%';
+        field.style.left = center.x + '%';
+        field.style.top = center.y + '%';
         field.innerHTML =
-          '<span class="soil-bed"></span>' +
-          cropHtml(plot) +
           '<span class="field-name">' + esc(plot.name) + '</span>' +
           '<span class="field-crop">' + esc(plot.crop || '作物') + '</span>' +
           '<span class="water-effect"><i></i><i></i><i></i><i></i></span>' +
-          (issues.length ? '<span class="field-alarm">阈值</span>' : '');
+          (visual.issues.length ? '<span class="field-alarm">阈值</span>' : '');
         field.addEventListener('click', function () {
           selectPlot(plot.id);
         });
         fieldLayer.appendChild(field);
       });
-
-      if (canManagePlot()) {
-        slots.forEach(function (slot) {
-          if (usedSlots[slot.id]) return;
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'map-add-slot';
-          btn.style.left = slot.x + '%';
-          btn.style.top = slot.y + '%';
-          btn.style.width = slot.w + '%';
-          btn.style.height = slot.h + '%';
-          btn.innerHTML = '<span>+</span>';
-          btn.title = '在' + slot.name + '添加地块';
-          btn.addEventListener('click', function () { openAddModal(slot.id); });
-          slotLayer.appendChild(btn);
-        });
-      }
+      renderDrones();
       renderSelected();
     }
 
@@ -403,15 +808,18 @@
           '<div class="panel-text">点击地图上的作物地块查看温度、土壤湿度、亮度和阈值状态。</div>';
         return;
       }
-      var rt = state.realtime[plot.id] || plot;
+      var rt = realtimeForPlot(plot);
       var issues = thresholdIssues(rt);
       var devs = state.devices.filter(function (d) { return d.plotId === plot.id; });
-      var waterDevices = devs.filter(function (d) { return d.controllable; });
+      var waterDevices = waterDevicesForPlot(plot.id, false);
+      var devCount = devs.length || Number(plot.deviceCount || 0);
+      var onlineCount = Number(plot.onlineCount || 0);
+      var dataType = state.devices.length ? (hasRealOnlineDevice(plot.id) ? '真实数据' : '模拟数据') : (onlineCount > 0 ? '真实数据' : '设备同步中');
       var water = waterDevices[0];
       var html =
         '<div class="panel-kicker">' + esc(plot.id) + '</div>' +
         '<div class="panel-title">' + esc(plot.name) + '</div>' +
-        '<div class="panel-text">' + esc(plot.crop || '-') + ' · ' + esc(plot.area || '-') + ' · ' + devs.length + ' 台设备</div>' +
+        '<div class="panel-text">' + esc(plot.crop || '-') + ' · ' + esc(plot.area || '-') + ' · ' + devCount + ' 台设备 · ' + dataType + '</div>' +
         '<div class="map-metrics">' +
           metricTile('温度', rt.temp, '℃', issues.join('|').indexOf('温度') >= 0) +
           metricTile('湿度', rt.humidity, '%', issues.join('|').indexOf('湿度') >= 0) +
@@ -421,7 +829,7 @@
           (issues.length ? '检测到 ' + issues.join('、') : '当前地块阈值状态正常') +
         '</div>' +
         '<div class="panel-section-title">灌溉设备控制</div>' +
-        irrigationControlsHtml(waterDevices) +
+        (state.devices.length ? irrigationControlsHtml(waterDevices) : '<div class="irrigation-device empty">设备同步中，请稍候。</div>') +
         '<div class="panel-actions">' +
           (issues.length ? '<a class="btn btn-danger btn-sm" href="alarm.html">跳转告警</a>' : '<a class="btn btn-outline btn-sm" href="monitoring.html">实时监测</a>') +
           (water ? '<button class="btn btn-outline btn-sm" type="button" id="manualIrrigate">GRU推荐浇灌</button>' : '') +
@@ -459,11 +867,181 @@
       while (log.children.length > 8) log.removeChild(log.lastChild);
     }
 
+    function renderScheduleStatus() {
+      var status = document.getElementById('irrigationScheduleStatus');
+      var stopBtn = document.getElementById('stopAutoIrrigation');
+      if (!status || !stopBtn) return;
+      var schedule = state.autoSchedule;
+      if (!schedule) {
+        if (status.textContent !== '当前未设置自动灌溉定时。') status.textContent = '当前未设置自动灌溉定时。';
+        var disabled = state.irrigationMode !== 'auto';
+        if (stopBtn.disabled !== disabled) stopBtn.disabled = disabled;
+        return;
+      }
+      var plot = plotById(schedule.plotId);
+      var nextText = (plot ? plot.name : '当前地块') + ' ' +
+        schedule.startTime + '-' + schedule.endTime +
+        (schedule.running ? ' 正在灌溉，可手动关闭。' : ' 等待开始，可提前取消。');
+      if (status.textContent !== nextText) status.textContent = nextText;
+      if (stopBtn.disabled) stopBtn.disabled = false;
+    }
+
+    function patrolActiveDrones() {
+      return state.drones.filter(function (drone) { return drone.patrolOn !== false; });
+    }
+
+    function refreshDroneToggle() {
+      var btn = document.getElementById('droneToggle');
+      var text = document.getElementById('droneToggleText');
+      if (!btn || !text) return;
+      var active = patrolActiveDrones().length;
+      state.droneOn = active > 0;
+      btn.classList.toggle('active', active > 0);
+      if (!state.drones.length) {
+        text.textContent = '暂无无人机';
+      } else if (active === state.drones.length) {
+        text.textContent = '无人机巡航中';
+      } else if (active > 0) {
+        text.textContent = '部分巡航中';
+      } else {
+        text.textContent = '无人机已关闭';
+      }
+    }
+
     function updateDronePanel(text) {
-      document.getElementById('droneStateTitle').textContent = state.droneOn ? '自主巡航中' : '巡航已关闭';
+      refreshDroneToggle();
+      var title = document.getElementById('droneStateTitle');
+      var statusText = document.getElementById('droneStateText');
+      var battery = document.getElementById('droneBattery');
+      var nextTitle = state.droneOn ? '自主巡航中' : '巡航已关闭';
+      if (title.textContent !== nextTitle) title.textContent = nextTitle;
       var modeText = state.irrigationMode === 'auto' ? '自动灌溉模式' : '手动灌溉模式';
-      document.getElementById('droneStateText').textContent = text || (state.droneOn ? '无人机正在沿地块航线巡检，当前为' + modeText + '。' : '无人机停靠在基站，当前为' + modeText + '。');
-      document.getElementById('droneBattery').style.width = state.battery + '%';
+      var scheduleText = '';
+      if (state.irrigationMode === 'auto' && state.autoSchedule) {
+        var plot = plotById(state.autoSchedule.plotId);
+        scheduleText = ' 定时任务：' + (plot ? plot.name : '当前地块') + ' ' +
+          state.autoSchedule.startTime + '-' + state.autoSchedule.endTime +
+          (state.autoSchedule.running ? '，正在灌溉。' : '，等待执行。');
+      }
+      var active = state.drones.filter(function (d) { return d.plotId; }).length;
+      var patrolActive = patrolActiveDrones().length;
+      var nextText = text || ((patrolActive ? state.drones.length + ' 架无人机在线，' + patrolActive + ' 架正在巡航，' + active + ' 架已绑定地块，当前为' + modeText + '。' : '无人机停靠在基站，当前为' + modeText + '。') + scheduleText);
+      if (statusText.textContent !== nextText) statusText.textContent = nextText;
+      var avgBattery = state.drones.length
+        ? state.drones.reduce(function (sum, d) { return sum + (d.battery || 0); }, 0) / state.drones.length
+        : state.battery;
+      var nextWidth = avgBattery.toFixed(1) + '%';
+      if (battery.style.width !== nextWidth) battery.style.width = nextWidth;
+      renderScheduleStatus();
+    }
+
+    function defaultDroneRoute() {
+      return [
+        { x: 22, y: 36 },
+        { x: 72, y: 28 },
+        { x: 79, y: 64 },
+        { x: 32, y: 68 }
+      ];
+    }
+
+    function edgeRouteForPlot(plotId) {
+      var plot = plotById(plotId);
+      if (!plot) return defaultDroneRoute();
+      var shape = shapeForPlot(plot);
+      var center = shapeCenter(shape);
+      return shape.points.map(function (p) {
+        return {
+          x: Math.max(3, Math.min(97, center.x + (p.x - center.x) * 1.12)),
+          y: Math.max(4, Math.min(96, center.y + (p.y - center.y) * 1.12)),
+          plotId: plot.id
+        };
+      });
+    }
+
+    function routeForDrone(drone) {
+      var route = drone.plotId ? edgeRouteForPlot(drone.plotId) : defaultDroneRoute();
+      return route.length ? route : defaultDroneRoute();
+    }
+
+    function renderDrones() {
+      var layer = document.getElementById('droneLayer');
+      if (!layer) return;
+      var alive = {};
+      state.drones.forEach(function (drone) {
+        alive[drone.id] = true;
+        var selector = '[data-drone-id="' + String(drone.id).replace(/"/g, '\\"') + '"]';
+        var el = layer.querySelector(selector);
+        if (!el) {
+          el = document.createElement('button');
+          el.type = 'button';
+          el.setAttribute('data-drone-id', drone.id);
+          el.innerHTML =
+            '<span class="rotor rotor-nw"></span>' +
+            '<span class="rotor rotor-ne"></span>' +
+            '<span class="rotor rotor-sw"></span>' +
+            '<span class="rotor rotor-se"></span>' +
+            '<span class="drone-body"><span class="drone-eye"></span></span>' +
+            '<span class="drone-name"></span>' +
+            '<span class="drone-spray"><i></i><i></i><i></i></span>';
+          el.addEventListener('click', function (e) {
+            e.stopPropagation();
+            openDroneDetail(el.getAttribute('data-drone-id'));
+          });
+          layer.appendChild(el);
+        }
+        el.className = 'drone' + (drone.patrolOn !== false ? ' active' : '') + (drone.spraying ? ' spraying' : '') + (state.selectedDroneId === drone.id ? ' selected' : '');
+        el.title = drone.name + (drone.patrolOn === false ? '（巡航已关闭）' : '');
+        el.style.left = drone.pos.x + '%';
+        el.style.top = drone.pos.y + '%';
+        var name = el.querySelector('.drone-name');
+        if (name && name.textContent !== drone.name) name.textContent = drone.name;
+      });
+      layer.querySelectorAll('.drone').forEach(function (el) {
+        if (!alive[el.getAttribute('data-drone-id')]) el.remove();
+      });
+    }
+
+    function tickDrone(ts) {
+      if (!state.lastTs) state.lastTs = ts;
+      var dt = Math.min(0.08, (ts - state.lastTs) / 1000);
+      state.lastTs = ts;
+      var movingDrones = patrolActiveDrones();
+      if (movingDrones.length) {
+        movingDrones.forEach(function (drone) {
+          var route = routeForDrone(drone);
+          var target = route[drone.routeIndex % route.length];
+          var dx = target.x - drone.pos.x;
+          var dy = target.y - drone.pos.y;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          var speed = drone.plotId ? 8.8 : 7.5;
+          if (dist < 0.28) {
+            if (target.plotId) inspectPlot(target.plotId, drone);
+            drone.routeIndex = (drone.routeIndex + 1) % route.length;
+          } else {
+            drone.pos.x += dx / dist * speed * dt;
+            drone.pos.y += dy / dist * speed * dt;
+          }
+          drone.battery = Math.max(58, (drone.battery || 96) - dt * 0.035);
+        });
+        renderDrones();
+        if (ts - (state.lastDroneSave || 0) > 2500) {
+          state.lastDroneSave = ts;
+          saveDrones();
+        }
+      }
+      if (ts - (state.lastPanelUpdate || 0) > 700) {
+        state.lastPanelUpdate = ts;
+        updateDronePanel();
+      }
+      requestAnimationFrame(tickDrone);
+    }
+
+    function inspectPlot(plotId, drone) {
+      var plot = plotById(plotId);
+      if (!plot) return;
+      if (state.selectedDroneId === (drone && drone.id) && document.getElementById('droneDetailModal').classList.contains('show')) {
+        renderDroneDetail();
+      }
     }
 
     function routePoints() {
@@ -476,58 +1054,30 @@
         ];
       }
       return state.plots.map(function (p) {
-        var slot = slotById(state.slotMap[p.id]);
-        return { x: slot.x + slot.w / 2, y: slot.y + slot.h / 2 - 3, plotId: p.id };
+        var bounds = shapeBounds(shapeForPlot(p));
+        return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 - 3, plotId: p.id };
       });
     }
 
-    function tickDrone(ts) {
-      if (!state.lastTs) state.lastTs = ts;
-      var dt = Math.min(0.08, (ts - state.lastTs) / 1000);
-      state.lastTs = ts;
-      var drone = document.getElementById('drone');
-      if (state.droneOn) {
-        var route = routePoints();
-        var target = route[state.droneTarget % route.length];
-        var dx = target.x - state.dronePos.x;
-        var dy = target.y - state.dronePos.y;
-        var dist = Math.sqrt(dx * dx + dy * dy);
-        var speed = state.plots.length ? 11 : 8;
-        if (dist < 0.35) {
-          if (target.plotId) inspectPlot(target.plotId);
-          state.droneTarget = (state.droneTarget + 1) % route.length;
-        } else {
-          state.dronePos.x += dx / dist * speed * dt;
-          state.dronePos.y += dy / dist * speed * dt;
-        }
-        var angle = Math.atan2(dy, dx) * 180 / Math.PI;
-        drone.style.left = state.dronePos.x + '%';
-        drone.style.top = state.dronePos.y + '%';
-        drone.style.transform = 'translate(-50%, -50%) rotate(' + angle + 'deg)';
-        state.battery = Math.max(64, state.battery - dt * 0.06);
-      }
-      updateDronePanel();
-      requestAnimationFrame(tickDrone);
-    }
-
-    function inspectPlot(plotId) {
-      var plot = plotById(plotId);
-      if (!plot) return;
-      var rt = state.realtime[plotId] || {};
-      var min = state.thresholds.humidityMin == null ? 40 : Number(state.thresholds.humidityMin);
-      var hum = num(rt.humidity, NaN);
-      if (state.irrigationMode === 'auto' && !isNaN(hum) && hum < min) {
-        startAutoIrrigation(plot, false);
-      } else if (state.irrigationMode === 'manual' && !isNaN(hum) && hum < min) {
-        updateDronePanel('巡检 ' + plot.name + '：湿度偏低，当前为手动灌溉模式。');
-      } else {
-        updateDronePanel('巡检 ' + plot.name + '：湿度状态正常。');
-      }
-    }
-
     function setFieldIrrigating(plotId, on) {
-      var field = document.querySelector('[data-plot-id="' + plotId + '"]');
-      if (field) field.classList.toggle('irrigating', !!on);
+      document.querySelectorAll('[data-plot-id="' + plotId + '"]').forEach(function (field) {
+        field.classList.toggle('irrigating', !!on);
+      });
+    }
+
+    function setDronesSprayingForPlot(plotId, on) {
+      var changed = false;
+      state.drones.forEach(function (drone) {
+        if (drone.plotId === plotId && drone.spraying !== !!on) {
+          drone.spraying = !!on;
+          changed = true;
+        }
+      });
+      if (changed) saveDrones();
+      renderDrones();
+      if (document.getElementById('droneDetailModal').classList.contains('show')) {
+        renderDroneDetail();
+      }
     }
 
     function controlDevice(device, action) {
@@ -556,6 +1106,570 @@
       }).finally(function () {
         if (input) input.disabled = false;
       });
+    }
+
+    function fillDronePlotOptions(selectedPlotId, selectId) {
+      var sel = document.getElementById(selectId || 'dronePlotSelect');
+      sel.innerHTML = '';
+      state.plots.forEach(function (plot) {
+        var opt = document.createElement('option');
+        opt.value = plot.id;
+        opt.textContent = plot.name;
+        sel.appendChild(opt);
+      });
+      sel.value = selectedPlotId || (state.plots[0] && state.plots[0].id) || '';
+    }
+
+    function openDroneAddModal() {
+      if (!state.plots.length) {
+        Toast.error('请先添加地块');
+        return;
+      }
+      document.getElementById('droneNameInput').value = '巡田无人机-' + String(state.drones.length + 1).padStart(2, '0');
+      document.getElementById('droneCameraInput').checked = true;
+      fillDronePlotOptions(state.selectedPlotId, 'droneAddPlotSelect');
+      document.getElementById('droneAddModal').classList.add('show');
+    }
+
+    function closeDroneAddModal() {
+      document.getElementById('droneAddModal').classList.remove('show');
+    }
+
+    function fillPatrolDroneOptions() {
+      var sel = document.getElementById('patrolDroneSelect');
+      sel.innerHTML = '';
+      var all = document.createElement('option');
+      all.value = 'all';
+      all.textContent = '全部无人机';
+      sel.appendChild(all);
+      state.drones.forEach(function (drone) {
+        var opt = document.createElement('option');
+        opt.value = drone.id;
+        opt.textContent = drone.name + (drone.patrolOn === false ? '（已关闭）' : '（巡航中）');
+        sel.appendChild(opt);
+      });
+      sel.value = state.selectedDroneId || 'all';
+      renderPatrolDroneHint();
+    }
+
+    function renderPatrolDroneHint() {
+      var sel = document.getElementById('patrolDroneSelect');
+      var hint = document.getElementById('patrolDroneHint');
+      if (!sel || !hint) return;
+      if (!state.drones.length) {
+        hint.textContent = '当前暂无无人机。';
+        return;
+      }
+      if (sel.value === 'all') {
+        var active = patrolActiveDrones().length;
+        hint.textContent = '将作用于全部无人机：' + active + ' 架巡航中，' + (state.drones.length - active) + ' 架已关闭。';
+        return;
+      }
+      var drone = droneById(sel.value);
+      hint.textContent = drone
+        ? drone.name + ' 当前' + (drone.patrolOn === false ? '已关闭巡航。' : '正在巡航。')
+        : '请选择无人机。';
+    }
+
+    function openDronePatrolModal() {
+      if (!state.drones.length) {
+        Toast.error('当前暂无无人机');
+        return;
+      }
+      fillPatrolDroneOptions();
+      document.getElementById('dronePatrolModal').classList.add('show');
+    }
+
+    function closeDronePatrolModal() {
+      document.getElementById('dronePatrolModal').classList.remove('show');
+    }
+
+    function setPatrolForSelection(on) {
+      var sel = document.getElementById('patrolDroneSelect');
+      var target = sel.value;
+      var changed = [];
+      if (target === 'all') {
+        state.drones.forEach(function (drone) {
+          if (drone.patrolOn !== !!on) {
+            drone.patrolOn = !!on;
+            changed.push(drone.name);
+          }
+        });
+      } else {
+        var drone = droneById(target);
+        if (drone && drone.patrolOn !== !!on) {
+          drone.patrolOn = !!on;
+          changed.push(drone.name);
+        }
+      }
+      if (!changed.length) {
+        Toast.error(on ? '所选无人机已在巡航' : '所选无人机已关闭巡航');
+        renderPatrolDroneHint();
+        return;
+      }
+      saveDrones();
+      renderDrones();
+      updateDronePanel();
+      fillPatrolDroneOptions();
+      pushLog((target === 'all' ? '全部无人机' : changed.join('、')) + (on ? ' 已恢复巡航。' : ' 已关闭巡航。'), on ? 'good' : 'warn');
+      Toast.success(on ? '无人机巡航已恢复' : '无人机巡航已关闭');
+      closeDronePatrolModal();
+    }
+
+    function confirmAddDrone() {
+      var name = document.getElementById('droneNameInput').value.trim();
+      if (!name) {
+        Toast.error('请填写无人机名称');
+        return;
+      }
+      var idx = state.drones.length + 1;
+      var firstPlot = document.getElementById('droneAddPlotSelect').value || state.selectedPlotId || (state.plots[0] && state.plots[0].id) || null;
+      if (!firstPlot) {
+        Toast.error('请选择绑定地块');
+        return;
+      }
+      var start = edgeRouteForPlot(firstPlot)[0] || { x: 48 + idx * 2, y: 38 + idx * 2 };
+      var drone = {
+        id: 'DRONE-' + Date.now(),
+        name: name,
+        hasCamera: document.getElementById('droneCameraInput').checked,
+        plotId: firstPlot,
+        pos: { x: start.x, y: start.y },
+        routeIndex: 0,
+        patrolOn: true,
+        spraying: false,
+        battery: 98
+      };
+      state.drones.push(drone);
+      state.selectedDroneId = drone.id;
+      saveDrones();
+      closeDroneAddModal();
+      renderMap();
+      openDroneDetail(drone.id);
+      pushLog(name + ' 已加入巡田任务。', 'good');
+    }
+
+    function openDroneDetail(droneId) {
+      var drone = droneById(droneId);
+      if (!drone) return;
+      state.selectedDroneId = drone.id;
+      if (!drone.plotId && state.plots[0]) drone.plotId = state.plots[0].id;
+      fillDronePlotOptions(drone.plotId);
+      renderDroneDetail();
+      document.getElementById('droneDetailModal').classList.add('show');
+      renderDrones();
+    }
+
+    function closeDroneDetailModal() {
+      document.getElementById('droneDetailModal').classList.remove('show');
+      state.selectedDroneId = null;
+      renderDrones();
+    }
+
+    function renderDroneDetail() {
+      var drone = droneById(state.selectedDroneId);
+      if (!drone) return;
+      var plot = plotById(drone.plotId);
+      document.getElementById('droneDetailTitle').textContent = drone.name + (drone.hasCamera ? ' · 摄像头已启用' : ' · 无摄像头');
+      if (!plot) {
+        document.getElementById('droneDetailGrid').innerHTML = '<div class="irrigation-device empty">请选择绑定地块。</div>';
+        document.getElementById('droneAlarmState').textContent = '未绑定地块';
+        document.getElementById('droneAlarmState').className = 'threshold-state bad';
+        return;
+      }
+      var rt = realtimeForPlot(plot);
+      var alarm = latestUnhandledAlarm(plot.id);
+      document.getElementById('droneDetailGrid').innerHTML =
+        '<div class="drone-info-tile"><span>所在地块</span><b>' + esc(plot.name) + '</b></div>' +
+        '<div class="drone-info-tile"><span>巡航状态</span><b>' + (drone.patrolOn === false ? '已关闭' : '巡航中') + '</b></div>' +
+        metricTile('温度', rt.temp, '℃', false) +
+        metricTile('湿度', rt.humidity, '%', false) +
+        metricTile('亮度', rt.lux, ' lx', false);
+      var alarmState = document.getElementById('droneAlarmState');
+      alarmState.className = 'threshold-state ' + (alarm ? 'bad' : 'good');
+      alarmState.textContent = alarm
+        ? ('最近未处理告警：' + (alarm.type || '告警') + ' · ' + (alarm.value || '') + ' · ' + (alarm.time || ''))
+        : '当前状态正常';
+    }
+
+    function bindDroneToPlot(plotId) {
+      var drone = droneById(state.selectedDroneId);
+      var plot = plotById(plotId);
+      if (!drone || !plot) return;
+      drone.plotId = plot.id;
+      drone.routeIndex = 0;
+      saveDrones();
+      renderDroneDetail();
+      renderDrones();
+      pushLog(drone.name + ' 已绑定 ' + plot.name + '，正在前往地块边缘巡航。', 'good');
+    }
+
+    function deleteSelectedDrone() {
+      var drone = droneById(state.selectedDroneId);
+      if (!drone) {
+        Toast.error('请选择无人机');
+        return;
+      }
+      if (!confirm('确认删除无人机「' + drone.name + '」吗？')) return;
+      closeDroneVideoModal();
+      state.drones = state.drones.filter(function (d) { return d.id !== drone.id; });
+      state.selectedDroneId = null;
+      saveDrones();
+      closeDroneDetailModal();
+      renderDrones();
+      updateDronePanel();
+      Toast.success('无人机已删除');
+      pushLog('无人机「' + drone.name + '」已删除。', 'good');
+    }
+
+    function openDroneCameraView() {
+      var drone = droneById(state.selectedDroneId);
+      var plot = drone && plotById(drone.plotId);
+      if (!drone || !plot || !drone.hasCamera || !camerasForPlot(plot.id).length) {
+        Toast.error('当前地块不存在摄像头');
+        return;
+      }
+      var cam = camerasForPlot(plot.id)[0];
+      var img = document.getElementById('droneVideoStream');
+      var placeholder = document.getElementById('droneVideoPlaceholder');
+      document.getElementById('droneVideoTitle').textContent = plot.name + ' · ' + cam.name;
+      state.droneVideoUseProxy = false;
+      function camAuth() {
+        var username = cam.username && cam.username !== 'null' ? cam.username : '';
+        var password = cam.password && cam.password !== 'null' ? cam.password : '';
+        return username ? encodeURIComponent(username) + ':' + encodeURIComponent(password) + '@' : '';
+      }
+      function streamUrl() {
+        if (state.droneVideoUseProxy) {
+          return 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+        }
+        return 'http://' + camAuth() + cam.ip + ':' + cam.port + '/video?_=' + Date.now();
+      }
+      function attach(showConnecting) {
+        var seq = ++state.droneVideoSeq;
+        if (showConnecting) {
+          placeholder.style.display = 'grid';
+          placeholder.textContent = '正在连接摄像头...';
+        }
+        img.style.display = 'block';
+        img.onload = function () {
+          if (seq === state.droneVideoSeq) placeholder.style.display = 'none';
+        };
+        img.onerror = function () {
+          if (seq !== state.droneVideoSeq) return;
+          if (!state.droneVideoUseProxy) {
+            state.droneVideoUseProxy = true;
+            placeholder.style.display = 'grid';
+            placeholder.textContent = '正在切换备用通道...';
+            attach(false);
+            return;
+          }
+          placeholder.style.display = 'grid';
+          placeholder.textContent = '摄像头画面连接失败';
+        };
+        img.src = streamUrl();
+        if (showConnecting) {
+          setTimeout(function () {
+            if (seq === state.droneVideoSeq && img.getAttribute('src')) placeholder.style.display = 'none';
+          }, 900);
+        }
+      }
+      clearInterval(state.droneVideoTimer);
+      attach(true);
+      state.droneVideoTimer = setInterval(function () {
+        if (state.droneVideoUseProxy) attach(false);
+      }, 12000);
+      document.getElementById('droneVideoModal').classList.add('show');
+    }
+
+    function closeDroneVideoModal() {
+      var img = document.getElementById('droneVideoStream');
+      clearInterval(state.droneVideoTimer);
+      state.droneVideoTimer = null;
+      state.droneVideoSeq += 1;
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute('src');
+      document.getElementById('droneVideoModal').classList.remove('show');
+    }
+
+    function droneAutoIrrigate() {
+      var drone = droneById(state.selectedDroneId);
+      var plot = drone && plotById(drone.plotId);
+      if (!drone || !plot) {
+        Toast.error('请先选择绑定地块');
+        return;
+      }
+      var devices = waterDevicesForPlot(plot.id, false);
+      if (!devices.length) {
+        Toast.error('当前地块不存在灌溉设备');
+        return;
+      }
+      var online = devices.filter(function (d) { return d.online; });
+      if (!online.length) {
+        Toast.error('当前地块灌溉设备离线');
+        return;
+      }
+      openIrrigationScheduleModal(plot.id, drone.id);
+    }
+
+    function droneStopIrrigate() {
+      var drone = droneById(state.selectedDroneId);
+      var plot = drone && plotById(drone.plotId);
+      if (!drone || !plot) {
+        Toast.error('请先选择绑定地块');
+        return;
+      }
+      var schedule = state.autoSchedule;
+      if (schedule && schedule.plotId === plot.id) {
+        clearScheduleTimers();
+        if (schedule.running) {
+          stopScheduledIrrigation(plot).then(function () {
+            pushLog(drone.name + ' 已手动停止 ' + plot.name + ' 的自动灌溉。', 'good');
+          });
+          return;
+        }
+        state.autoSchedule = null;
+        setIrrigationMode('manual');
+        setDronesSprayingForPlot(plot.id, false);
+        setFieldIrrigating(plot.id, false);
+        pushLog(drone.name + ' 已取消 ' + plot.name + ' 的自动灌溉定时。', 'good');
+        Toast.success('自动灌溉定时已取消');
+        return;
+      }
+      var runningDevices = waterDevicesForPlot(plot.id, false).filter(function (d) { return d.running; });
+      if (!runningDevices.length && !drone.spraying) {
+        Toast.error('当前地块未在灌溉');
+        return;
+      }
+      Promise.all(runningDevices.map(function (device) { return controlDevice(device, 'off'); })).finally(function () {
+        state.activeJobs[plot.id] = false;
+        setDronesSprayingForPlot(plot.id, false);
+        setFieldIrrigating(plot.id, false);
+        pushLog(drone.name + ' 已停止 ' + plot.name + ' 的灌溉。', 'good');
+        Toast.success('灌溉已停止');
+        renderSelected();
+      });
+    }
+
+    function clearScheduleTimers() {
+      Object.keys(state.scheduleTimers).forEach(function (key) {
+        clearTimeout(state.scheduleTimers[key]);
+      });
+      state.scheduleTimers = {};
+    }
+
+    function minutesOfDay(value) {
+      var m = String(value || '').match(/^(\d{2}):(\d{2})$/);
+      if (!m) return NaN;
+      return Number(m[1]) * 60 + Number(m[2]);
+    }
+
+    function scheduleDates(startTime, endTime) {
+      var startMin = minutesOfDay(startTime);
+      var endMin = minutesOfDay(endTime);
+      if (isNaN(startMin) || isNaN(endMin) || startMin === endMin) return null;
+      var now = new Date();
+      var todayMin = now.getHours() * 60 + now.getMinutes();
+      var startAt = new Date(now);
+      startAt.setSeconds(0, 0);
+      startAt.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+      var endAt = new Date(now);
+      endAt.setSeconds(0, 0);
+      endAt.setHours(Math.floor(endMin / 60), endMin % 60, 0, 0);
+      if (endMin <= startMin) endAt.setDate(endAt.getDate() + 1);
+      if (todayMin >= endMin && endMin > startMin) {
+        startAt.setDate(startAt.getDate() + 1);
+        endAt.setDate(endAt.getDate() + 1);
+      }
+      if (now >= startAt && now < endAt) startAt = new Date(now);
+      if (now >= startAt && now >= endAt) {
+        startAt.setDate(startAt.getDate() + 1);
+        endAt.setDate(endAt.getDate() + 1);
+      }
+      return { startAt: startAt, endAt: endAt };
+    }
+
+    function setIrrigationMode(mode) {
+      state.irrigationMode = mode;
+      document.querySelectorAll('#irrigationMode button').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-mode') === mode);
+      });
+      updateDronePanel();
+    }
+
+    function fillSchedulePlotOptions(fixedPlotId) {
+      var sel = document.getElementById('schedulePlotSelect');
+      sel.innerHTML = '';
+      var preferred = fixedPlotId || state.selectedPlotId;
+      var firstWithWater = null;
+      state.plots.forEach(function (plot) {
+        var count = waterDevicesForPlot(plot.id, true).length;
+        if (!firstWithWater && count) firstWithWater = plot.id;
+        var opt = document.createElement('option');
+        opt.value = plot.id;
+        opt.textContent = plot.name + (count ? '（在线灌溉设备 ' + count + ' 台）' : '（无在线灌溉设备）');
+        sel.appendChild(opt);
+      });
+      sel.value = preferred || firstWithWater || (state.plots[0] && state.plots[0].id) || '';
+      sel.disabled = !!fixedPlotId;
+    }
+
+    function openIrrigationScheduleModal(plotId, droneId) {
+      if (!state.plots.length) {
+        Toast.error('暂无地块，无法设置自动灌溉');
+        return;
+      }
+      state.pendingIrrigationDroneId = droneId || null;
+      fillSchedulePlotOptions(plotId);
+      var now = new Date();
+      now.setSeconds(0, 0);
+      var later = new Date(now.getTime() + 30 * 60 * 1000);
+      document.getElementById('scheduleStartTime').value = state.autoSchedule ? state.autoSchedule.startTime : timeValue(now);
+      document.getElementById('scheduleEndTime').value = state.autoSchedule ? state.autoSchedule.endTime : timeValue(later);
+      var hint = document.getElementById('scheduleHint');
+      var plot = plotById(plotId);
+      hint.textContent = (plot ? '当前将为「' + plot.name + '」设置定时灌溉。' : '') + '灌溉只控制设备启停，湿度数值仍以传感器采集为准。';
+      document.getElementById('irrigationScheduleModal').classList.add('show');
+    }
+
+    function closeIrrigationScheduleModal() {
+      state.pendingIrrigationDroneId = null;
+      document.getElementById('schedulePlotSelect').disabled = false;
+      document.getElementById('irrigationScheduleModal').classList.remove('show');
+    }
+
+    function startScheduledIrrigation(plot) {
+      var devices = waterDevicesForPlot(plot.id, true);
+      if (!devices.length) {
+        Toast.error('该地块暂无在线灌溉设备');
+        pushLog(plot.name + ' 缺少在线灌溉设备，自动灌溉未启动。', 'bad');
+        return Promise.resolve(false);
+      }
+      state.activeJobs[plot.id] = true;
+      return Promise.all(devices.map(function (device) { return controlDevice(device, 'on'); })).then(function (results) {
+        var ok = results.some(Boolean);
+        if (ok) {
+          if (state.autoSchedule) state.autoSchedule.running = true;
+          setFieldIrrigating(plot.id, true);
+          setDronesSprayingForPlot(plot.id, true);
+          pushLog(plot.name + ' 定时自动灌溉已启动，湿度仍以传感器实时采集为准。', 'warn');
+          Toast.success('自动灌溉已启动');
+          renderSelected();
+        } else {
+          state.activeJobs[plot.id] = false;
+          Toast.error('自动灌溉启动失败');
+        }
+        return ok;
+      });
+    }
+
+    function stopScheduledIrrigation(plot) {
+      var devices = waterDevicesForPlot(plot.id, false).filter(function (d) { return d.running; });
+      return Promise.all(devices.map(function (device) { return controlDevice(device, 'off'); })).then(function () {
+        if (state.autoSchedule) state.autoSchedule.running = false;
+        state.activeJobs[plot.id] = false;
+        setFieldIrrigating(plot.id, false);
+        setDronesSprayingForPlot(plot.id, false);
+        pushLog(plot.name + ' 定时自动灌溉已结束，湿度数据未被灌溉逻辑改写。', 'good');
+        if (state.autoSchedule && state.autoSchedule.plotId === plot.id) {
+          state.autoSchedule = null;
+          clearScheduleTimers();
+        }
+        setIrrigationMode('manual');
+        Toast.success('自动灌溉已停止');
+        renderMap();
+      });
+    }
+
+    function armIrrigationSchedule() {
+      clearScheduleTimers();
+      var schedule = state.autoSchedule;
+      if (!schedule) return;
+      var plot = plotById(schedule.plotId);
+      if (!plot) return;
+      var now = Date.now();
+      var startDelay = Math.max(0, schedule.startAt - now);
+      var endDelay = Math.max(0, schedule.endAt - now);
+      state.scheduleTimers.start = setTimeout(function () {
+        startScheduledIrrigation(plot);
+      }, startDelay);
+      state.scheduleTimers.end = setTimeout(function () {
+        stopScheduledIrrigation(plot);
+      }, endDelay);
+    }
+
+    function cancelIrrigationSchedule(stopRunning) {
+      var schedule = state.autoSchedule;
+      clearScheduleTimers();
+      if (stopRunning && schedule && schedule.running) {
+        var plot = plotById(schedule.plotId);
+        if (plot) {
+          stopScheduledIrrigation(plot);
+          return;
+        }
+      }
+      state.autoSchedule = null;
+    }
+
+    function stopAutoIrrigationNow() {
+      var schedule = state.autoSchedule;
+      if (!schedule) {
+        setIrrigationMode('manual');
+        pushLog('已关闭自动灌溉模式。', 'good');
+        Toast.success('自动灌溉已关闭');
+        return;
+      }
+      var plot = plotById(schedule.plotId);
+      clearScheduleTimers();
+      if (schedule.running && plot) {
+        stopScheduledIrrigation(plot).then(function () {
+          setIrrigationMode('manual');
+          pushLog('用户已手动提前关闭自动灌溉。', 'good');
+          renderScheduleStatus();
+        });
+        return;
+      }
+      state.autoSchedule = null;
+      setIrrigationMode('manual');
+      pushLog((plot ? plot.name : '当前地块') + ' 的自动灌溉定时已提前取消。', 'good');
+      Toast.success('自动灌溉已关闭');
+      renderScheduleStatus();
+    }
+
+    function confirmIrrigationSchedule() {
+      var drone = droneById(state.pendingIrrigationDroneId);
+      var plotId = drone && drone.plotId ? drone.plotId : document.getElementById('schedulePlotSelect').value;
+      var startTime = document.getElementById('scheduleStartTime').value;
+      var endTime = document.getElementById('scheduleEndTime').value;
+      var plot = plotById(plotId);
+      if (!plot) {
+        Toast.error('请选择地块');
+        return;
+      }
+      if (!waterDevicesForPlot(plot.id, true).length) {
+        Toast.error('该地块暂无在线灌溉设备');
+        return;
+      }
+      var dates = scheduleDates(startTime, endTime);
+      if (!dates) {
+        Toast.error('请设置不同的开始时间和结束时间');
+        return;
+      }
+      state.autoSchedule = {
+        plotId: plot.id,
+        droneId: drone ? drone.id : null,
+        startTime: startTime,
+        endTime: endTime,
+        startAt: dates.startAt.getTime(),
+        endAt: dates.endAt.getTime(),
+        running: false
+      };
+      setIrrigationMode('auto');
+      armIrrigationSchedule();
+      closeIrrigationScheduleModal();
+      pushLog((drone ? drone.name + ' 已为 ' : '') + plot.name + ' 设置自动灌溉定时：' + startTime + '-' + endTime + '。', 'good');
+      Toast.success('自动灌溉定时已保存');
     }
 
     function getHistory(plotId) {
@@ -589,10 +1703,8 @@
     function startAutoIrrigation(plot, manual) {
       if (!state.droneOn && !manual) return;
       if (state.activeJobs[plot.id]) return;
-      var rt = state.realtime[plot.id] || {};
-      var water = state.devices.filter(function (d) {
-        return d.plotId === plot.id && d.controllable && d.online;
-      })[0];
+      var rt = realtimeForPlot(plot);
+      var water = waterDevicesForPlot(plot.id, true)[0];
       if (!water) {
         pushLog(plot.name + ' 缺少在线灌溉设备，已跳过自动浇水。', 'bad');
         return;
@@ -609,24 +1721,14 @@
             return;
           }
           setFieldIrrigating(plot.id, true);
-          var start = Date.now();
-          var baseHum = num((state.realtime[plot.id] || {}).humidity, 0);
-          var timer = setInterval(function () {
-            var elapsed = (Date.now() - start) / 1000;
-            var ratio = Math.min(1, elapsed / plan.seconds);
-            state.realtime[plot.id] = state.realtime[plot.id] || {};
-            state.realtime[plot.id].humidity = baseHum + (plan.target - baseHum) * ratio;
-            if (state.selectedPlotId === plot.id) renderSelected();
-            if (ratio >= 1 || state.realtime[plot.id].humidity >= plan.target) {
-              clearInterval(timer);
-              controlDevice(water, 'off').then(function () {
-                setFieldIrrigating(plot.id, false);
-                pushLog(plot.name + ' 湿度已回到 ' + fmt(state.realtime[plot.id].humidity, '%') + '，灌溉自动停止。', 'good');
-                state.activeJobs[plot.id] = false;
-                renderMap();
-              });
-            }
-          }, 700);
+          setTimeout(function () {
+            controlDevice(water, 'off').then(function () {
+              setFieldIrrigating(plot.id, false);
+              pushLog(plot.name + ' 已按建议时长完成浇灌，湿度数值保持传感器实时采集结果。', 'good');
+              state.activeJobs[plot.id] = false;
+              renderMap();
+            });
+          }, plan.seconds * 1000);
         });
       });
     }
@@ -751,22 +1853,142 @@
       });
     }
 
+    function draftShape() {
+      return state.draft && state.draft.points.length >= 3
+        ? { points: orderedPolygonPoints(state.draft.points), source: state.draft.mode }
+        : null;
+    }
+
+    function setCreateMode(mode) {
+      if (!state.draft) state.draft = { mode: 'draw', points: [] };
+      state.draft.mode = mode;
+      document.querySelectorAll('#plotCreateMode button').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-create-mode') === mode);
+      });
+      document.getElementById('mapPlotArea').readOnly = mode === 'draw';
+      document.getElementById('undoDrawPoint').style.display = mode === 'draw' ? 'inline-flex' : 'none';
+      document.getElementById('resetDrawPlot').style.display = mode === 'draw' ? 'inline-flex' : 'none';
+      document.getElementById('recommendPlot').style.display = mode === 'recommend' ? 'inline-flex' : 'none';
+      document.getElementById('cqMap').classList.toggle('drawing-plot', mode === 'draw');
+      document.getElementById('mapDrawTip').classList.toggle('show', mode === 'draw');
+      updateShapeStatus();
+      renderDraftShape();
+    }
+
+    function updateShapeStatus() {
+      var status = document.getElementById('shapeStatus');
+      if (!status || !state.draft) return;
+      var shape = draftShape();
+      var undo = document.getElementById('undoDrawPoint');
+      var reset = document.getElementById('resetDrawPlot');
+      if (undo) undo.disabled = state.draft.mode !== 'draw' || !state.draft.points.length;
+      if (reset) reset.disabled = state.draft.mode !== 'draw' || !state.draft.points.length;
+      if (state.draft.mode === 'draw') {
+        status.textContent = state.draft.points.length < 3
+          ? '请在地图上点击至少 3 个点，当前 ' + state.draft.points.length + ' 个点。'
+          : '面积约 ' + areaFromShape(shape).toFixed(1) + ' 亩，可继续调整或确认添加。';
+        return;
+      }
+      status.textContent = shape
+        ? '已生成推荐轮廓，面积约 ' + areaFromShape(shape).toFixed(1) + ' 亩。'
+        : '填写面积后点击推荐地块，系统会自动避开现有地块。';
+    }
+
+    function renderDraftShape() {
+      var layer = document.getElementById('drawLayer');
+      if (!layer) return;
+      layer.innerHTML = '';
+      if (!state.draft || !state.draft.points.length) {
+        updateShapeStatus();
+        return;
+      }
+      var shape = draftShape();
+      var polygonPoints = shape ? shape.points : state.draft.points;
+      var pts = pointsText(polygonPoints);
+      if (state.draft.points.length >= 3) {
+        var poly = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        poly.setAttribute('d', pathD(polygonPoints));
+        poly.setAttribute('class', overlapsExisting(shape) ? 'draft-poly invalid' : 'draft-poly');
+        layer.appendChild(poly);
+      } else if (state.draft.points.length === 2) {
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        line.setAttribute('points', pts);
+        line.setAttribute('class', 'draft-line');
+        layer.appendChild(line);
+      }
+      state.draft.points.forEach(function (p, idx) {
+        var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', p.x);
+        dot.setAttribute('cy', p.y);
+        dot.setAttribute('r', idx === 0 ? '1.1' : '.85');
+        dot.setAttribute('class', 'draft-dot');
+        layer.appendChild(dot);
+      });
+      if (shape && state.draft.mode === 'draw') {
+        document.getElementById('mapPlotArea').value = areaFromShape(shape).toFixed(1);
+      }
+      updateShapeStatus();
+    }
+
+    function resetDraft() {
+      state.draft = { mode: state.draft ? state.draft.mode : 'draw', points: [] };
+      if (state.draft.mode === 'draw') document.getElementById('mapPlotArea').value = '';
+      renderDraftShape();
+    }
+
+    function undoDraftPoint() {
+      if (!state.draft || state.draft.mode !== 'draw') return;
+      state.draft.points.pop();
+      if (state.draft.points.length < 3) document.getElementById('mapPlotArea').value = '';
+      renderDraftShape();
+    }
+
+    function mapPointFromEvent(e) {
+      var rect = document.getElementById('cqMap').getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(100, (e.clientX - rect.left) / rect.width * 100)),
+        y: Math.max(0, Math.min(100, (e.clientY - rect.top) / rect.height * 100))
+      };
+    }
+
+    function generateRecommendedDraft() {
+      var area = parseFloat(document.getElementById('mapPlotArea').value);
+      if (isNaN(area) || area <= 0) {
+        Toast.error('请先填写大于 0 的面积');
+        return;
+      }
+      var shape = recommendedShape(area, document.getElementById('mapSlotSelect').value);
+      if (!shape) {
+        Toast.error('推荐区域与现有地块重叠，请调小面积或改用手绘轮廓');
+        return;
+      }
+      state.draft = { mode: 'recommend', points: shape.points };
+      setCreateMode('recommend');
+      renderDraftShape();
+    }
+
     function openAddModal(slotId) {
       if (!canManagePlot()) {
         Toast.error('当前角色无地块管理权限');
         return;
       }
       fillSlotOptions(slotId);
+      state.draft = { mode: 'draw', points: [] };
       document.getElementById('mapPlotName').value = '';
       document.getElementById('mapPlotCrop').value = '';
       document.getElementById('mapPlotArea').value = '';
       document.getElementById('mapCropStyle').value = 'auto';
       document.getElementById('mapDevRows').innerHTML = '';
       document.getElementById('mapAddModal').classList.add('show');
+      setCreateMode('draw');
     }
 
     function closeAddModal() {
       document.getElementById('mapAddModal').classList.remove('show');
+      state.draft = null;
+      document.getElementById('cqMap').classList.remove('drawing-plot');
+      document.getElementById('mapDrawTip').classList.remove('show');
+      renderDraftShape();
     }
 
     function confirmAddPlot() {
@@ -775,8 +1997,17 @@
       var area = document.getElementById('mapPlotArea').value.trim();
       var slotId = document.getElementById('mapSlotSelect').value;
       var style = document.getElementById('mapCropStyle').value;
+      var shape = draftShape();
       if (!name || !crop || !area) {
         Toast.error('请填写地块名称、作物和面积');
+        return;
+      }
+      if (!shape) {
+        Toast.error(state.draft && state.draft.mode === 'recommend' ? '请先生成推荐地块轮廓' : '请在地图上勾勒至少 3 个轮廓点');
+        return;
+      }
+      if (overlapsExisting(shape)) {
+        Toast.error('地块重叠，不可添加');
         return;
       }
       var devices;
@@ -786,7 +2017,7 @@
         Toast.error(e.message);
         return;
       }
-      API.addPlot({ name: name, crop: crop, area: area, devices: devices }).then(function (res) {
+      API.addPlot({ name: name, crop: crop, area: area, mapShape: shape, cropStyle: style, devices: devices }).then(function (res) {
         if (!res || res.code !== 0) {
           Toast.error((res && res.msg) || '添加地块失败');
           return;
@@ -804,7 +2035,18 @@
 
     function deleteSelectedPlot(plot) {
       if (!confirm('确认删除地块「' + plot.name + '」及其关联设备、数据和告警吗？')) return;
-      API.deletePlot(plot.id).then(function (res) {
+      var runningDevices = waterDevicesForPlot(plot.id, false).filter(function (d) { return d.running; });
+      var stopRunning = runningDevices.length
+        ? Promise.all(runningDevices.map(function (device) { return controlDevice(device, 'off'); }))
+        : Promise.resolve([]);
+      stopRunning.then(function () {
+        if (state.autoSchedule && state.autoSchedule.plotId === plot.id) {
+          clearScheduleTimers();
+          state.autoSchedule = null;
+          setIrrigationMode('manual');
+        }
+        return API.deletePlot(plot.id);
+      }).then(function (res) {
         if (!res || res.code !== 0) {
           Toast.error((res && res.msg) || '删除失败');
           return;
@@ -813,20 +2055,21 @@
         delete cropStyles[plot.id];
         saveJson(SLOT_KEY, state.slotMap);
         saveJson(CROP_KEY, cropStyles);
+        var droneCount = removeDronesForPlot(plot.id);
         state.selectedPlotId = null;
-        Toast.success('地块已删除');
+        Toast.success('地块已删除' + (droneCount ? '，已同步删除 ' + droneCount + ' 架无人机' : ''));
         loadAll();
       });
     }
 
     function selectPlot(plotId) {
       state.selectedPlotId = plotId;
-      renderMap();
+      refreshMapState();
     }
 
     function loadRealtime() {
       return Promise.all(state.plots.map(function (p) {
-        return API.getRealtime(p.id).then(function (res) {
+        return API.getRealtime(p.id, { loader: false }).then(function (res) {
           if (res && res.code === 0) state.realtime[p.id] = res.data;
         }).catch(function () {
           state.realtime[p.id] = p;
@@ -835,54 +2078,109 @@
     }
 
     function loadAll(selectId) {
-      return Promise.all([
-        API.getPlots(),
-        API.getDevices(),
-        API.getThresholds()
-      ]).then(function (all) {
-        state.plots = (all[0] && all[0].data) || [];
-        state.devices = (all[1] && all[1].data) || [];
-        state.thresholds = (all[2] && all[2].data) || {};
+      return API.getPlots().then(function (res) {
+        state.plots = (res && res.data) || [];
+        var storedDrones = loadJson(DRONE_KEY, null);
+        state.drones = storedDrones === null ? defaultDrones() : normalizeDrones(storedDrones);
+        state.drones.forEach(function (drone, idx) {
+          if (!drone.plotId && state.plots[idx % Math.max(1, state.plots.length)]) {
+            drone.plotId = state.plots[idx % state.plots.length].id;
+          }
+        });
+        saveDrones();
         syncSlotMap();
         state.selectedPlotId = selectId || state.selectedPlotId || (state.plots[0] && state.plots[0].id) || null;
-        return loadRealtime();
-      }).then(function () {
         renderMap();
         renderLogs();
+        renderScheduleStatus();
         pushLog('地图数据已同步，共 ' + state.plots.length + ' 个地块。', 'good');
+        API.getDevices({ loader: false }).then(function (deviceRes) {
+          state.devices = (deviceRes && deviceRes.data) || [];
+          refreshMapState();
+        }).catch(function () {});
+        API.getThresholds({ loader: false }).then(function (thresholdRes) {
+          state.thresholds = (thresholdRes && thresholdRes.data) || {};
+          refreshMapState();
+        }).catch(function () {});
+        loadRealtime().then(function () {
+          refreshMapState();
+        }).catch(function () {});
+        API.getAlarms({ loader: false }).then(function (res) {
+          state.alarms = (res && res.data) || [];
+          renderSelected();
+          if (document.getElementById('droneDetailModal').classList.contains('show')) {
+            renderDroneDetail();
+          }
+        }).catch(function () {});
       }).catch(function (e) {
         Toast.error('巡田地图加载失败：' + e.message);
       });
     }
 
-    document.getElementById('droneToggle').addEventListener('click', function () {
-      state.droneOn = !state.droneOn;
-      var btn = document.getElementById('droneToggle');
-      btn.classList.toggle('active', state.droneOn);
-      document.getElementById('drone').classList.toggle('active', state.droneOn);
-      document.getElementById('droneToggleText').textContent = state.droneOn ? '无人机巡航中' : '无人机已关闭';
-      updateDronePanel();
-    });
-    document.querySelectorAll('#irrigationMode button').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        state.irrigationMode = btn.getAttribute('data-mode');
-        document.querySelectorAll('#irrigationMode button').forEach(function (b) {
-          b.classList.toggle('active', b === btn);
-        });
-        pushLog('已切换为' + (state.irrigationMode === 'auto' ? '自动灌溉' : '手动灌溉') + '模式。', 'good');
-        updateDronePanel();
-      });
-    });
+    document.getElementById('droneToggle').addEventListener('click', openDronePatrolModal);
     document.getElementById('refreshMap').addEventListener('click', function () { loadAll(); });
     document.getElementById('openMapAdd').addEventListener('click', function () { openAddModal(); });
+    document.getElementById('openDroneAdd').addEventListener('click', openDroneAddModal);
+    document.getElementById('cancelDroneAdd').addEventListener('click', closeDroneAddModal);
+    document.getElementById('confirmDroneAdd').addEventListener('click', confirmAddDrone);
+    document.getElementById('patrolDroneSelect').addEventListener('change', renderPatrolDroneHint);
+    document.getElementById('cancelDronePatrol').addEventListener('click', closeDronePatrolModal);
+    document.getElementById('confirmDronePatrolStop').addEventListener('click', function () { setPatrolForSelection(false); });
+    document.getElementById('resumeDronePatrol').addEventListener('click', function () { setPatrolForSelection(true); });
+    document.getElementById('closeDroneDetail').addEventListener('click', closeDroneDetailModal);
+    document.getElementById('dronePlotSelect').addEventListener('change', function () {
+      bindDroneToPlot(this.value);
+    });
+    document.getElementById('droneViewCamera').addEventListener('click', openDroneCameraView);
+    document.getElementById('droneAutoIrrigate').addEventListener('click', droneAutoIrrigate);
+    document.getElementById('droneStopIrrigate').addEventListener('click', droneStopIrrigate);
+    document.getElementById('deleteDrone').addEventListener('click', deleteSelectedDrone);
+    document.getElementById('closeDroneVideo').addEventListener('click', closeDroneVideoModal);
+    document.getElementById('droneAddModal').addEventListener('click', function (e) {
+      if (e.target.id === 'droneAddModal') closeDroneAddModal();
+    });
+    document.getElementById('dronePatrolModal').addEventListener('click', function (e) {
+      if (e.target.id === 'dronePatrolModal') closeDronePatrolModal();
+    });
+    document.getElementById('droneDetailModal').addEventListener('click', function (e) {
+      if (e.target.id === 'droneDetailModal') closeDroneDetailModal();
+    });
+    document.getElementById('droneVideoModal').addEventListener('click', function (e) {
+      if (e.target.id === 'droneVideoModal') closeDroneVideoModal();
+    });
+    document.querySelectorAll('#plotCreateMode button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var mode = btn.getAttribute('data-create-mode');
+        state.draft = { mode: mode, points: [] };
+        setCreateMode(mode);
+        if (mode === 'recommend') generateRecommendedDraft();
+      });
+    });
+    document.getElementById('resetDrawPlot').addEventListener('click', resetDraft);
+    document.getElementById('undoDrawPoint').addEventListener('click', undoDraftPoint);
+    document.getElementById('recommendPlot').addEventListener('click', generateRecommendedDraft);
+    document.getElementById('cqMap').addEventListener('click', function (e) {
+      if (!state.draft || state.draft.mode !== 'draw') return;
+      if (e.target.closest && e.target.closest('.cq-field-label, .drone')) return;
+      state.draft.points.push(mapPointFromEvent(e));
+      renderDraftShape();
+      e.preventDefault();
+    });
     document.getElementById('addMapDevRow').addEventListener('click', function () { addDeviceRow(); });
     document.getElementById('cancelMapAdd').addEventListener('click', closeAddModal);
     document.getElementById('confirmMapAdd').addEventListener('click', confirmAddPlot);
+    document.getElementById('cancelIrrigationSchedule').addEventListener('click', closeIrrigationScheduleModal);
+    document.getElementById('confirmIrrigationSchedule').addEventListener('click', confirmIrrigationSchedule);
+    document.getElementById('irrigationScheduleModal').addEventListener('click', function (e) {
+      if (e.target.id === 'irrigationScheduleModal') closeIrrigationScheduleModal();
+    });
+    window.addEventListener('beforeunload', closeDroneVideoModal);
 
     loadAll().then(function () {
+      if (new URLSearchParams(location.search).get('add') === '1' && canManagePlot()) openAddModal();
       requestAnimationFrame(tickDrone);
       setInterval(function () {
-        loadRealtime().then(renderMap);
+        loadRealtime().then(refreshMapState);
       }, 15000);
     });
   </script>

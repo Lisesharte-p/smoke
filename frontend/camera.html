@@ -18,81 +18,25 @@
         <div class="camera-head">
           <div>
             <div class="section-title">视频监控</div>
-            <div class="camera-sub">摄像头实时画面 · 同源代理播放 MJPEG/HTTP 流</div>
+            <div class="camera-sub">六路监控大屏 · 摄像头实时画面 · 人体识别告警同步</div>
           </div>
           <div class="camera-actions">
-            <select class="form-control" id="cameraSelect"></select>
+            <select class="form-control" id="cameraControlSelect"></select>
+            <button class="btn btn-primary btn-sm" id="powerOnCamera" type="button">开启</button>
+            <button class="btn btn-outline btn-sm" id="powerOffCamera" type="button">关闭</button>
             <button class="btn btn-outline btn-sm" id="reloadCamera" type="button">刷新画面</button>
-            <button class="btn btn-outline btn-sm" id="reloadDetection" type="button">刷新识别</button>
-            <a class="btn btn-outline btn-sm" href="devices.html">设备管理</a>
+            <button class="btn btn-outline btn-sm" id="reloadDetection" type="button">刷新告警</button>
+            <button class="btn btn-outline btn-sm" id="startDetectionWorker" type="button">启动 worker</button>
           </div>
         </div>
 
-        <div class="camera-layout">
-          <section class="camera-view">
-            <div class="camera-screen" id="cameraScreen">
-              <img id="cameraImg" alt="摄像头实时画面">
-              <div class="camera-placeholder" id="cameraPlaceholder">
-                <div class="placeholder-title">正在加载摄像头</div>
-                <div class="placeholder-sub">请确认摄像头设备已在设备管理中配置协议、IP、端口和账号密码。</div>
-              </div>
-              <div class="camera-hud">
-                <span class="live-dot"></span>
-                <span id="liveText">LIVE</span>
-              </div>
-            </div>
-          </section>
-
-          <aside class="camera-side">
-            <div class="camera-panel">
-              <div class="panel-kicker">CAMERA</div>
-              <div class="panel-title" id="cameraName">--</div>
-              <div class="panel-text" id="cameraMeta">--</div>
-            </div>
-            <div class="camera-panel">
-              <div class="panel-kicker">STREAM</div>
-              <div class="camera-info-grid">
-                <div><span>协议</span><b id="cameraProtocol">--</b></div>
-                <div><span>地址</span><b id="cameraAddress">--</b></div>
-                <div><span>地块</span><b id="cameraPlot">--</b></div>
-                <div><span>状态</span><b id="cameraOnline">--</b></div>
-              </div>
-            </div>
-            <div class="camera-panel">
-              <div class="panel-kicker">NOTE</div>
-              <div class="panel-text" id="cameraNote">
-                MJPEG/HTTP 摄像头可直接播放；RTSP 摄像头需要 ffmpeg 或流媒体服务转成浏览器支持的格式。
-              </div>
-            </div>
-            <div class="camera-panel">
-              <div class="panel-kicker">YOLO</div>
-              <div class="detection-settings">
-                <label class="switch-row">
-                  <input type="checkbox" id="detectionEnabled">
-                  <span>人体识别</span>
-                </label>
-                <div class="detection-form">
-                  <label>
-                    <span>置信度</span>
-                    <input class="form-control" id="confidenceThreshold" type="number" min="0.01" max="0.99" step="0.01">
-                  </label>
-                  <label>
-                    <span>冷却秒数</span>
-                    <input class="form-control" id="cooldownSeconds" type="number" min="0" max="600" step="1">
-                  </label>
-                </div>
-                <button class="btn btn-primary btn-sm" id="saveDetectionSettings" type="button">保存识别设置</button>
-                <div class="panel-text" id="detectionStatus">识别状态加载中</div>
-              </div>
-            </div>
-          </aside>
-        </div>
+        <section class="monitor-wall" id="monitorWall"></section>
 
         <section class="camera-records">
           <div class="card-header">
             <div>
               <div class="card-title">人体识别记录</div>
-              <div class="card-sub">YOLO 检测到人体时自动保存事件片段，可直接回放</div>
+              <div class="card-sub">YOLO 检测到人体时自动保存事件片段，并同步到告警管理</div>
             </div>
             <div class="flex gap-8">
               <input class="form-control" id="recordDate" type="date">
@@ -104,6 +48,74 @@
           </div>
         </section>
       </main>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="cameraAddModal">
+    <div class="modal camera-add-modal">
+      <div class="modal-title" id="cameraAddTitle">添加摄像头</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">摄像头名称</label>
+          <input class="form-control" id="cameraNameInput" type="text" placeholder="如：一号大棚摄像头">
+        </div>
+        <div class="form-group">
+          <label class="form-label">绑定地块</label>
+          <select class="form-control" id="cameraPlotSelect"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">协议</label>
+          <select class="form-control" id="cameraProtocolInput">
+            <option value="mjpeg">MJPEG / HTTP</option>
+            <option value="http">HTTP</option>
+            <option value="rtsp">RTSP</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">IP</label>
+          <input class="form-control" id="cameraIpInput" type="text" placeholder="如 192.168.43.121">
+        </div>
+        <div class="form-group">
+          <label class="form-label">端口</label>
+          <input class="form-control" id="cameraPortInput" type="number" min="1" max="65535" placeholder="如 8080">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group mb-0">
+          <label class="form-label">用户名</label>
+          <input class="form-control" id="cameraUsernameInput" type="text" placeholder="无则留空">
+        </div>
+        <div class="form-group mb-0">
+          <label class="form-label">密码</label>
+          <input class="form-control" id="cameraPasswordInput" type="password" placeholder="无则留空">
+        </div>
+      </div>
+      <div class="form-hint mt-12" id="cameraAddHint">添加后会立即重新检索连接状态，成功后自动显示画面。</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelCameraAdd" type="button">取消</button>
+        <button class="btn btn-primary" id="confirmCameraAdd" type="button">添加并连接</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="cameraZoomModal">
+    <div class="modal camera-zoom-modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="cameraZoomTitle">监控画面</div>
+          <div class="modal-sub" id="cameraZoomSub">--</div>
+        </div>
+        <button class="modal-close" id="closeCameraZoom" type="button">×</button>
+      </div>
+      <div class="zoom-camera-frame">
+        <img id="cameraZoomImg" alt="放大监控画面">
+        <div class="camera-placeholder" id="cameraZoomPlaceholder">
+          <div class="placeholder-title">正在连接摄像头</div>
+          <div class="placeholder-sub">请稍候</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -127,9 +139,18 @@
   <script>
     Layout.init();
 
+    var SCREEN_COUNT = 6;
+    var BINDING_KEY = 'agri_camera_screen_bindings_v2';
+    var POWER_KEY = 'agri_camera_screen_power_v2';
     var cameras = [];
-    var selectedCamera = null;
+    var plots = [];
+    var alarms = [];
     var detectionRecords = [];
+    var screens = [];
+    var bindings = loadJson(BINDING_KEY, {});
+    var power = loadJson(POWER_KEY, {});
+    var pendingSlot = 0;
+    var zoomStream = { seq: 0, useProxy: false, timer: null, screen: null, movedImg: null, originalParent: null, fallbackImg: null };
     var initialRecordId = new URLSearchParams(location.search).get('recordId');
 
     function esc(s) {
@@ -140,132 +161,405 @@
         .replace(/"/g, '&quot;');
     }
 
-    function cameraUrl(cam) {
-      if (API.isSimulatorMode()) return API.getSimulatorCameraSource();
+    function loadJson(key, fallback) {
+      try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+    }
+
+    function saveJson(key, data) {
+      try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) {}
+    }
+
+    function cameraAuth(cam) {
+      var username = cam && cam.username && cam.username !== 'null' ? cam.username : '';
+      var password = cam && cam.password && cam.password !== 'null' ? cam.password : '';
+      return username ? encodeURIComponent(username) + ':' + encodeURIComponent(password) + '@' : '';
+    }
+
+    function directCameraUrl(cam) {
+      return 'http://' + cameraAuth(cam) + cam.ip + ':' + cam.port + '/video?_=' + Date.now();
+    }
+
+    function proxyCameraUrl(cam) {
       return 'api/camera/mjpeg?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
     }
 
-    function setPlaceholder(title, sub) {
-      var p = document.getElementById('cameraPlaceholder');
+    function cameraUrl(cam, useProxy) {
+      if (API.isSimulatorMode && API.isSimulatorMode()) return API.getSimulatorCameraSource();
+      return useProxy ? proxyCameraUrl(cam) : directCameraUrl(cam);
+    }
+
+    function cameraById(id) {
+      return cameras.filter(function (cam) { return cam.id === id; })[0] || null;
+    }
+
+    function plotById(id) {
+      return plots.filter(function (plot) { return plot.id === id; })[0] || null;
+    }
+
+    function cameraPowerKey(slot) {
+      return String(slot);
+    }
+
+    function isScreenPowered(slot) {
+      return power[cameraPowerKey(slot)] !== false;
+    }
+
+    function setScreenPower(slot, on) {
+      power[cameraPowerKey(slot)] = !!on;
+      saveJson(POWER_KEY, power);
+    }
+
+    function alarmCountForCamera(cam) {
+      if (!cam) return 0;
+      return alarms.filter(function (alarm) {
+        if (alarm.status === '已处理') return false;
+        return alarm.deviceId === cam.id || (!alarm.deviceId && alarm.plotId && alarm.plotId === cam.plotId);
+      }).length;
+    }
+
+    function latestAlarmForCamera(cam) {
+      if (!cam) return null;
+      return alarms.filter(function (alarm) {
+        if (alarm.status === '已处理') return false;
+        return alarm.deviceId === cam.id || (!alarm.deviceId && alarm.plotId && alarm.plotId === cam.plotId);
+      })[0] || null;
+    }
+
+    function buildScreens(targetCameraId) {
+      var used = {};
+      screens = [];
+      for (var i = 0; i < SCREEN_COUNT; i++) {
+        var bound = bindings[String(i)];
+        var cam = bound ? cameraById(bound) : null;
+        if (!cam) {
+          cam = cameras.filter(function (c) { return !used[c.id]; })[0] || null;
+          if (cam) bindings[String(i)] = cam.id;
+        }
+        if (cam) used[cam.id] = true;
+        screens.push({
+          slot: i,
+          camera: cam,
+          status: targetCameraId && cam && cam.id === targetCameraId ? 'connecting' : 'idle',
+          seq: 0,
+          useProxy: false,
+          timer: null
+        });
+      }
+      saveJson(BINDING_KEY, bindings);
+    }
+
+    function renderMonitorWall(targetCameraId) {
+      var wall = document.getElementById('monitorWall');
+      wall.innerHTML = screens.map(function (screen) {
+        var cam = screen.camera;
+        var powered = isScreenPowered(screen.slot);
+        var alarmCount = alarmCountForCamera(cam);
+        var alarm = latestAlarmForCamera(cam);
+        var statusText = !cam ? '连接失败' : (!powered ? '已关闭' : (screen.status === 'live' ? '连接成功' : (screen.status === 'connecting' ? '正在连接' : '连接失败')));
+        return '<article class="monitor-tile ' + (screen.status === 'live' && powered ? 'is-live' : '') + (!powered ? ' is-off' : '') + '" data-slot="' + screen.slot + '">' +
+          '<div class="monitor-frame">' +
+            '<img id="cameraImg' + screen.slot + '" alt="监控屏 ' + (screen.slot + 1) + '">' +
+            '<div class="camera-placeholder" id="cameraPlaceholder' + screen.slot + '">' +
+              '<div class="placeholder-title">' + esc(statusText) + '</div>' +
+              '<div class="placeholder-sub">' + esc(cam ? cam.ip + ':' + cam.port : '未绑定或未连接摄像头，点击添加摄像头设备。') + '</div>' +
+            '</div>' +
+            '<div class="monitor-hud"><span class="live-dot"></span><span>' + esc(statusText) + '</span></div>' +
+            '<div class="monitor-screen-no">屏幕 ' + (screen.slot + 1) + '</div>' +
+          '</div>' +
+          '<div class="monitor-meta">' +
+            '<div><b>' + esc(cam ? cam.name : '未绑定摄像头') + '</b><span>' + esc(cam ? ((cam.plotName || '-') + ' · ' + (cam.protocol || 'mjpeg').toUpperCase()) : '点击画面添加') + '</span></div>' +
+            '<div class="monitor-actions">' +
+              '<button class="btn btn-outline btn-sm" data-power="' + screen.slot + '" data-action="on" type="button">开</button>' +
+              '<button class="btn btn-outline btn-sm" data-power="' + screen.slot + '" data-action="off" type="button">关</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="monitor-alarm ' + (alarmCount ? 'has-alarm' : '') + '">' +
+            (alarmCount ? ('未处理告警 ' + alarmCount + ' 条 · ' + esc((alarm && alarm.type) || '告警')) : '当前无未处理告警') +
+          '</div>' +
+        '</article>';
+      }).join('');
+      bindMonitorTileEvents();
+      screens.forEach(function (screen) {
+        if (screen.camera && isScreenPowered(screen.slot)) {
+          attachScreenStream(screen, !!targetCameraId && screen.camera.id === targetCameraId);
+        }
+      });
+      fillControlSelect();
+    }
+
+    function bindMonitorTileEvents() {
+      document.querySelectorAll('.monitor-tile').forEach(function (tile) {
+        tile.addEventListener('click', function () {
+          var slot = Number(tile.getAttribute('data-slot'));
+          var screen = screens[slot];
+          if (!screen || !screen.camera || screen.status !== 'live' || !isScreenPowered(slot)) {
+            openCameraAddModal(slot);
+            return;
+          }
+          openCameraZoom(screen);
+        });
+      });
+      document.querySelectorAll('[data-power]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          setCameraPower(Number(btn.getAttribute('data-power')), btn.getAttribute('data-action') === 'on', false, false);
+        });
+      });
+    }
+
+    function setScreenPlaceholder(slot, title, sub, loading) {
+      var p = document.getElementById('cameraPlaceholder' + slot);
+      var tile = document.querySelector('[data-slot="' + slot + '"]');
+      if (!p || !tile) return;
       p.style.display = 'grid';
       p.innerHTML =
+        (loading ? '<div class="mini-spinner"></div>' : '') +
         '<div class="placeholder-title">' + esc(title) + '</div>' +
         '<div class="placeholder-sub">' + esc(sub || '') + '</div>';
+      tile.classList.toggle('is-live', false);
+      tile.classList.toggle('is-connecting', !!loading);
+      tile.classList.toggle('is-off', title === '已关闭');
+      var hud = tile.querySelector('.monitor-hud span:last-child');
+      if (hud) hud.textContent = title;
     }
 
-    function hidePlaceholder() {
-      document.getElementById('cameraPlaceholder').style.display = 'none';
-    }
-
-    function renderCameraInfo(cam) {
-      document.getElementById('cameraName').textContent = cam ? cam.name : '--';
-      document.getElementById('cameraMeta').textContent = cam ? ((cam.username ? cam.username + '@' : '') + cam.ip + ':' + cam.port) : '--';
-      document.getElementById('cameraProtocol').textContent = cam ? String(cam.protocol || 'mjpeg').toUpperCase() : '--';
-      document.getElementById('cameraAddress').textContent = cam ? (cam.ip + ':' + cam.port) : '--';
-      document.getElementById('cameraPlot').textContent = cam ? (cam.plotName || '-') : '--';
-      document.getElementById('cameraOnline').textContent = cam ? (cam.online ? '在线' : '离线') : '--';
-    }
-
-    function playCamera(cam) {
-      selectedCamera = cam || null;
-      renderCameraInfo(selectedCamera);
-      loadDetectionStatus();
-      loadDetectionRecords();
-      var img = document.getElementById('cameraImg');
-      img.removeAttribute('src');
-
-      if (!selectedCamera) {
-        setPlaceholder('暂无摄像头设备', '请先在设备管理中添加摄像头类型设备。');
-        return;
+    function hideScreenPlaceholder(slot) {
+      var p = document.getElementById('cameraPlaceholder' + slot);
+      var tile = document.querySelector('[data-slot="' + slot + '"]');
+      if (p) p.style.display = 'none';
+      if (tile) {
+        tile.classList.add('is-live');
+        tile.classList.remove('is-connecting', 'is-off');
+        var hud = tile.querySelector('.monitor-hud span:last-child');
+        if (hud) hud.textContent = '连接成功';
       }
-
-      var protocol = String(selectedCamera.protocol || 'mjpeg').toLowerCase();
-      if (protocol === 'rtsp') {
-        setPlaceholder('RTSP 暂需转码', '该摄像头是 RTSP 协议，需要 ffmpeg 中转为 HLS/WebRTC/HTTP-FLV 后播放。');
-        return;
-      }
-
-      setPlaceholder(API.isSimulatorMode() ? '正在载入本地模拟画面' : '正在连接摄像头', API.isSimulatorMode() ? '模拟模式不会连接摄像头或后端服务。' : selectedCamera.ip + ':' + selectedCamera.port);
-      img.onload = hidePlaceholder;
-      img.onerror = function () {
-        setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');
-      };
-      img.src = cameraUrl(selectedCamera);
     }
 
-    function loadDetectionStatus() {
-      var text = document.getElementById('detectionStatus');
-      if (!selectedCamera) {
-        text.textContent = '暂无摄像头，人体识别不可用';
-        setDetectionForm({ enabled: false, confidenceThreshold: 0.5, cooldownSeconds: 30 });
-        return;
-      }
-      text.textContent = '正在读取识别设置';
-      API.getDetectionStatus(selectedCamera.id).then(function (res) {
-        if (!res || res.code !== 0) {
-          text.textContent = (res && res.msg) || '识别状态读取失败';
-          return;
-        }
-        setDetectionForm(res.data || {});
-        var d = res.data || {};
-        var state = d.enabled
-          ? (d.workerOnline ? 'worker 在线' : 'worker 未连接')
-          : '识别已关闭';
-        if (d.workerStatus === 'error') state = 'worker 异常';
-        text.textContent = state + (d.workerMessage ? ' · ' + d.workerMessage : '') +
-          (d.lastRecordAt ? (' · 最近识别：' + d.lastRecordAt) : ' · 暂无人体识别记录');
-      }).catch(function (e) {
-        text.textContent = e.message || '识别状态读取失败';
+    function updateAlarmBadges() {
+      screens.forEach(function (screen) {
+        var tile = document.querySelector('[data-slot="' + screen.slot + '"]');
+        if (!tile) return;
+        var alarmBox = tile.querySelector('.monitor-alarm');
+        if (!alarmBox) return;
+        var count = alarmCountForCamera(screen.camera);
+        var alarm = latestAlarmForCamera(screen.camera);
+        alarmBox.classList.toggle('has-alarm', count > 0);
+        alarmBox.textContent = count ? ('未处理告警 ' + count + ' 条 · ' + ((alarm && alarm.type) || '告警')) : '当前无未处理告警';
       });
     }
 
-    function setDetectionForm(data) {
-      document.getElementById('detectionEnabled').checked = !!data.enabled;
-      document.getElementById('confidenceThreshold').value = data.confidenceThreshold == null ? 0.5 : data.confidenceThreshold;
-      document.getElementById('cooldownSeconds').value = data.cooldownSeconds == null ? 30 : data.cooldownSeconds;
+    function stopScreenStream(screen) {
+      if (!screen) return;
+      clearInterval(screen.timer);
+      screen.timer = null;
+      screen.seq += 1;
+      var img = document.getElementById('cameraImg' + screen.slot);
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+      }
     }
 
-    function saveDetectionSettings() {
-      if (!selectedCamera) {
-        Toast.error('请先选择摄像头');
+    function attachScreenStream(screen, showConnecting) {
+      var cam = screen.camera;
+      var img = document.getElementById('cameraImg' + screen.slot);
+      if (!cam || !img) return;
+      stopScreenStream(screen);
+      screen.status = 'connecting';
+      screen.useProxy = false;
+      if (showConnecting) setScreenPlaceholder(screen.slot, '正在连接', cam.ip + ':' + cam.port, true);
+      if (String(cam.protocol || 'mjpeg').toLowerCase() === 'rtsp') {
+        screen.status = 'failed';
+        setScreenPlaceholder(screen.slot, '连接失败', 'RTSP 需要转码后才能在浏览器播放。', false);
         return;
       }
-      var confidence = Number(document.getElementById('confidenceThreshold').value);
-      var cooldown = Number(document.getElementById('cooldownSeconds').value);
-      if (isNaN(confidence) || confidence < 0.01 || confidence > 0.99) {
-        Toast.error('置信度阈值需在 0.01-0.99 之间');
+      function attach(showProxyHint) {
+        var seq = ++screen.seq;
+        if (showProxyHint) setScreenPlaceholder(screen.slot, '正在连接', cam.ip + ':' + cam.port, true);
+        img.onload = function () {
+          if (seq !== screen.seq) return;
+          screen.status = 'live';
+          hideScreenPlaceholder(screen.slot);
+        };
+        img.onerror = function () {
+          if (seq !== screen.seq) return;
+          if (!screen.useProxy) {
+            screen.useProxy = true;
+            setScreenPlaceholder(screen.slot, '正在切换备用通道', '直连失败，正在使用同源代理。', true);
+            attach(false);
+            return;
+          }
+          screen.status = 'failed';
+          setScreenPlaceholder(screen.slot, '连接失败', '请检查协议、账号密码、IP、端口和手机摄像头服务。', false);
+        };
+        img.src = cameraUrl(cam, screen.useProxy);
+      }
+      attach(showConnecting);
+      screen.timer = setInterval(function () {
+        if (screen.useProxy && isScreenPowered(screen.slot)) attach(false);
+      }, 12000);
+    }
+
+    function setCameraPower(slot, on, quiet, skipAdd) {
+      var screen = screens[slot];
+      if (!screen) return;
+      setScreenPower(slot, on);
+      if (!on) {
+        stopScreenStream(screen);
+        screen.status = 'off';
+        setScreenPlaceholder(slot, '已关闭', '该屏幕摄像头已关闭，可从总控或屏幕按钮重新开启。', false);
+        if (screen.camera) API.saveDetectionSettings({ deviceId: screen.camera.id, enabled: false, confidenceThreshold: 0.5, cooldownSeconds: 30 }).catch(function () {});
+        if (!quiet) Toast.success('摄像头已关闭');
         return;
       }
-      if (isNaN(cooldown) || cooldown < 0) {
-        Toast.error('冷却秒数必须为非负数字');
+      if (!screen.camera) {
+        if (!skipAdd) openCameraAddModal(slot);
         return;
       }
-      API.saveDetectionSettings({
-        deviceId: selectedCamera.id,
-        enabled: document.getElementById('detectionEnabled').checked,
-        confidenceThreshold: confidence,
-        cooldownSeconds: Math.round(cooldown)
+      API.saveDetectionSettings({ deviceId: screen.camera.id, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30 }).catch(function () {});
+      startWorker(false);
+      attachScreenStream(screen, true);
+      if (!quiet) Toast.success('摄像头正在连接');
+    }
+
+    function setSelectedPower(on) {
+      var value = document.getElementById('cameraControlSelect').value;
+      if (value === 'all') {
+        screens.forEach(function (screen) { setCameraPower(screen.slot, on, true, true); });
+        Toast.success(on ? '已开启全部已绑定摄像头' : '已关闭全部摄像头');
+        return;
+      }
+      setCameraPower(Number(value), on, false, false);
+    }
+
+    function fillControlSelect() {
+      var sel = document.getElementById('cameraControlSelect');
+      var value = sel.value || 'all';
+      sel.innerHTML = '<option value="all">全部摄像头</option>' + screens.map(function (screen) {
+        var cam = screen.camera;
+        return '<option value="' + screen.slot + '">屏幕 ' + (screen.slot + 1) + ' · ' + esc(cam ? cam.name : '未绑定') + '</option>';
+      }).join('');
+      sel.value = value;
+    }
+
+    function fillPlotSelect() {
+      var sel = document.getElementById('cameraPlotSelect');
+      sel.innerHTML = '';
+      plots.forEach(function (plot) {
+        var opt = document.createElement('option');
+        opt.value = plot.id;
+        opt.textContent = plot.name;
+        sel.appendChild(opt);
+      });
+    }
+
+    function openCameraAddModal(slot) {
+      pendingSlot = slot || 0;
+      document.getElementById('cameraAddTitle').textContent = '为屏幕 ' + (pendingSlot + 1) + ' 添加摄像头';
+      document.getElementById('cameraNameInput').value = '监控屏' + (pendingSlot + 1) + '摄像头';
+      document.getElementById('cameraProtocolInput').value = 'mjpeg';
+      document.getElementById('cameraIpInput').value = '';
+      document.getElementById('cameraPortInput').value = '';
+      document.getElementById('cameraUsernameInput').value = '';
+      document.getElementById('cameraPasswordInput').value = '';
+      fillPlotSelect();
+      document.getElementById('cameraAddHint').textContent = plots.length ? '添加后会立即重新检索连接状态，成功后自动显示画面。' : '不存在地块';
+      document.getElementById('cameraAddModal').classList.add('show');
+    }
+
+    function closeCameraAddModal() {
+      document.getElementById('cameraAddModal').classList.remove('show');
+    }
+
+    function confirmCameraAdd() {
+      if (!plots.length) {
+        Toast.error('不存在地块');
+        return;
+      }
+      var name = document.getElementById('cameraNameInput').value.trim();
+      var protocol = document.getElementById('cameraProtocolInput').value;
+      var ip = document.getElementById('cameraIpInput').value.trim();
+      var port = Number(document.getElementById('cameraPortInput').value);
+      var plotId = document.getElementById('cameraPlotSelect').value;
+      var plot = plotById(plotId);
+      if (!plot) {
+        Toast.error('不存在地块');
+        return;
+      }
+      if (!name || !ip || !port || port < 1 || port > 65535) {
+        Toast.error('请完整填写名称、IP 和 1-65535 之间的端口');
+        return;
+      }
+      var btn = document.getElementById('confirmCameraAdd');
+      btn.disabled = true;
+      btn.textContent = '正在添加...';
+      setScreenPlaceholder(pendingSlot, '正在连接', ip + ':' + port, true);
+      closeCameraAddModal();
+      API.addDevice({
+        name: name,
+        type: '摄像头',
+        plotId: plot.id,
+        plotName: plot.name,
+        protocol: protocol,
+        ip: ip,
+        port: port,
+        username: document.getElementById('cameraUsernameInput').value.trim(),
+        password: document.getElementById('cameraPasswordInput').value.trim()
       }).then(function (res) {
-        if (!res || res.code !== 0) {
-          Toast.error((res && res.msg) || '保存失败');
+        if (!res || res.code !== 0 || !res.data) {
+          setScreenPlaceholder(pendingSlot, '连接失败', (res && res.msg) || '摄像头添加失败', false);
+          Toast.error((res && res.msg) || '摄像头添加失败');
           return;
         }
-        Toast.success('人体识别设置已保存');
-        loadDetectionStatus();
+        bindings[String(pendingSlot)] = res.data.id;
+        setScreenPower(pendingSlot, true);
+        saveJson(BINDING_KEY, bindings);
+        return API.saveDetectionSettings({ deviceId: res.data.id, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30 })
+          .catch(function () {})
+          .then(function () { return startWorker(false); })
+          .then(function () { return loadAll(res.data.id); });
       }).catch(function (e) {
-        Toast.error(e.message || '保存失败');
+        setScreenPlaceholder(pendingSlot, '连接失败', e.message || '摄像头添加失败', false);
+        Toast.error(e.message || '摄像头添加失败');
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = '添加并连接';
       });
     }
 
-    function loadDetectionRecords() {
+    function startWorker(showToast) {
+      var btn = document.getElementById('startDetectionWorker');
+      btn.disabled = true;
+      btn.textContent = '启动中...';
+      return API.startDetectionWorker().then(function (res) {
+        if (!res || res.code !== 0) {
+          if (showToast !== false) Toast.error((res && res.msg) || 'worker 启动失败');
+          return false;
+        }
+        if (showToast !== false) Toast.success((res && res.msg) || 'worker 已启动');
+        return true;
+      }).catch(function (e) {
+        if (showToast !== false) Toast.error(e.message || 'worker 启动失败');
+        return false;
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = '启动 worker';
+      });
+    }
+
+    function enableWorkerForCameras() {
+      if (!cameras.length) return Promise.resolve();
+      return Promise.all(cameras.map(function (cam) {
+        return API.saveDetectionSettings({ deviceId: cam.id, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30 }).catch(function () { return null; });
+      })).then(function () { return startWorker(false); });
+    }
+
+    function loadDetectionRecords(deviceId) {
       var box = document.getElementById('detectionRecordList');
-      if (!selectedCamera) {
-        box.innerHTML = '<div class="empty-state">暂无摄像头设备</div>';
-        return;
-      }
       box.innerHTML = '<div class="empty-state">正在加载识别记录</div>';
       API.getDetectionRecords({
-        deviceId: selectedCamera.id,
+        deviceId: deviceId || '',
         date: document.getElementById('recordDate').value
       }).then(function (res) {
         if (!res || res.code !== 0) {
@@ -305,7 +599,8 @@
         '</article>';
       }).join('');
       box.querySelectorAll('[data-play]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
           openDetectionModal(btn.getAttribute('data-play'));
         });
       });
@@ -342,60 +637,171 @@
       document.getElementById('detectionModal').style.display = 'none';
     }
 
-    function fillCameraSelect() {
-      var sel = document.getElementById('cameraSelect');
-      sel.innerHTML = '';
-      cameras.forEach(function (cam) {
-        var opt = document.createElement('option');
-        opt.value = cam.id;
-        opt.textContent = cam.name + '（' + (cam.protocol || 'mjpeg').toUpperCase() + ' · ' + cam.ip + ':' + cam.port + '）';
-        sel.appendChild(opt);
-      });
-      if (!cameras.length) {
-        var opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = '暂无摄像头设备';
-        sel.appendChild(opt);
-      }
+    function openCameraZoom(screen) {
+      stopZoomStream();
+      var cam = screen && screen.camera;
+      if (!screen || !cam) return;
+      document.getElementById('cameraZoomTitle').textContent = cam.name;
+      document.getElementById('cameraZoomSub').textContent = (cam.plotName || '-') + ' · ' + cam.ip + ':' + cam.port;
+      document.getElementById('cameraZoomModal').classList.add('show');
+      attachZoomStream(screen);
     }
 
-    function loadCameras() {
-      API.getDevices().then(function (res) {
-        cameras = (res.data || []).filter(function (d) { return d.type === '摄像头'; });
-        fillCameraSelect();
-        playCamera(cameras[0]);
+    function stopZoomStream() {
+      clearInterval(zoomStream.timer);
+      zoomStream.timer = null;
+      zoomStream.seq += 1;
+      if (zoomStream.movedImg && zoomStream.originalParent) {
+        zoomStream.movedImg.classList.remove('monitor-zoom-img');
+        zoomStream.originalParent.insertBefore(zoomStream.movedImg, zoomStream.originalParent.firstChild);
+        if (zoomStream.screen) {
+          zoomStream.screen.status = 'live';
+          hideScreenPlaceholder(zoomStream.screen.slot);
+        }
+      }
+      var img = zoomStream.fallbackImg || document.getElementById('cameraZoomImg');
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+        img.style.display = 'none';
+      }
+      zoomStream.screen = null;
+      zoomStream.movedImg = null;
+      zoomStream.originalParent = null;
+      zoomStream.fallbackImg = null;
+    }
+
+    function attachZoomStream(screen) {
+      var cam = screen.camera;
+      var liveImg = document.getElementById('cameraImg' + screen.slot);
+      var frame = document.querySelector('.zoom-camera-frame');
+      var fallbackImg = document.getElementById('cameraZoomImg');
+      var placeholder = document.getElementById('cameraZoomPlaceholder');
+      var tilePlaceholder = document.getElementById('cameraPlaceholder' + screen.slot);
+      if (liveImg && liveImg.getAttribute('src')) {
+        zoomStream.screen = screen;
+        zoomStream.movedImg = liveImg;
+        zoomStream.originalParent = liveImg.parentNode;
+        zoomStream.fallbackImg = fallbackImg;
+        fallbackImg.style.display = 'none';
+        liveImg.classList.add('monitor-zoom-img');
+        frame.insertBefore(liveImg, placeholder);
+        placeholder.style.display = 'none';
+        if (tilePlaceholder) {
+          tilePlaceholder.style.display = 'grid';
+          tilePlaceholder.innerHTML =
+            '<div class="placeholder-title">正在放大查看</div>' +
+            '<div class="placeholder-sub">' + esc(cam.name) + '</div>';
+        }
+        return;
+      }
+      var img = fallbackImg;
+      img.style.display = 'block';
+      zoomStream.useProxy = false;
+      function show(title, sub, loading) {
+        placeholder.style.display = 'grid';
+        placeholder.innerHTML =
+          (loading ? '<div class="mini-spinner"></div>' : '') +
+          '<div class="placeholder-title">' + esc(title) + '</div>' +
+          '<div class="placeholder-sub">' + esc(sub || '') + '</div>';
+      }
+      function attach() {
+        var seq = ++zoomStream.seq;
+        show('正在连接摄像头', cam.ip + ':' + cam.port, true);
+        img.onload = function () {
+          if (seq === zoomStream.seq) placeholder.style.display = 'none';
+        };
+        img.onerror = function () {
+          if (seq !== zoomStream.seq) return;
+          if (!zoomStream.useProxy) {
+            zoomStream.useProxy = true;
+            show('正在切换备用通道', '直连失败，正在使用同源代理。', true);
+            attach();
+            return;
+          }
+          show('连接失败', '请检查摄像头连接。', false);
+        };
+        img.src = cameraUrl(cam, zoomStream.useProxy);
+      }
+      attach();
+      zoomStream.timer = setInterval(function () {
+        if (zoomStream.useProxy) attach();
+      }, 12000);
+    }
+
+    function closeCameraZoom() {
+      stopZoomStream();
+      document.getElementById('cameraZoomModal').classList.remove('show');
+    }
+
+    function stopAllStreams() {
+      stopZoomStream();
+      screens.forEach(stopScreenStream);
+    }
+
+    function loadAll(targetCameraId) {
+      stopAllStreams();
+      document.getElementById('monitorWall').innerHTML = '<div class="empty-state monitor-loading">正在加载监控大屏</div>';
+      return Promise.all([
+        API.getPlots({ loader: false }).catch(function () { return { code: 1, data: [] }; }),
+        API.getDevices({ loader: false }).catch(function () { return { code: 1, data: [] }; }),
+        API.getAlarms({ loader: false }).catch(function () { return { code: 1, data: [] }; })
+      ]).then(function (res) {
+        plots = (res[0].data || []);
+        cameras = (res[1].data || []).filter(function (d) { return d.type === '摄像头'; });
+        alarms = (res[2].data || []);
+        buildScreens(targetCameraId);
+        renderMonitorWall(targetCameraId);
+        enableWorkerForCameras();
+        loadDetectionRecords('');
         if (initialRecordId) {
           openDetectionModal(initialRecordId);
           initialRecordId = null;
         }
       }).catch(function (e) {
-        setPlaceholder('加载摄像头失败', e.message || '设备接口请求失败');
+        document.getElementById('monitorWall').innerHTML = '<div class="empty-state monitor-loading">' + esc(e.message || '监控大屏加载失败') + '</div>';
       });
     }
 
-    document.getElementById('cameraSelect').addEventListener('change', function () {
-      var id = this.value;
-      playCamera(cameras.filter(function (c) { return c.id === id; })[0]);
-    });
-    document.getElementById('reloadCamera').addEventListener('click', function () {
-      playCamera(selectedCamera);
-    });
+    document.getElementById('powerOnCamera').addEventListener('click', function () { setSelectedPower(true); });
+    document.getElementById('powerOffCamera').addEventListener('click', function () { setSelectedPower(false); });
+    document.getElementById('reloadCamera').addEventListener('click', function () { loadAll(); });
     document.getElementById('reloadDetection').addEventListener('click', function () {
-      loadDetectionStatus();
-      loadDetectionRecords();
+      API.getAlarms({ loader: false }).then(function (res) {
+        alarms = (res && res.data) || [];
+        updateAlarmBadges();
+      });
+      loadDetectionRecords('');
     });
-    document.getElementById('saveDetectionSettings').addEventListener('click', saveDetectionSettings);
-    document.getElementById('recordDate').addEventListener('change', loadDetectionRecords);
+    document.getElementById('startDetectionWorker').addEventListener('click', function () { startWorker(true); });
+    document.getElementById('recordDate').addEventListener('change', function () { loadDetectionRecords(''); });
     document.getElementById('clearRecordDate').addEventListener('click', function () {
       document.getElementById('recordDate').value = '';
-      loadDetectionRecords();
+      loadDetectionRecords('');
+    });
+    document.getElementById('cancelCameraAdd').addEventListener('click', closeCameraAddModal);
+    document.getElementById('confirmCameraAdd').addEventListener('click', confirmCameraAdd);
+    document.getElementById('cameraAddModal').addEventListener('click', function (e) {
+      if (e.target === this) closeCameraAddModal();
+    });
+    document.getElementById('closeCameraZoom').addEventListener('click', closeCameraZoom);
+    document.getElementById('cameraZoomModal').addEventListener('click', function (e) {
+      if (e.target === this) closeCameraZoom();
     });
     document.getElementById('closeDetectionModal').addEventListener('click', closeDetectionModal);
     document.getElementById('detectionModal').addEventListener('click', function (e) {
       if (e.target === this) closeDetectionModal();
     });
+    window.addEventListener('beforeunload', stopAllStreams);
 
-    loadCameras();
+    loadAll();
+    setInterval(function () {
+      API.getAlarms({ loader: false }).then(function (res) {
+        alarms = (res && res.data) || [];
+        updateAlarmBadges();
+      }).catch(function () {});
+    }, 15000);
   </script>
 </body>
 </html>

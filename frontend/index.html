@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>数据总览 - 智慧农业平台</title>
+  <script>
+    // 提前应用主题，避免加载闪烁（FOUC）
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('agri_theme') || 'dark'); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="assets/css/style.css">
   <script src="assets/vendor/echarts.min.js"></script>
 </head>
@@ -57,7 +61,7 @@
         <!-- 多地块总览 -->
         <div class="section-title">
           <span>多地块总览</span>
-          <button class="btn btn-primary btn-sm" id="openAddPlot" style="margin-left:auto">＋ 添加地块</button>
+          <a class="btn btn-primary btn-sm" id="openAddPlot" href="map.html?add=1" style="margin-left:auto">＋ 添加地块</a>
         </div>
         <div class="plot-grid" id="plotGrid"></div>
 
@@ -222,10 +226,16 @@
       ]);
     }
 
+    function cssVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
     /* ---------- ECharts 通用折线图配置（单指标，一轴一图） ---------- */
     function lineOption(title, unit, color, dates, values) {
+      var textColor = cssVar('--text') || '#e7efff';
+      var mutedColor = cssVar('--text-muted') || '#64748b';
       return {
-        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: '#e7efff' } },
+        title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: textColor } },
         tooltip: {
           trigger: 'axis',
           backgroundColor: 'rgba(14, 23, 40, .96)',
@@ -245,14 +255,14 @@
           boundaryGap: false,
           axisLine: { lineStyle: { color: 'rgba(148, 163, 184, .25)' } },
           axisTick: { show: false },
-          axisLabel: { color: '#64748b', fontSize: 10, hideOverlap: true }
+          axisLabel: { color: mutedColor, fontSize: 10, hideOverlap: true }
         },
         yAxis: {
           type: 'value',
           scale: true,
           axisLine: { show: false },
           axisTick: { show: false },
-          axisLabel: { color: '#64748b', fontSize: 11 },
+          axisLabel: { color: mutedColor, fontSize: 11 },
           splitLine: { lineStyle: { color: 'rgba(148, 163, 184, .08)' } }
         },
         series: [{
@@ -459,17 +469,21 @@
       });
     }
 
-    /* ---------- 渲染设备状态环形图（模拟数据） ---------- */
+    /* ---------- 渲染设备状态环形图 ---------- */
     function renderDeviceStatus() {
       var dom = document.getElementById('deviceChart');
       if (!window.echarts || !dom) return;
 
       var total = devices.length;
-      var running = devices.filter(function (d) { return d.running; }).length;
+      var running = devices.filter(function (d) { return d.online && d.running; }).length;
       var offline = devices.filter(function (d) { return !d.online; }).length;
       var online = total - running - offline;
+      var textColor = cssVar('--text') || '#e7efff';
+      var mutedColor = cssVar('--text-muted') || '#64748b';
+      var secondaryColor = cssVar('--text-secondary') || '#9db1cc';
 
-      var chart = echarts.init(dom);
+      if (!charts.deviceStatus) charts.deviceStatus = echarts.init(dom);
+      var chart = charts.deviceStatus;
       chart.setOption({
         tooltip: {
           trigger: 'item',
@@ -484,15 +498,15 @@
           itemWidth: 10,
           itemHeight: 10,
           itemGap: 16,
-          textStyle: { color: '#9db1cc', fontSize: 12 }
+          textStyle: { color: secondaryColor, fontSize: 12 }
         },
         title: {
           text: total + '',
           subtext: '设备总数',
           left: 'center',
           top: '30%',
-          textStyle: { color: '#e7efff', fontSize: 24, fontWeight: 700 },
-          subtextStyle: { color: '#64748b', fontSize: 11 }
+          textStyle: { color: textColor, fontSize: 24, fontWeight: 700 },
+          subtextStyle: { color: mutedColor, fontSize: 11 }
         },
         series: [{
           type: 'pie',
@@ -510,9 +524,12 @@
       });
     }
 
-    /* ---------- 渲染实时告警面板（模拟数据） ---------- */
+    /* ---------- 渲染实时告警面板 ---------- */
     function renderAlarmPanel() {
       var html = '<div class="alarm-list">';
+      if (!alarms.length) {
+        html += '<div class="empty-state">暂无告警记录</div>';
+      }
       alarms.slice(0, 5).forEach(function (a) {
         var severe = a.level === '严重';
         var pending = a.status === '未处理';
@@ -530,9 +547,12 @@
       document.getElementById('alarmPanel').innerHTML = html;
     }
 
-    /* ---------- 渲染最近操作日志（模拟数据） ---------- */
+    /* ---------- 渲染最近操作日志 ---------- */
     function renderOperationLog() {
       var html = '<div class="log-list">';
+      if (!controlLogs.length) {
+        html += '<div class="empty-state">暂无控制记录</div>';
+      }
       controlLogs.slice(0, 5).forEach(function (l) {
         var success = l.result === '成功';
         html +=
@@ -549,6 +569,11 @@
     document.getElementById('trendPlot').addEventListener('change', function () {
       loadTrend(this.value);
     });
+    window.addEventListener('agri:themechange', function () {
+      var trendPlot = document.getElementById('trendPlot');
+      if (trendPlot && trendPlot.value) loadTrend(trendPlot.value);
+      renderDeviceStatus();
+    });
 
     /* ---------- 删除地块 ---------- */
     function handleDeletePlot(plot) {
@@ -562,6 +587,9 @@
         devices = devices.filter(function (d) { return d.plotId !== plot.id; });
         renderKpi();
         renderPlotCards();
+        renderDeviceStatus();
+        renderAlarmPanel();
+        renderOperationLog();
         fillPlotSelect();
         if (plots.length) loadTrend(plots[0].id);
         Toast.success('地块「' + plot.name + '」已删除');
@@ -623,11 +651,7 @@
     /* ---------- 添加地块弹窗控制 ---------- */
     var addPlotModal = document.getElementById('addPlotModal');
     document.getElementById('openAddPlot').addEventListener('click', function () {
-      document.getElementById('plotName').value = '';
-      document.getElementById('plotCrop').value = '';
-      document.getElementById('plotArea').value = '';
-      document.getElementById('devRows').innerHTML = '';
-      addPlotModal.classList.add('show');
+      location.href = 'map.html?add=1';
     });
     document.getElementById('cancelAddPlot').addEventListener('click', function () {
       addPlotModal.classList.remove('show');
@@ -676,6 +700,9 @@
           devices = r2.data;
           renderKpi();
           renderPlotCards();
+          renderDeviceStatus();
+          renderAlarmPanel();
+          renderOperationLog();
           fillPlotSelect();
           document.getElementById('trendPlot').value = np.id;
           loadTrend(np.id);
@@ -686,26 +713,39 @@
       });
     });
 
+    function refreshDashboardData() {
+      return Promise.all([
+        API.getPlots(),
+        API.getDevices(),
+        API.getAlarms(),
+        API.getControlLogs({ limit: 5 })
+      ]).then(function (all) {
+        var selectedPlot = document.getElementById('trendPlot').value;
+        plots = all[0].data || [];
+        devices = all[1].data || [];
+        alarms = all[2].data || [];
+        controlLogs = all[3].data || [];
+        fillPlotSelect();
+        if (selectedPlot) document.getElementById('trendPlot').value = selectedPlot;
+        if (!document.getElementById('trendPlot').value && plots.length) {
+          document.getElementById('trendPlot').value = plots[0].id;
+        }
+        renderKpi();
+        renderPlotCards();
+        renderDeviceStatus();
+        renderAlarmPanel();
+        renderOperationLog();
+        if (document.getElementById('trendPlot').value) {
+          loadTrend(document.getElementById('trendPlot').value);
+        }
+      });
+    }
+
     /* ---------- 初始化 ---------- */
-    API.getPlots().then(function (res) {
-      plots = res.data;
-      fillPlotSelect();
-      return API.getDevices();
-    }).then(function (res) {
-      devices = res.data;
-      return API.getAlarms();
-    }).then(function (res) {
-      alarms = res.data;
-      return API.getControlLogs();
-    }).then(function (res) {
-      controlLogs = res.data || [];
+    refreshDashboardData().then(function () {
       renderKpi();
-      renderPlotCards();
-      renderDeviceStatus();
-      renderAlarmPanel();
-      renderOperationLog();
-      if (plots.length) loadTrend(plots[0].id);
     });
+    setInterval(refreshDashboardData, 15000);
   </script>
 </body>
 </html>
