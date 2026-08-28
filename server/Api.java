@@ -2060,6 +2060,7 @@ public class Api {
         }
         byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
         conn.setFixedLengthStreamingMode(bytes.length);
+        conn.setRequestProperty("Connection", "close");
         try (OutputStream out = conn.getOutputStream()) {
             out.write(bytes);
         }
@@ -2440,13 +2441,13 @@ public class Api {
        ================================================================== */
 
     /** 智能问答 API Key：从环境变量读取，勿硬编码（避免随代码提交泄露）。 */
-    private static final String SMART_QA_API_KEY = envFirst("SMART_QA_API_KEY", "DEEPSEEK_API_KEY");
+    private static final String SMART_QA_API_KEY = envFirst("SMART_QA_API_KEY", "DEEPSEEK_API_KEY", "API");
     private static final String SMART_QA_URL   = env("SMART_QA_API_URL", "https://api.deepseek.com/chat/completions");
     private static final String SMART_QA_MODEL = env("SMART_QA_MODEL", "deepseek-chat");
     /** 多轮对话最多带上多少条历史（防止上下文过长、超 token 上限） */
-    private static final int MAX_CHAT_HISTORY = 20;
+    private static final int MAX_CHAT_HISTORY = 8;
     /** RAG 知识库检索返回的最相关知识块条数 */
-    private static final int RAG_TOP_K = 3;
+    private static final int RAG_TOP_K = 2;
 
     /**
      * POST /api/assistant/chat —— 智能问答（DeepSeek 大模型，支持多轮对话）。
@@ -2487,22 +2488,16 @@ public class Api {
 
         String question = lastUserQuestion(valid);
 
+        // 所有智能问答都调用大模型；RAG 只作为参考资料，不再走本地固定回答分支。
+        String kbContext = Rag.buildContext(question, RAG_TOP_K);
         String answer;
-        String sourcesJson;
-        if (isIrrigationPredictionQuestion(question)) {
-            answer = irrigationPredictionAnswer(question);
-            sourcesJson = Json.arrStr(java.util.Arrays.asList("历史温湿度光照数据", "1层GRU预测模型"));
-        } else {
-            // RAG 检索：拿最后一条用户问题去知识库检索相关资料，命中则拼入「参考资料」段给大模型
-            String kbContext = Rag.buildContext(question, RAG_TOP_K);
-            try {
-                answer = deepseekChat(valid, kbContext);
-            } catch (Exception e) {
-                return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
-            }
-            // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
-            sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
+        try {
+            answer = deepseekChat(valid, kbContext);
+        } catch (Exception e) {
+            return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
         }
+        // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
+        String sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
 
         // 落库（按用户名隔离）；未传 user（未登录）则不保存，仅返回回答
         Long conversationId = null;
@@ -3119,7 +3114,7 @@ public class Api {
 
         StringBuilder req = new StringBuilder();
         req.append("{\"model\":\"").append(SMART_QA_MODEL)
-           .append("\",\"temperature\":0.7,\"messages\":[");
+           .append("\",\"temperature\":0.5,\"max_tokens\":700,\"messages\":[");
         req.append("{\"role\":\"system\",\"content\":")
            .append(Json.str(system))
            .append('}');
@@ -3129,12 +3124,31 @@ public class Api {
         }
         req.append("]}");
 
-        String body = httpPostJson(SMART_QA_URL, req.toString(), SMART_QA_API_KEY, 5000, 15000);
+        String body = smartQaPostWithRetry(req.toString());
         String content = Json.strValue(body, "content");
         if (content == null) {
             throw new IOException("响应解析失败，未找到 content 字段");
         }
         return content;
+    }
+
+    private static String smartQaPostWithRetry(String payload) throws IOException {
+        IOException last = null;
+        for (int i = 1; i <= 3; i++) {
+            try {
+                return httpPostJson(SMART_QA_URL, payload, SMART_QA_API_KEY, 2500, 30000);
+            } catch (IOException e) {
+                last = e;
+                if (i == 3) break;
+                try {
+                    Thread.sleep(250L * i);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+        throw last == null ? new IOException("模型接口请求失败") : last;
     }
 
     /**
