@@ -191,7 +191,7 @@
     <div class="modal drone-detail-modal">
       <div class="modal-title" id="droneDetailTitle">无人机详情</div>
       <div class="form-group">
-        <label class="form-label">绑定地块</label>
+        <label class="form-label">重新绑定地块</label>
         <select class="form-control" id="dronePlotSelect"></select>
       </div>
       <div class="drone-detail-grid" id="droneDetailGrid"></div>
@@ -199,6 +199,7 @@
       <div class="modal-actions">
         <button class="btn btn-outline" id="droneViewCamera" type="button">查看当前地块状况</button>
         <button class="btn btn-primary" id="droneAutoIrrigate" type="button">自动灌溉</button>
+        <button class="btn btn-danger" id="deleteDrone" type="button">删除无人机</button>
         <button class="btn btn-outline" id="closeDroneDetail" type="button">关闭</button>
       </div>
     </div>
@@ -337,7 +338,8 @@
     }
 
     function normalizeDrones(list) {
-      if (!Array.isArray(list) || !list.length) return defaultDrones();
+      if (!Array.isArray(list)) return defaultDrones();
+      if (!list.length) return [];
       return list.map(function (d, idx) {
         return {
           id: d.id || ('DRONE-' + String(idx + 1).padStart(3, '0')),
@@ -358,6 +360,20 @@
 
     function droneById(id) {
       return state.drones.filter(function (d) { return d.id === id; })[0] || null;
+    }
+
+    function removeDronesForPlot(plotId) {
+      var removed = state.drones.filter(function (d) { return d.plotId === plotId; });
+      if (!removed.length) return 0;
+      state.drones = state.drones.filter(function (d) { return d.plotId !== plotId; });
+      if (removed.some(function (d) { return d.id === state.selectedDroneId; })) {
+        state.selectedDroneId = null;
+        closeDroneDetailModal();
+      }
+      saveDrones();
+      renderDrones();
+      updateDronePanel();
+      return removed.length;
     }
 
     function nonCameraDevicesForPlot(plotId) {
@@ -1152,6 +1168,24 @@
       pushLog(drone.name + ' 已绑定 ' + plot.name + '，正在前往地块边缘巡航。', 'good');
     }
 
+    function deleteSelectedDrone() {
+      var drone = droneById(state.selectedDroneId);
+      if (!drone) {
+        Toast.error('请选择无人机');
+        return;
+      }
+      if (!confirm('确认删除无人机「' + drone.name + '」吗？')) return;
+      closeDroneVideoModal();
+      state.drones = state.drones.filter(function (d) { return d.id !== drone.id; });
+      state.selectedDroneId = null;
+      saveDrones();
+      closeDroneDetailModal();
+      renderDrones();
+      updateDronePanel();
+      Toast.success('无人机已删除');
+      pushLog('无人机「' + drone.name + '」已删除。', 'good');
+    }
+
     function openDroneCameraView() {
       var drone = droneById(state.selectedDroneId);
       var plot = drone && plotById(drone.plotId);
@@ -1841,8 +1875,9 @@
         delete cropStyles[plot.id];
         saveJson(SLOT_KEY, state.slotMap);
         saveJson(CROP_KEY, cropStyles);
+        var droneCount = removeDronesForPlot(plot.id);
         state.selectedPlotId = null;
-        Toast.success('地块已删除');
+        Toast.success('地块已删除' + (droneCount ? '，已同步删除 ' + droneCount + ' 架无人机' : ''));
         loadAll();
       });
     }
@@ -1865,7 +1900,8 @@
     function loadAll(selectId) {
       return API.getPlots().then(function (res) {
         state.plots = (res && res.data) || [];
-        state.drones = normalizeDrones(loadJson(DRONE_KEY, []));
+        var storedDrones = loadJson(DRONE_KEY, null);
+        state.drones = storedDrones === null ? defaultDrones() : normalizeDrones(storedDrones);
         state.drones.forEach(function (drone, idx) {
           if (!drone.plotId && state.plots[idx % Math.max(1, state.plots.length)]) {
             drone.plotId = state.plots[idx % state.plots.length].id;
@@ -1932,6 +1968,7 @@
     });
     document.getElementById('droneViewCamera').addEventListener('click', openDroneCameraView);
     document.getElementById('droneAutoIrrigate').addEventListener('click', droneAutoIrrigate);
+    document.getElementById('deleteDrone').addEventListener('click', deleteSelectedDrone);
     document.getElementById('closeDroneVideo').addEventListener('click', closeDroneVideoModal);
     document.getElementById('droneAddModal').addEventListener('click', function (e) {
       if (e.target.id === 'droneAddModal') closeDroneAddModal();
