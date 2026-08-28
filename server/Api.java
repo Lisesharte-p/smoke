@@ -697,6 +697,9 @@ public class Api {
         if (sameTypeAddrExists(type, ip.trim(), port)) {
             return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换类型或地址") + "}";
         }
+        if (!exists("SELECT 1 FROM plot WHERE id = ?", plotId)) {
+            return "{\"code\":1,\"msg\":" + Json.str("不存在地块") + "}";
+        }
         String id = nextDeviceId();
         String sql = "INSERT INTO device(id, plot_id, name, type, ip, port, protocol, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
@@ -2358,7 +2361,7 @@ public class Api {
         String plotId = trimToNull(queryParam(query, "plotId"));
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at, a.handled_at, a.handler, a.handle_log," +
+                "SELECT a.id, a.plot_id, a.device_id, a.alarm_type, a.value, a.level, a.status, a.created_at, a.handled_at, a.handler, a.handle_log," +
                 " r.id AS detectionRecordId," +
                 " p.name AS plotName FROM alarm a LEFT JOIN plot p ON p.id = a.plot_id" +
                 " LEFT JOIN human_detection_record r ON r.alarm_id = a.id" +
@@ -2381,6 +2384,7 @@ public class Api {
                   .append("\"id\":").append(rs.getLong("id")).append(',')
                   .append("\"time\":").append(Json.str(time)).append(',')
                   .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
+                  .append("\"deviceId\":").append(Json.str(rs.getString("device_id"))).append(',')
                   .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
                   .append("\"type\":").append(Json.str(rs.getString("alarm_type"))).append(',')
                   .append("\"value\":").append(Json.str(rs.getString("value"))).append(',')

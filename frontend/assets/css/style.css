@@ -1703,7 +1703,186 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 }
 
 .camera-actions select {
-  width: min(420px, 48vw);
+  width: min(260px, 42vw);
+}
+
+.monitor-wall {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 960px;
+}
+
+.monitor-tile {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  background: rgba(15, 23, 42, .76);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.monitor-tile:hover {
+  transform: translateY(-1px);
+  border-color: rgba(34, 211, 238, .34);
+  box-shadow: var(--shadow-lg);
+}
+
+.monitor-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(148, 163, 184, .06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, .06) 1px, transparent 1px),
+    #020617;
+  background-size: 34px 34px;
+}
+
+.monitor-frame img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #020617;
+}
+
+.monitor-hud,
+.monitor-screen-no {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  background: rgba(2, 6, 23, .68);
+  color: #e0f2fe;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.monitor-hud {
+  top: 10px;
+  left: 10px;
+  gap: 7px;
+  padding: 6px 9px;
+}
+
+.monitor-screen-no {
+  right: 10px;
+  top: 10px;
+  padding: 6px 8px;
+}
+
+.monitor-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 8px;
+}
+
+.monitor-meta b,
+.monitor-meta span {
+  display: block;
+}
+
+.monitor-meta b {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-meta span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.monitor-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.monitor-alarm {
+  margin: 0 12px 12px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, .18);
+  background: rgba(22, 101, 52, .13);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.monitor-alarm.has-alarm {
+  border-color: rgba(248, 113, 113, .36);
+  background: rgba(127, 29, 29, .24);
+  color: #fecaca;
+}
+
+.monitor-tile.is-connecting .monitor-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, .08) 45%, transparent 70%);
+  animation: monitor-scan 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes monitor-scan {
+  from { transform: translateX(-90%); }
+  to { transform: translateX(90%); }
+}
+
+.mini-spinner {
+  width: 30px;
+  height: 30px;
+  margin: 0 auto 2px;
+  border-radius: 999px;
+  border: 3px solid rgba(148, 163, 184, .28);
+  border-top-color: #38bdf8;
+  animation: mini-spin .8s linear infinite;
+}
+
+@keyframes mini-spin {
+  to { transform: rotate(360deg); }
+}
+
+.camera-add-modal {
+  max-width: 680px;
+}
+
+.camera-zoom-modal {
+  max-width: min(1180px, calc(100vw - 32px));
+}
+
+.zoom-camera-frame {
+  position: relative;
+  height: min(72vh, 720px);
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  background: #020617;
+}
+
+.zoom-camera-frame img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #020617;
+}
+
+.monitor-loading {
+  grid-column: 1 / -1;
 }
 
 .camera-layout {
@@ -3207,6 +3386,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 /* 视频监控浅色模式 */
 :root[data-theme="light"] .camera-view,
 :root[data-theme="light"] .camera-panel,
+:root[data-theme="light"] .monitor-tile,
 :root[data-theme="light"] .camera-records {
   background:
     linear-gradient(180deg, rgba(16, 185, 129, .06), transparent 42%),
@@ -3221,7 +3401,15 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
     #f8fafc;
 }
 
+:root[data-theme="light"] .monitor-frame {
+  background:
+    linear-gradient(rgba(15, 23, 42, .05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, .05) 1px, transparent 1px),
+    #f8fafc;
+}
+
 :root[data-theme="light"] .camera-screen img,
+:root[data-theme="light"] .monitor-frame img,
 :root[data-theme="light"] .record-thumb,
 :root[data-theme="light"] .detection-modal video {
   background: #f8fafc;
@@ -3255,6 +3443,25 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   color: #047857;
   background: rgba(236, 253, 245, .92);
   border-color: rgba(5, 150, 105, .28);
+}
+
+:root[data-theme="light"] .monitor-hud,
+:root[data-theme="light"] .monitor-screen-no {
+  color: #075985;
+  background: rgba(240, 249, 255, .9);
+  border-color: rgba(14, 165, 233, .22);
+}
+
+:root[data-theme="light"] .monitor-alarm {
+  color: #047857;
+  background: rgba(236, 253, 245, .86);
+  border-color: rgba(5, 150, 105, .2);
+}
+
+:root[data-theme="light"] .monitor-alarm.has-alarm {
+  color: #b91c1c;
+  background: rgba(254, 242, 242, .9);
+  border-color: rgba(239, 68, 68, .24);
 }
 
 :root[data-theme="light"] .record-thumb span {
