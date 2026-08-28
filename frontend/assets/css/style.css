@@ -2833,6 +2833,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   max-width: 440px;
 }
 
+.drone-patrol-modal {
+  max-width: 460px;
+}
+
 .drone-detail-modal {
   max-width: 560px;
 }

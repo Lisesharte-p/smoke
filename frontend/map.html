@@ -198,6 +198,22 @@
     </div>
   </div>
 
+  <div class="modal-mask" id="dronePatrolModal">
+    <div class="modal drone-patrol-modal">
+      <div class="modal-title">关闭无人机巡航</div>
+      <div class="form-group">
+        <label class="form-label">选择无人机</label>
+        <select class="form-control" id="patrolDroneSelect"></select>
+      </div>
+      <div class="form-hint" id="patrolDroneHint">可选择单架无人机，也可以选择全部关闭。</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelDronePatrol" type="button">取消</button>
+        <button class="btn btn-primary" id="resumeDronePatrol" type="button">恢复巡航</button>
+        <button class="btn btn-danger" id="confirmDronePatrolStop" type="button">关闭巡航</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-mask" id="droneVideoModal">
     <div class="modal drone-video-modal">
       <div class="modal-title" id="droneVideoTitle">当前地块画面</div>
@@ -327,6 +343,7 @@
         plotId: null,
         pos: { x: 48, y: 38 },
         routeIndex: 0,
+        patrolOn: true,
         spraying: false,
         battery: 96
       }];
@@ -343,6 +360,7 @@
           plotId: d.plotId || null,
           pos: d.pos || { x: 48 + idx * 3, y: 38 + idx * 3 },
           routeIndex: d.routeIndex || 0,
+          patrolOn: d.patrolOn !== false,
           spraying: !!d.spraying,
           battery: d.battery == null ? 96 : d.battery
         };
@@ -868,7 +886,30 @@
       if (stopBtn.disabled) stopBtn.disabled = false;
     }
 
+    function patrolActiveDrones() {
+      return state.drones.filter(function (drone) { return drone.patrolOn !== false; });
+    }
+
+    function refreshDroneToggle() {
+      var btn = document.getElementById('droneToggle');
+      var text = document.getElementById('droneToggleText');
+      if (!btn || !text) return;
+      var active = patrolActiveDrones().length;
+      state.droneOn = active > 0;
+      btn.classList.toggle('active', active > 0);
+      if (!state.drones.length) {
+        text.textContent = '暂无无人机';
+      } else if (active === state.drones.length) {
+        text.textContent = '无人机巡航中';
+      } else if (active > 0) {
+        text.textContent = '部分巡航中';
+      } else {
+        text.textContent = '无人机已关闭';
+      }
+    }
+
     function updateDronePanel(text) {
+      refreshDroneToggle();
       var title = document.getElementById('droneStateTitle');
       var statusText = document.getElementById('droneStateText');
       var battery = document.getElementById('droneBattery');
@@ -883,7 +924,8 @@
           (state.autoSchedule.running ? '，正在灌溉。' : '，等待执行。');
       }
       var active = state.drones.filter(function (d) { return d.plotId; }).length;
-      var nextText = text || ((state.droneOn ? state.drones.length + ' 架无人机在线，' + active + ' 架正在按绑定地块边缘巡航，当前为' + modeText + '。' : '无人机停靠在基站，当前为' + modeText + '。') + scheduleText);
+      var patrolActive = patrolActiveDrones().length;
+      var nextText = text || ((patrolActive ? state.drones.length + ' 架无人机在线，' + patrolActive + ' 架正在巡航，' + active + ' 架已绑定地块，当前为' + modeText + '。' : '无人机停靠在基站，当前为' + modeText + '。') + scheduleText);
       if (statusText.textContent !== nextText) statusText.textContent = nextText;
       var avgBattery = state.drones.length
         ? state.drones.reduce(function (sum, d) { return sum + (d.battery || 0); }, 0) / state.drones.length
@@ -947,8 +989,8 @@
           });
           layer.appendChild(el);
         }
-        el.className = 'drone' + (state.droneOn ? ' active' : '') + (drone.spraying ? ' spraying' : '') + (state.selectedDroneId === drone.id ? ' selected' : '');
-        el.title = drone.name;
+        el.className = 'drone' + (drone.patrolOn !== false ? ' active' : '') + (drone.spraying ? ' spraying' : '') + (state.selectedDroneId === drone.id ? ' selected' : '');
+        el.title = drone.name + (drone.patrolOn === false ? '（巡航已关闭）' : '');
         el.style.left = drone.pos.x + '%';
         el.style.top = drone.pos.y + '%';
         var name = el.querySelector('.drone-name');
@@ -963,8 +1005,9 @@
       if (!state.lastTs) state.lastTs = ts;
       var dt = Math.min(0.08, (ts - state.lastTs) / 1000);
       state.lastTs = ts;
-      if (state.droneOn) {
-        state.drones.forEach(function (drone) {
+      var movingDrones = patrolActiveDrones();
+      if (movingDrones.length) {
+        movingDrones.forEach(function (drone) {
           var route = routeForDrone(drone);
           var target = route[drone.routeIndex % route.length];
           var dx = target.x - drone.pos.x;
@@ -1092,6 +1135,87 @@
       document.getElementById('droneAddModal').classList.remove('show');
     }
 
+    function fillPatrolDroneOptions() {
+      var sel = document.getElementById('patrolDroneSelect');
+      sel.innerHTML = '';
+      var all = document.createElement('option');
+      all.value = 'all';
+      all.textContent = '全部无人机';
+      sel.appendChild(all);
+      state.drones.forEach(function (drone) {
+        var opt = document.createElement('option');
+        opt.value = drone.id;
+        opt.textContent = drone.name + (drone.patrolOn === false ? '（已关闭）' : '（巡航中）');
+        sel.appendChild(opt);
+      });
+      sel.value = state.selectedDroneId || 'all';
+      renderPatrolDroneHint();
+    }
+
+    function renderPatrolDroneHint() {
+      var sel = document.getElementById('patrolDroneSelect');
+      var hint = document.getElementById('patrolDroneHint');
+      if (!sel || !hint) return;
+      if (!state.drones.length) {
+        hint.textContent = '当前暂无无人机。';
+        return;
+      }
+      if (sel.value === 'all') {
+        var active = patrolActiveDrones().length;
+        hint.textContent = '将作用于全部无人机：' + active + ' 架巡航中，' + (state.drones.length - active) + ' 架已关闭。';
+        return;
+      }
+      var drone = droneById(sel.value);
+      hint.textContent = drone
+        ? drone.name + ' 当前' + (drone.patrolOn === false ? '已关闭巡航。' : '正在巡航。')
+        : '请选择无人机。';
+    }
+
+    function openDronePatrolModal() {
+      if (!state.drones.length) {
+        Toast.error('当前暂无无人机');
+        return;
+      }
+      fillPatrolDroneOptions();
+      document.getElementById('dronePatrolModal').classList.add('show');
+    }
+
+    function closeDronePatrolModal() {
+      document.getElementById('dronePatrolModal').classList.remove('show');
+    }
+
+    function setPatrolForSelection(on) {
+      var sel = document.getElementById('patrolDroneSelect');
+      var target = sel.value;
+      var changed = [];
+      if (target === 'all') {
+        state.drones.forEach(function (drone) {
+          if (drone.patrolOn !== !!on) {
+            drone.patrolOn = !!on;
+            changed.push(drone.name);
+          }
+        });
+      } else {
+        var drone = droneById(target);
+        if (drone && drone.patrolOn !== !!on) {
+          drone.patrolOn = !!on;
+          changed.push(drone.name);
+        }
+      }
+      if (!changed.length) {
+        Toast.error(on ? '所选无人机已在巡航' : '所选无人机已关闭巡航');
+        renderPatrolDroneHint();
+        return;
+      }
+      saveDrones();
+      renderDrones();
+      updateDronePanel();
+      fillPatrolDroneOptions();
+      pushLog((target === 'all' ? '全部无人机' : changed.join('、')) + (on ? ' 已恢复巡航。' : ' 已关闭巡航。'), on ? 'good' : 'warn');
+      Toast.success(on ? '无人机巡航已恢复' : '无人机巡航已关闭');
+      closeDronePatrolModal();
+    }
+
     function confirmAddDrone() {
       var name = document.getElementById('droneNameInput').value.trim();
       if (!name) {
@@ -1112,6 +1236,7 @@
         plotId: firstPlot,
         pos: { x: start.x, y: start.y },
         routeIndex: 0,
+        patrolOn: true,
         spraying: false,
         battery: 98
       };
@@ -1156,6 +1281,7 @@
       var alarm = latestUnhandledAlarm(plot.id);
       document.getElementById('droneDetailGrid').innerHTML =
         '<div class="drone-info-tile"><span>所在地块</span><b>' + esc(plot.name) + '</b></div>' +
+        '<div class="drone-info-tile"><span>巡航状态</span><b>' + (drone.patrolOn === false ? '已关闭' : '巡航中') + '</b></div>' +
         metricTile('温度', rt.temp, '℃', false) +
         metricTile('湿度', rt.humidity, '%', false) +
         metricTile('亮度', rt.lux, ' lx', false);
@@ -1991,19 +2117,16 @@
       });
     }
 
-    document.getElementById('droneToggle').addEventListener('click', function () {
-      state.droneOn = !state.droneOn;
-      var btn = document.getElementById('droneToggle');
-      btn.classList.toggle('active', state.droneOn);
-      document.getElementById('droneToggleText').textContent = state.droneOn ? '无人机巡航中' : '无人机已关闭';
-      renderDrones();
-      updateDronePanel();
-    });
+    document.getElementById('droneToggle').addEventListener('click', openDronePatrolModal);
     document.getElementById('refreshMap').addEventListener('click', function () { loadAll(); });
     document.getElementById('openMapAdd').addEventListener('click', function () { openAddModal(); });
     document.getElementById('openDroneAdd').addEventListener('click', openDroneAddModal);
     document.getElementById('cancelDroneAdd').addEventListener('click', closeDroneAddModal);
     document.getElementById('confirmDroneAdd').addEventListener('click', confirmAddDrone);
+    document.getElementById('patrolDroneSelect').addEventListener('change', renderPatrolDroneHint);
+    document.getElementById('cancelDronePatrol').addEventListener('click', closeDronePatrolModal);
+    document.getElementById('confirmDronePatrolStop').addEventListener('click', function () { setPatrolForSelection(false); });
+    document.getElementById('resumeDronePatrol').addEventListener('click', function () { setPatrolForSelection(true); });
     document.getElementById('closeDroneDetail').addEventListener('click', closeDroneDetailModal);
     document.getElementById('dronePlotSelect').addEventListener('change', function () {
       bindDroneToPlot(this.value);
@@ -2015,6 +2138,9 @@
     document.getElementById('closeDroneVideo').addEventListener('click', closeDroneVideoModal);
     document.getElementById('droneAddModal').addEventListener('click', function (e) {
       if (e.target.id === 'droneAddModal') closeDroneAddModal();
+    });
+    document.getElementById('dronePatrolModal').addEventListener('click', function (e) {
+      if (e.target.id === 'dronePatrolModal') closeDronePatrolModal();
     });
     document.getElementById('droneDetailModal').addEventListener('click', function (e) {
       if (e.target.id === 'droneDetailModal') closeDroneDetailModal();
