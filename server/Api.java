@@ -943,8 +943,12 @@ public class Api {
             URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
             conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(5000);
-            conn.setReadTimeout(15000);
+            conn.setReadTimeout(8000);
+            conn.setUseCaches(false);
             conn.setRequestProperty("User-Agent", "SmartAgriCameraProxy");
+            conn.setRequestProperty("Cache-Control", "no-cache");
+            conn.setRequestProperty("Pragma", "no-cache");
+            conn.setRequestProperty("Connection", "close");
             if (c.username != null && !c.username.isEmpty()) {
                 String pass = c.password == null ? "" : c.password;
                 String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
@@ -965,11 +969,14 @@ public class Api {
             ex.getResponseHeaders().set("Content-Type", contentType);
             ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
             ex.getResponseHeaders().set("Pragma", "no-cache");
+            ex.getResponseHeaders().set("Expires", "0");
+            ex.getResponseHeaders().set("X-Accel-Buffering", "no");
+            ex.getResponseHeaders().set("Connection", "close");
             ex.sendResponseHeaders(200, 0);
 
             try (InputStream in = conn.getInputStream();
                  OutputStream out = ex.getResponseBody()) {
-                byte[] buf = new byte[8192];
+                byte[] buf = new byte[2048];
                 int n;
                 while ((n = in.read(buf)) != -1) {
                     out.write(buf, 0, n);

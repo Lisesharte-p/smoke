@@ -131,6 +131,8 @@
     var selectedCamera = null;
     var detectionRecords = [];
     var initialRecordId = new URLSearchParams(location.search).get('recordId');
+    var cameraReloadTimer = null;
+    var cameraStreamSeq = 0;
 
     function esc(s) {
       return String(s == null ? '' : s)
@@ -156,6 +158,35 @@
       document.getElementById('cameraPlaceholder').style.display = 'none';
     }
 
+    function stopCameraStream() {
+      clearInterval(cameraReloadTimer);
+      cameraReloadTimer = null;
+      var img = document.getElementById('cameraImg');
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute('src');
+    }
+
+    function attachCameraStream(showConnecting) {
+      if (!selectedCamera) return;
+      var img = document.getElementById('cameraImg');
+      var seq = ++cameraStreamSeq;
+      if (showConnecting) setPlaceholder('正在连接摄像头', selectedCamera.ip + ':' + selectedCamera.port);
+      img.onload = function () {
+        if (seq === cameraStreamSeq) hidePlaceholder();
+      };
+      img.onerror = function () {
+        if (seq !== cameraStreamSeq) return;
+        setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');
+      };
+      img.src = cameraUrl(selectedCamera);
+      if (showConnecting) {
+        setTimeout(function () {
+          if (seq === cameraStreamSeq && img.getAttribute('src')) hidePlaceholder();
+        }, 900);
+      }
+    }
+
     function renderCameraInfo(cam) {
       document.getElementById('cameraName').textContent = cam ? cam.name : '--';
       document.getElementById('cameraMeta').textContent = cam ? ((cam.username ? cam.username + '@' : '') + cam.ip + ':' + cam.port) : '--';
@@ -166,12 +197,11 @@
     }
 
     function playCamera(cam) {
+      stopCameraStream();
       selectedCamera = cam || null;
       renderCameraInfo(selectedCamera);
       loadDetectionStatus();
       loadDetectionRecords();
-      var img = document.getElementById('cameraImg');
-      img.removeAttribute('src');
 
       if (!selectedCamera) {
         setPlaceholder('暂无摄像头设备', '请先在设备管理中添加摄像头类型设备。');
@@ -184,12 +214,10 @@
         return;
       }
 
-      setPlaceholder('正在连接摄像头', selectedCamera.ip + ':' + selectedCamera.port);
-      img.onload = hidePlaceholder;
-      img.onerror = function () {
-        setPlaceholder('画面加载失败', '请检查摄像头账号密码、协议、IP 和端口是否正确。');
-      };
-      img.src = cameraUrl(selectedCamera);
+      attachCameraStream(true);
+      cameraReloadTimer = setInterval(function () {
+        attachCameraStream(false);
+      }, 6500);
     }
 
     function loadDetectionStatus() {
@@ -393,6 +421,7 @@
     document.getElementById('detectionModal').addEventListener('click', function (e) {
       if (e.target === this) closeDetectionModal();
     });
+    window.addEventListener('beforeunload', stopCameraStream);
 
     loadCameras();
   </script>

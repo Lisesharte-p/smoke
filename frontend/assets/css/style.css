@@ -1751,20 +1751,23 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   text-align: center;
   padding: 28px;
   background:
-    radial-gradient(circle at 50% 42%, rgba(34, 211, 238, .12), transparent 34%),
-    rgba(2, 6, 23, .88);
+    radial-gradient(circle at 50% 42%, rgba(34, 211, 238, .08), transparent 34%),
+    rgba(2, 6, 23, .96);
+  color: #f8fafc;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, .72);
 }
 
 .placeholder-title {
   font-size: 18px;
   font-weight: 800;
-  color: var(--text);
+  color: #ffffff;
 }
 
 .placeholder-sub {
   max-width: 460px;
-  color: var(--text-secondary);
+  color: #dbeafe;
   font-size: 13px;
+  font-weight: 600;
   line-height: 1.7;
 }
 
@@ -2612,6 +2615,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   height: 100%;
   min-height: 680px;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .map-panel {
@@ -2622,6 +2626,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
     rgba(15, 23, 42, .72);
   padding: 16px;
   box-shadow: var(--shadow-sm);
+}
+
+.selected-panel {
+  min-height: 328px;
 }
 
 .panel-kicker {
@@ -2670,6 +2678,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 }
 
 .map-metric {
+  min-height: 72px;
   padding: 10px;
   border-radius: 8px;
   background: rgba(15, 23, 42, .72);
@@ -2687,6 +2696,7 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   margin-top: 5px;
   color: var(--text);
   font-size: 15px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -2897,8 +2907,11 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   inset: 0;
   display: grid;
   place-items: center;
-  color: #cbd5e1;
-  background: rgba(2, 6, 23, .72);
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 800;
+  background: rgba(2, 6, 23, .94);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, .75);
 }
 
 .map-dev-rows {
@@ -3207,8 +3220,20 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 :root[data-theme="light"] .camera-placeholder {
   background:
-    radial-gradient(circle at 50% 42%, rgba(14, 165, 233, .14), transparent 34%),
-    rgba(248, 252, 255, .88);
+    radial-gradient(circle at 50% 42%, rgba(14, 165, 233, .1), transparent 34%),
+    rgba(255, 255, 255, .96);
+  color: #0f172a;
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .placeholder-title,
+:root[data-theme="light"] .drone-video-frame .camera-placeholder {
+  color: #0f172a;
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .placeholder-sub {
+  color: #334155;
 }
 
 :root[data-theme="light"] .camera-info-grid div,
