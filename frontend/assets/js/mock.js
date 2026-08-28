@@ -11,10 +11,10 @@ window.MOCK = (function () {
      地块数据（数据总览 / 数据监测用，供同伴页面调用）
      ------------------------------------------------------------------ */
   var plots = [
-    { id: 'P001', name: '一号大棚', crop: '番茄',    area: '2.5亩', temp: 26.4, humidity: 62, deviceCount: 4, onlineCount: 4 },
-    { id: 'P002', name: '二号大棚', crop: '黄瓜',    area: '1.8亩', temp: 24.1, humidity: 55, deviceCount: 3, onlineCount: 3 },
-    { id: 'P003', name: '三号菜地', crop: '生菜',    area: '3.0亩', temp: 28.7, humidity: 41, deviceCount: 2, onlineCount: 1 },
-    { id: 'P004', name: '四号果园', crop: '草莓',    area: '1.2亩', temp: 22.8, humidity: 68, deviceCount: 3, onlineCount: 3 }
+    { id: 'P001', name: '一号大棚', crop: '番茄',    area: '2.5亩', temp: 26.4, humidity: 62, lux: 580, deviceCount: 5, onlineCount: 5 },
+    { id: 'P002', name: '二号大棚', crop: '黄瓜',    area: '1.8亩', temp: 24.1, humidity: 55, lux: 520, deviceCount: 3, onlineCount: 3 },
+    { id: 'P003', name: '三号菜地', crop: '生菜',    area: '3.0亩', temp: 28.7, humidity: 41, lux: 710, deviceCount: 2, onlineCount: 1 },
+    { id: 'P004', name: '四号果园', crop: '草莓',    area: '1.2亩', temp: 22.8, humidity: 68, lux: 630, deviceCount: 3, onlineCount: 3 }
   ];
 
   /* ------------------------------------------------------------------
@@ -31,7 +31,8 @@ window.MOCK = (function () {
     { id: 'D006', name: '灌溉电磁阀-02',     type: '灌溉设备',   plotId: 'P002', plotName: '二号大棚', ip: '192.168.70.167', port: 8888, online: true,  controllable: true,  running: true  },
     { id: 'D007', name: '土壤湿度传感器-03', type: '土壤湿度',   plotId: 'P003', plotName: '三号菜地', online: false, controllable: false },
     { id: 'D008', name: '灌溉电磁阀-03',     type: '灌溉设备',   plotId: 'P004', plotName: '四号果园', online: true,  controllable: true,  running: false },
-    { id: 'D009', name: '大棚摄像头-01',     type: '摄像头',     plotId: 'P001', plotName: '一号大棚', ip: '192.168.70.168', port: 8080, protocol: 'mjpeg', online: true, controllable: false }
+    { id: 'D009', name: '大棚摄像头-01',     type: '摄像头',     plotId: 'P001', plotName: '一号大棚', ip: '192.168.70.168', port: 8080, protocol: 'mjpeg', online: true, controllable: false },
+    { id: 'D010', name: '光照传感器-01',     type: '光照',       plotId: 'P001', plotName: '一号大棚', online: true, controllable: false }
   ];
 
   /* ------------------------------------------------------------------
@@ -87,7 +88,7 @@ window.MOCK = (function () {
      持久化模拟器仓库
      只在 API 的模拟模式下使用；真实模式不会读取或写入这些本地数据。
      ------------------------------------------------------------------ */
-  var STATE_KEY = 'agri_simulator_state_v1';
+  var STATE_KEY = 'agri_simulator_state_v2';
   var seed = {
     plots: JSON.parse(JSON.stringify(plots)),
     devices: JSON.parse(JSON.stringify(devices)),
@@ -126,7 +127,7 @@ window.MOCK = (function () {
   }
 
   function snapshot() {
-    return { version: 1, plots: plots, devices: devices, thresholds: thresholds,
+    return { version: 2, plots: plots, devices: devices, thresholds: thresholds,
       alarms: alarms, controlLogs: controlLogs, weather: weather, users: users,
       registerRequests: registerRequests, detectionSettings: detectionSettings, conversations: conversations };
   }
@@ -138,7 +139,7 @@ window.MOCK = (function () {
   function hydrate() {
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem(STATE_KEY)); } catch (e) {}
-    restore(saved && saved.version === 1 ? saved : clone(seed));
+    restore(saved && saved.version === 2 ? saved : clone(seed));
   }
 
   function reset() {
@@ -375,11 +376,13 @@ window.MOCK = (function () {
     // 轻微随机波动，模拟实时变化
     var temp = Math.round((plot.temp + (Math.random() * 0.6 - 0.3)) * 10) / 10;
     var humidity = Math.round((plot.humidity + (Math.random() * 1.4 - 0.7)) * 10) / 10;
+    var lux = Math.round((Number(plot.lux) + (Math.random() * 24 - 12)));
     return {
       plotId: plot.id,
       plotName: plot.name,
       temp: temp,
       humidity: humidity,
+      lux: lux,
       updatedAt: nowTime()
     };
   }
