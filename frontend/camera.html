@@ -150,7 +150,7 @@
     var bindings = loadJson(BINDING_KEY, {});
     var power = loadJson(POWER_KEY, {});
     var pendingSlot = 0;
-    var zoomStream = { seq: 0, useProxy: false, timer: null };
+    var zoomStream = { seq: 0, useProxy: false, timer: null, screen: null, movedImg: null, originalParent: null, fallbackImg: null };
     var initialRecordId = new URLSearchParams(location.search).get('recordId');
 
     function esc(s) {
@@ -295,7 +295,7 @@
             openCameraAddModal(slot);
             return;
           }
-          openCameraZoom(screen.camera);
+          openCameraZoom(screen);
         });
       });
       document.querySelectorAll('[data-power]').forEach(function (btn) {
@@ -636,27 +636,67 @@
       document.getElementById('detectionModal').style.display = 'none';
     }
 
-    function openCameraZoom(cam) {
+    function openCameraZoom(screen) {
       stopZoomStream();
+      var cam = screen && screen.camera;
+      if (!screen || !cam) return;
       document.getElementById('cameraZoomTitle').textContent = cam.name;
       document.getElementById('cameraZoomSub').textContent = (cam.plotName || '-') + ' · ' + cam.ip + ':' + cam.port;
       document.getElementById('cameraZoomModal').classList.add('show');
-      attachZoomStream(cam);
+      attachZoomStream(screen);
     }
 
     function stopZoomStream() {
       clearInterval(zoomStream.timer);
       zoomStream.timer = null;
       zoomStream.seq += 1;
-      var img = document.getElementById('cameraZoomImg');
-      img.onload = null;
-      img.onerror = null;
-      img.removeAttribute('src');
+      if (zoomStream.movedImg && zoomStream.originalParent) {
+        zoomStream.movedImg.classList.remove('monitor-zoom-img');
+        zoomStream.originalParent.insertBefore(zoomStream.movedImg, zoomStream.originalParent.firstChild);
+        if (zoomStream.screen) {
+          zoomStream.screen.status = 'live';
+          hideScreenPlaceholder(zoomStream.screen.slot);
+        }
+      }
+      var img = zoomStream.fallbackImg || document.getElementById('cameraZoomImg');
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+        img.style.display = 'none';
+      }
+      zoomStream.screen = null;
+      zoomStream.movedImg = null;
+      zoomStream.originalParent = null;
+      zoomStream.fallbackImg = null;
     }
 
-    function attachZoomStream(cam) {
-      var img = document.getElementById('cameraZoomImg');
+    function attachZoomStream(screen) {
+      var cam = screen.camera;
+      var liveImg = document.getElementById('cameraImg' + screen.slot);
+      var frame = document.querySelector('.zoom-camera-frame');
+      var fallbackImg = document.getElementById('cameraZoomImg');
       var placeholder = document.getElementById('cameraZoomPlaceholder');
+      var tilePlaceholder = document.getElementById('cameraPlaceholder' + screen.slot);
+      if (liveImg && liveImg.getAttribute('src')) {
+        zoomStream.screen = screen;
+        zoomStream.movedImg = liveImg;
+        zoomStream.originalParent = liveImg.parentNode;
+        zoomStream.fallbackImg = fallbackImg;
+        fallbackImg.style.display = 'none';
+        liveImg.classList.add('monitor-zoom-img');
+        frame.insertBefore(liveImg, placeholder);
+        placeholder.style.display = 'none';
+        if (tilePlaceholder) {
+          tilePlaceholder.style.display = 'grid';
+          tilePlaceholder.innerHTML =
+            '<div class="placeholder-title">正在放大查看</div>' +
+            '<div class="placeholder-sub">' + esc(cam.name) + '</div>';
+        }
+        return;
+      }
+      var img = fallbackImg;
+      img.style.display = 'block';
       zoomStream.useProxy = false;
       function show(title, sub, loading) {
         placeholder.style.display = 'grid';
@@ -695,8 +735,8 @@
     }
 
     function stopAllStreams() {
-      screens.forEach(stopScreenStream);
       stopZoomStream();
+      screens.forEach(stopScreenStream);
     }
 
     function loadAll(targetCameraId) {

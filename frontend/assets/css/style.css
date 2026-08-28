@@ -1881,6 +1881,10 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   background: #020617;
 }
 
+.zoom-camera-frame .monitor-zoom-img {
+  display: block;
+}
+
 .monitor-loading {
   grid-column: 1 / -1;
 }
