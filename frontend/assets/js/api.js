@@ -45,7 +45,7 @@ window.API = (function () {
     textTimer: null,
     shownAt: 0,
     messageIndex: 0,
-    pageLoadUntil: Date.now() + 450,
+    pageLoadUntil: Date.now() + 1200,
     messages: ['正在连接设备', '正在分析数据', '正在同步状态']
   };
 
@@ -272,9 +272,9 @@ window.API = (function () {
   /* ==================================================================
      设备
      ================================================================== */
-  function getDevices() {
+  function getDevices(options) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.devices });
-    return request(config.endpoints.devices);
+    return request(config.endpoints.devices, options || {});
   }
 
   function addDevice(data) {
@@ -331,9 +331,9 @@ window.API = (function () {
   /* ==================================================================
      实时数据 / 历史数据（供同伴页面使用）
      ================================================================== */
-  function getRealtime(plotId) {
+  function getRealtime(plotId, options) {
     if (config.useMock) return mockDelay({ code: 0, data: window.MOCK.getRealtime(plotId) }, 350);
-    return request(config.endpoints.realtime.replace('{plotId}', plotId));
+    return request(config.endpoints.realtime.replace('{plotId}', plotId), options || {});
   }
 
   function getHistory(plotId, days, win) {
@@ -378,7 +378,10 @@ window.API = (function () {
     filter = filter || {};
     var qs = [];
     if (filter.plotId) qs.push('plotId=' + encodeURIComponent(filter.plotId));
-    return request(config.endpoints.thresholds + (qs.length ? '?' + qs.join('&') : ''), filter.loader === true ? { loader: true } : undefined);
+    return request(
+      config.endpoints.thresholds + (qs.length ? '?' + qs.join('&') : ''),
+      typeof filter.loader === 'boolean' ? { loader: filter.loader } : undefined
+    );
   }
 
   function saveThresholds(data, filter) {
@@ -405,7 +408,10 @@ window.API = (function () {
     filter = filter || {};
     var qs = [];
     if (filter.plotId) qs.push('plotId=' + encodeURIComponent(filter.plotId));
-    return request(config.endpoints.alarms + (qs.length ? '?' + qs.join('&') : ''), filter.loader === true ? { loader: true } : undefined);
+    return request(
+      config.endpoints.alarms + (qs.length ? '?' + qs.join('&') : ''),
+      typeof filter.loader === 'boolean' ? { loader: filter.loader } : undefined
+    );
   }
 
   function updateAlarmStatus(alarmId, status, data) {

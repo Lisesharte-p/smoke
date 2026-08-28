@@ -2142,10 +2142,13 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 18px;
   align-items: stretch;
+  min-height: min(760px, calc(100vh - 190px));
 }
 
 .cq-map-shell {
+  display: flex;
   min-height: 680px;
+  height: 100%;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, .16);
   background:
@@ -2158,78 +2161,21 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 .cq-map {
   position: relative;
   width: 100%;
+  flex: 1;
   min-height: 680px;
-  height: calc(100vh - 210px);
+  height: 100%;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 18% 16%, rgba(187, 247, 208, .20), transparent 30%),
-    radial-gradient(circle at 72% 22%, rgba(250, 204, 21, .14), transparent 30%),
-    radial-gradient(circle at 56% 78%, rgba(52, 211, 153, .16), transparent 34%),
-    linear-gradient(145deg, #102f1d 0%, #173f28 44%, #273a1d 100%);
+  background: #0f172a;
 }
 
-.cq-terrain {
+.map-photo-layer {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  opacity: .96;
-}
-
-.cq-map-base {
-  fill: url(#fullMapLand);
-}
-
-.cq-patch {
-  mix-blend-mode: soft-light;
-  opacity: .68;
-}
-
-.patch-a {
-  fill: #74d675;
-}
-
-.patch-b {
-  fill: #e9c85e;
-}
-
-.patch-c {
-  fill: #66c98a;
-}
-
-.patch-d {
-  fill: #b8d96a;
-}
-
-.patch-e {
-  fill: #92df78;
-  opacity: .42;
-}
-
-.cq-parcel {
-  fill: rgba(255, 255, 255, .055);
-  stroke: none;
-  mix-blend-mode: soft-light;
-}
-
-.parcel-b,
-.parcel-e {
-  fill: rgba(250, 204, 21, .075);
-}
-
-.parcel-c,
-.parcel-f {
-  fill: rgba(94, 234, 212, .055);
-}
-
-.map-grid-lines {
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(circle at 20% 25%, rgba(236, 253, 245, .10) 0 1px, transparent 2px),
-    radial-gradient(circle at 78% 68%, rgba(254, 240, 138, .08) 0 1px, transparent 2px);
-  background-size: 46px 46px, 58px 58px;
-  opacity: .32;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, .06), rgba(15, 23, 42, .18)),
+    url("../img/map.jpg") center center / cover no-repeat;
   pointer-events: none;
 }
 
@@ -2263,6 +2209,13 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .field-layer {
   z-index: 6;
+  pointer-events: none;
+}
+
+.drone-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
   pointer-events: none;
 }
 
@@ -2488,51 +2441,59 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   position: absolute;
   left: 48%;
   top: 38%;
-  width: 82px;
-  height: 82px;
+  width: 46px;
+  height: 46px;
   z-index: 8;
   opacity: .58;
   transform: translate(-50%, -50%);
-  pointer-events: none;
-  transition: opacity .2s ease;
-  filter: drop-shadow(0 0 18px rgba(34, 211, 238, .5)) drop-shadow(0 12px 14px rgba(0, 0, 0, .34));
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: opacity .2s ease, filter .2s ease, transform .2s ease;
+  filter: drop-shadow(0 0 10px rgba(34, 211, 238, .5)) drop-shadow(0 8px 9px rgba(0, 0, 0, .34));
 }
 
 .drone.active {
   opacity: 1;
 }
 
+.drone.selected {
+  filter: drop-shadow(0 0 14px rgba(250, 204, 21, .72)) drop-shadow(0 10px 10px rgba(0, 0, 0, .38));
+}
+
 .drone-body {
   position: absolute;
-  left: 23px;
-  top: 25px;
-  width: 36px;
-  height: 26px;
+  left: 13px;
+  top: 15px;
+  width: 20px;
+  height: 15px;
   border-radius: 46% 46% 42% 42%;
   background: linear-gradient(135deg, #f8fafc, #bae6fd 45%, #14b8a6 78%, #0f766e);
   border: 1px solid rgba(224, 242, 254, .72);
-  box-shadow: inset 0 -6px 10px rgba(15, 23, 42, .35);
+  box-shadow: inset 0 -4px 7px rgba(15, 23, 42, .35);
 }
 
 .drone-body::before,
 .drone-body::after {
   content: "";
   position: absolute;
-  top: 9px;
-  width: 24px;
-  height: 3px;
+  top: 5px;
+  width: 14px;
+  height: 2px;
   background: rgba(226, 232, 240, .85);
 }
 
-.drone-body::before { right: 31px; transform: rotate(14deg); }
-.drone-body::after { left: 31px; transform: rotate(-14deg); }
+.drone-body::before { right: 17px; transform: rotate(14deg); }
+.drone-body::after { left: 17px; transform: rotate(-14deg); }
 
 .drone-eye {
   position: absolute;
-  right: 5px;
-  top: 6px;
-  width: 7px;
-  height: 7px;
+  right: 3px;
+  top: 3px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: #22d3ee;
   box-shadow: 0 0 8px #22d3ee;
@@ -2540,8 +2501,8 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .rotor {
   position: absolute;
-  width: 28px;
-  height: 28px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: 2px solid rgba(191, 219, 254, .78);
   background: radial-gradient(circle, rgba(34, 211, 238, .5), rgba(15, 23, 42, .12));
@@ -2550,33 +2511,73 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 .rotor::after {
   content: "";
   position: absolute;
-  left: 3px;
-  right: 3px;
-  top: 10px;
-  height: 3px;
+  left: 2px;
+  right: 2px;
+  top: 5px;
+  height: 2px;
   border-radius: 999px;
   background: rgba(224, 242, 254, .9);
   animation: rotor-spin .13s linear infinite;
 }
 
-.rotor-nw { left: 2px; top: 2px; }
-.rotor-ne { right: 2px; top: 2px; }
-.rotor-sw { left: 2px; bottom: 2px; }
-.rotor-se { right: 2px; bottom: 2px; }
+.rotor-nw { left: 1px; top: 1px; }
+.rotor-ne { right: 1px; top: 1px; }
+.rotor-sw { left: 1px; bottom: 1px; }
+.rotor-se { right: 1px; bottom: 1px; }
 
 @keyframes rotor-spin {
   to { transform: rotate(180deg); }
 }
 
-.drone-beam {
+.drone-name {
   position: absolute;
-  left: 26px;
-  top: 44px;
-  width: 20px;
-  height: 62px;
-  background: linear-gradient(rgba(34, 211, 238, .28), transparent);
-  clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
-  opacity: .75;
+  left: 50%;
+  top: 47px;
+  transform: translateX(-50%);
+  max-width: 96px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #ecfeff;
+  background: rgba(15, 23, 42, .72);
+  border: 1px solid rgba(125, 211, 252, .28);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.drone-spray {
+  position: absolute;
+  left: 50%;
+  top: 32px;
+  width: 42px;
+  height: 54px;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.drone.spraying .drone-spray {
+  opacity: 1;
+}
+
+.drone-spray i {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 26px;
+  border-radius: 999px;
+  background: linear-gradient(#e0f2fe, rgba(56, 189, 248, .08));
+  animation: drone-spray .58s linear infinite;
+}
+
+.drone-spray i:nth-child(1) { left: 9px; transform: rotate(-24deg); }
+.drone-spray i:nth-child(2) { left: 20px; animation-delay: .12s; }
+.drone-spray i:nth-child(3) { right: 9px; transform: rotate(24deg); animation-delay: .24s; }
+
+@keyframes drone-spray {
+  0% { height: 8px; opacity: .95; }
+  70% { opacity: .65; }
+  100% { height: 40px; opacity: 0; }
 }
 
 .map-empty {
@@ -2608,6 +2609,9 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   display: grid;
   gap: 14px;
   align-content: start;
+  height: 100%;
+  min-height: 680px;
+  overflow: auto;
 }
 
 .map-panel {
@@ -2808,6 +2812,93 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 
 .irrigation-modal {
   max-width: 520px;
+}
+
+.drone-form-modal {
+  max-width: 440px;
+}
+
+.drone-detail-modal {
+  max-width: 560px;
+}
+
+.drone-video-modal {
+  max-width: 760px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .16);
+  background: rgba(15, 23, 42, .42);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.drone-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.drone-info-tile {
+  min-height: 66px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, .13);
+  background: rgba(15, 23, 42, .62);
+}
+
+.drone-info-tile span,
+.drone-info-tile b {
+  display: block;
+}
+
+.drone-info-tile span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.drone-info-tile b {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.drone-video-frame {
+  position: relative;
+  min-height: 360px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, .18);
+  background: #020617;
+}
+
+.drone-video-frame img {
+  display: block;
+  width: 100%;
+  height: 420px;
+  object-fit: contain;
+  background: #020617;
+}
+
+.drone-video-frame .camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #cbd5e1;
+  background: rgba(2, 6, 23, .72);
 }
 
 .map-dev-rows {
@@ -3163,46 +3254,13 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 }
 
 :root[data-theme="light"] .cq-map {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .map-photo-layer {
   background:
-    radial-gradient(circle at 20% 18%, rgba(16, 185, 129, .13), transparent 30%),
-    radial-gradient(circle at 76% 30%, rgba(234, 179, 8, .12), transparent 34%),
-    radial-gradient(circle at 58% 78%, rgba(34, 197, 94, .10), transparent 34%),
-    #ffffff;
-}
-
-:root[data-theme="light"] #fullMapLand stop:nth-child(1) { stop-color: #f8fff7; }
-:root[data-theme="light"] #fullMapLand stop:nth-child(2) { stop-color: #eefbea; }
-:root[data-theme="light"] #fullMapLand stop:nth-child(3) { stop-color: #fdf8df; }
-
-:root[data-theme="light"] .cq-terrain {
-  opacity: .98;
-}
-
-:root[data-theme="light"] .cq-patch {
-  mix-blend-mode: multiply;
-  opacity: .26;
-}
-
-:root[data-theme="light"] .cq-parcel {
-  fill: rgba(4, 120, 87, .055);
-  stroke: none;
-  mix-blend-mode: multiply;
-}
-
-:root[data-theme="light"] .parcel-b,
-:root[data-theme="light"] .parcel-e {
-  fill: rgba(202, 138, 4, .055);
-}
-
-:root[data-theme="light"] .parcel-c,
-:root[data-theme="light"] .parcel-f {
-  fill: rgba(14, 165, 233, .042);
-}
-
-:root[data-theme="light"] .map-grid-lines {
-  background-image:
-    radial-gradient(circle at 20% 25%, rgba(15, 118, 110, .08) 0 1px, transparent 1.8px),
-    radial-gradient(circle at 78% 68%, rgba(202, 138, 4, .08) 0 1px, transparent 1.8px);
+    linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, .14)),
+    url("../img/map.jpg") center center / cover no-repeat;
 }
 
 :root[data-theme="light"] .map-label {
@@ -3250,9 +3308,15 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
 :root[data-theme="light"] .map-empty,
 :root[data-theme="light"] .map-panel,
 :root[data-theme="light"] .map-metric,
+:root[data-theme="light"] .drone-info-tile,
 :root[data-theme="light"] .irrigation-device,
 :root[data-theme="light"] .flight-item,
 :root[data-theme="light"] .map-dev-row {
+  background: rgba(248, 252, 255, .9);
+  border-color: rgba(15, 23, 42, .12);
+}
+
+:root[data-theme="light"] .check-row {
   background: rgba(248, 252, 255, .9);
   border-color: rgba(15, 23, 42, .12);
 }
