@@ -459,7 +459,7 @@ public class BoardCollector {
         }
         markDeviceOnline(deviceId);
 
-        // 阈值告警：按地块最新 temp/humidity/lux 统一判断，启用指标全部越界才报警。
+        // 阈值告警：按地块最新 temp/humidity/lux 统一判断，任一启用指标越界就报警。
         String plotId = Api.plotOfDevice(deviceId);
         if (plotId != null) {
             try {

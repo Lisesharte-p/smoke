@@ -44,6 +44,8 @@ import java.util.zip.GZIPInputStream;
  * 每个接口独立一个方法，路由在 handle() 里分发；以后新增接口加一行即可。
  */
 public class Api {
+    private static final int THRESHOLD_ALARM_COOLDOWN_SECONDS = 60;
+
 
     /** 读取环境变量，为空时使用默认值。 */
     private static String env(String key, String def) {
@@ -2291,6 +2293,19 @@ public class Api {
                 ps.executeBatch();
             }
         }
+        List<String> checkedPlotIds = new ArrayList<>();
+        if (selectedPlotId != null) {
+            checkedPlotIds.add(selectedPlotId);
+        } else {
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) checkedPlotIds.add(rs.getString(1));
+            }
+        }
+        for (String plotId : checkedPlotIds) {
+            checkThresholdAlarm(plotId, true);
+        }
         return "{\"code\":0}";
     }
 
@@ -3790,8 +3805,13 @@ public class Api {
         checkThresholdAlarm(plotId);
     }
 
-    /** 启用的全部指标都越过阈值时，插入一条综合告警。 */
+    /** 任一启用指标越过阈值时，插入一条告警记录。 */
     static void checkThresholdAlarm(String plotId) throws SQLException {
+        checkThresholdAlarm(plotId, false);
+    }
+
+    /** 任一启用指标越过阈值时，插入一条告警记录；forceInsert 用于阈值保存后的立即留档。 */
+    static void checkThresholdAlarm(String plotId, boolean forceInsert) throws SQLException {
         ThresholdConfig cfg = null;
         String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold WHERE plot_id = ?";
         try (Connection conn = DBUtil.getConnection();
@@ -3813,43 +3833,60 @@ public class Api {
         if (!cfg.hasEnabledMetric()) return;
 
         Map<String, BigDecimal> latest = latestMetricsForPlot(plotId);
-        List<String> details = new ArrayList<>();
+        List<MetricBreach> details = new ArrayList<>();
         boolean severe = false;
         if (cfg.humidityEnabled()) {
             MetricBreach b = breach(latest.get("humidity"), cfg.humidityMin, cfg.humidityMax,
                     "土壤湿度过低", "土壤湿度过高", "%", false);
-            if (b == null) return;
-            details.add(b.text);
-            severe = severe || b.severe;
+            if (b != null) {
+                details.add(b);
+                severe = severe || b.severe;
+            }
         }
         if (cfg.tempEnabled()) {
             MetricBreach b = breach(latest.get("temp"), cfg.tempMin, cfg.tempMax,
                     "温度过低", "温度过高", "℃", true);
-            if (b == null) return;
-            details.add(b.text);
-            severe = severe || b.severe;
+            if (b != null) {
+                details.add(b);
+                severe = severe || b.severe;
+            }
         }
         if (cfg.luxEnabled()) {
             MetricBreach b = breach(latest.get("lux"), cfg.luxMin, cfg.luxMax,
                     "亮度过低", "亮度过高", " lx", false);
-            if (b == null) return;
-            details.add(b.text);
-            severe = severe || b.severe;
-        }
-
-        // 去重：同一地块同类型且未处理的告警不重复插入
-        String alarmType = "综合阈值告警";
-        String dup = "SELECT 1 FROM alarm WHERE plot_id = ? AND alarm_type = ? AND status = '未处理'";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(dup)) {
-            ps.setString(1, plotId);
-            ps.setString(2, alarmType);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return;
+            if (b != null) {
+                details.add(b);
+                severe = severe || b.severe;
             }
         }
-        String alarmValue = String.join("；", details);
+        if (details.isEmpty()) return;
+
+        String alarmType;
+        String alarmValue;
+        if (details.size() == 1) {
+            MetricBreach only = details.get(0);
+            alarmType = only.type;
+            alarmValue = only.valueText;
+        } else {
+            alarmType = "综合阈值告警";
+            alarmValue = String.join("；", textsOf(details));
+        }
         String level = severe || details.size() >= 2 ? "严重" : "警告";
+
+        // 采集循环不覆盖旧记录，只做短时间去重；阈值保存时强制追加一条当前快照。
+        if (!forceInsert) {
+            String dup = "SELECT 1 FROM alarm WHERE plot_id = ? AND alarm_type = ? AND status = '未处理'" +
+                    " AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(dup)) {
+                ps.setString(1, plotId);
+                ps.setString(2, alarmType);
+                ps.setInt(3, THRESHOLD_ALARM_COOLDOWN_SECONDS);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return;
+                }
+            }
+        }
         String ins = "INSERT INTO alarm(plot_id, alarm_type, value, level, status) VALUES (?, ?, ?, ?, '未处理')";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(ins)) {
@@ -3860,6 +3897,12 @@ public class Api {
             ps.executeUpdate();
         }
         FeishuBotService.pushAlarmAsync(plotId, alarmType, alarmValue, level);
+    }
+
+    private static List<String> textsOf(List<MetricBreach> breaches) {
+        List<String> texts = new ArrayList<>();
+        for (MetricBreach b : breaches) texts.add(b.text);
+        return texts;
     }
 
     private static Map<String, BigDecimal> latestMetricsForPlot(String plotId) throws SQLException {
@@ -3889,19 +3932,25 @@ public class Api {
                                        String lowType, String highType, String unit, boolean highSevere) {
         if (value == null) return null;
         if (min != null && value.compareTo(min) < 0) {
-            return new MetricBreach(lowType + " " + value.stripTrailingZeros().toPlainString() + unit, false);
+            String valueText = value.stripTrailingZeros().toPlainString() + unit;
+            return new MetricBreach(lowType, valueText, lowType + " " + valueText, false);
         }
         if (max != null && value.compareTo(max) > 0) {
-            return new MetricBreach(highType + " " + value.stripTrailingZeros().toPlainString() + unit, highSevere);
+            String valueText = value.stripTrailingZeros().toPlainString() + unit;
+            return new MetricBreach(highType, valueText, highType + " " + valueText, highSevere);
         }
         return null;
     }
 
     private static class MetricBreach {
+        final String type;
+        final String valueText;
         final String text;
         final boolean severe;
 
-        MetricBreach(String text, boolean severe) {
+        MetricBreach(String type, String valueText, String text, boolean severe) {
+            this.type = type;
+            this.valueText = valueText;
             this.text = text;
             this.severe = severe;
         }

@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS `alarm` (
     `plot_id`    VARCHAR(16)  NOT NULL COMMENT '关联 plot.id',
     `device_id`  VARCHAR(16)  DEFAULT NULL COMMENT '触发设备（设备离线告警时填）',
     `alarm_type` VARCHAR(30)  NOT NULL COMMENT '告警类型：土壤湿度过低 / 土壤湿度过高 / 温度过低 / 温度过高 / 亮度过低 / 亮度过高 / 设备离线',
-    `value`      VARCHAR(20)  DEFAULT NULL COMMENT '触发时的值（展示型带单位），如 38%、36.5℃、-',
+    `value`      VARCHAR(255) DEFAULT NULL COMMENT '触发时的值或综合告警描述',
     `level`      VARCHAR(10)  NOT NULL COMMENT '级别：严重 / 警告',
     `status`     VARCHAR(10)  DEFAULT '未处理' COMMENT '状态：未处理 / 已处理',
     `created_at` DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '触发时间',

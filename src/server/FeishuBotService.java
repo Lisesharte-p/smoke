@@ -4,6 +4,7 @@ import com.lark.oapi.event.EventDispatcher;
 import com.lark.oapi.service.im.ImService;
 import com.lark.oapi.service.im.v1.model.CreateMessageReq;
 import com.lark.oapi.service.im.v1.model.CreateMessageReqBody;
+import com.lark.oapi.service.im.v1.model.CreateMessageResp;
 import com.lark.oapi.service.im.v1.model.EventMessage;
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1;
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1Data;
@@ -13,6 +14,7 @@ import com.lark.oapi.service.im.v1.model.ReplyMessageResp;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -36,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 public class FeishuBotService {
 
     private static final Path LOCAL_CONFIG = Paths.get("config", "feishu.local.properties");
+    private static final Path RUNTIME_CONFIG = Paths.get("config", "feishu.runtime.properties");
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private static final ExecutorService SEND_POOL = Executors.newFixedThreadPool(2, r -> {
@@ -62,6 +65,7 @@ public class FeishuBotService {
         if (started) return;
         Config loaded = loadConfig();
         config = loaded;
+        lastChatId = loaded.lastChatId;
 
         if (!loaded.enabled) {
             System.out.println("[FeishuBot] 未启用，跳过启动。");
@@ -133,6 +137,14 @@ public class FeishuBotService {
 
             String text = extractText(message.getContent());
             System.out.println("[FeishuBot] 收到消息: " + text);
+            if (config.rememberLastChat && !isBlank(message.getChatId())) {
+                rememberChat("FEISHU_LAST_CHAT_ID", message.getChatId());
+            }
+            String bindAnswer = handleBindCommand(text, message.getChatId());
+            if (bindAnswer != null) {
+                reply(message.getMessageId(), bindAnswer);
+                return;
+            }
             String answer = FeishuCommandRouter.route(text);
             reply(message.getMessageId(), answer);
         } catch (Throwable t) {
@@ -176,10 +188,59 @@ public class FeishuBotService {
                             .uuid(UUID.randomUUID().toString())
                             .build())
                     .build();
-            apiClient.im().message().create(req);
+            CreateMessageResp resp = apiClient.im().message().create(req);
+            if (!resp.success()) {
+                System.out.println("[FeishuBot] 主动发送失败 code=" + resp.getCode() + ", msg=" + resp.getMsg());
+            } else {
+                System.out.println("[FeishuBot] 主动消息已发送到 chat_id=" + mask(chatId));
+            }
         } catch (Throwable t) {
             System.out.println("[FeishuBot] 主动发送消息失败: " + t.getMessage());
             t.printStackTrace(System.out);
+        }
+    }
+
+    private static String handleBindCommand(String text, String chatId) {
+        if (isBlank(text) || isBlank(chatId)) return null;
+        String normalized = text.trim().replace(" ", "");
+        if (containsAny(normalized, "绑定告警", "开启告警推送", "订阅告警", "告警推送开启")) {
+            rememberChat("FEISHU_ALERT_CHAT_ID", chatId);
+            Config cfg = config;
+            cfg.alertChatId = chatId;
+            return "已绑定当前会话为智慧农业告警推送目标。后续网页或板子触发新告警时，我会主动发到这里。";
+        }
+        if (containsAny(normalized, "绑定日报", "开启每日总结", "订阅日报", "日报推送开启")) {
+            rememberChat("FEISHU_DAILY_CHAT_ID", chatId);
+            Config cfg = config;
+            cfg.dailyChatId = chatId;
+            return "已绑定当前会话为每日总结推送目标。";
+        }
+        if (containsAny(normalized, "查看飞书绑定", "告警绑定状态", "推送绑定状态")) {
+            Config cfg = config;
+            String alert = isBlank(cfg.alertChatId) ? "未绑定" : "已绑定";
+            String daily = isBlank(cfg.dailyChatId) ? "未绑定" : "已绑定";
+            return "飞书推送绑定状态：\n告警推送：" + alert + "\n每日总结：" + daily;
+        }
+        return null;
+    }
+
+    private static void rememberChat(String key, String chatId) {
+        if (isBlank(chatId)) return;
+        lastChatId = chatId;
+        Properties props = loadProperties(RUNTIME_CONFIG);
+        props.setProperty(key, chatId);
+        if ("FEISHU_ALERT_CHAT_ID".equals(key)) {
+            props.setProperty("FEISHU_LAST_CHAT_ID", chatId);
+        }
+        try {
+            Path parent = RUNTIME_CONFIG.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            try (OutputStream out = Files.newOutputStream(RUNTIME_CONFIG)) {
+                props.store(out, "Local Feishu runtime chat bindings. Do not commit.");
+            }
+            System.out.println("[FeishuBot] 已记录 " + key + "=" + mask(chatId));
+        } catch (IOException e) {
+            System.out.println("[FeishuBot] 保存会话绑定失败: " + e.getMessage());
         }
     }
 
@@ -225,31 +286,40 @@ public class FeishuBotService {
     }
 
     private static Config loadConfig() {
-        Properties props = new Properties();
-        if (Files.isRegularFile(LOCAL_CONFIG)) {
-            try (InputStream in = Files.newInputStream(LOCAL_CONFIG)) {
-                props.load(in);
-            } catch (IOException e) {
-                System.out.println("[FeishuBot] 读取本地配置失败: " + e.getMessage());
-            }
-        }
+        Properties localProps = loadProperties(LOCAL_CONFIG);
+        Properties runtimeProps = loadProperties(RUNTIME_CONFIG);
 
         Config cfg = new Config();
-        cfg.appId = read("FEISHU_APP_ID", props);
-        cfg.appSecret = read("FEISHU_APP_SECRET", props);
-        cfg.enabled = bool(read("FEISHU_ENABLED", props), !isBlank(cfg.appId) && !isBlank(cfg.appSecret));
-        cfg.alertChatId = read("FEISHU_ALERT_CHAT_ID", props);
-        cfg.rememberLastChat = bool(read("FEISHU_REMEMBER_LAST_CHAT", props), true);
-        cfg.dailySummaryEnabled = bool(read("FEISHU_DAILY_SUMMARY_ENABLED", props), false);
-        cfg.dailyChatId = read("FEISHU_DAILY_CHAT_ID", props);
-        cfg.dailyTime = parseTime(read("FEISHU_DAILY_TIME", props), LocalTime.of(17, 0));
+        cfg.appId = read("FEISHU_APP_ID", localProps, runtimeProps);
+        cfg.appSecret = read("FEISHU_APP_SECRET", localProps, runtimeProps);
+        cfg.enabled = bool(read("FEISHU_ENABLED", localProps, runtimeProps), !isBlank(cfg.appId) && !isBlank(cfg.appSecret));
+        cfg.alertChatId = read("FEISHU_ALERT_CHAT_ID", localProps, runtimeProps);
+        cfg.rememberLastChat = bool(read("FEISHU_REMEMBER_LAST_CHAT", localProps, runtimeProps), true);
+        cfg.dailySummaryEnabled = bool(read("FEISHU_DAILY_SUMMARY_ENABLED", localProps, runtimeProps), false);
+        cfg.dailyChatId = read("FEISHU_DAILY_CHAT_ID", localProps, runtimeProps);
+        cfg.dailyTime = parseTime(read("FEISHU_DAILY_TIME", localProps, runtimeProps), LocalTime.of(17, 0));
+        cfg.lastChatId = read("FEISHU_LAST_CHAT_ID", localProps, runtimeProps);
         return cfg;
     }
 
-    private static String read(String key, Properties props) {
+    private static Properties loadProperties(Path path) {
+        Properties props = new Properties();
+        if (Files.isRegularFile(path)) {
+            try (InputStream in = Files.newInputStream(path)) {
+                props.load(in);
+            } catch (IOException e) {
+                System.out.println("[FeishuBot] 读取配置失败 " + path + ": " + e.getMessage());
+            }
+        }
+        return props;
+    }
+
+    private static String read(String key, Properties localProps, Properties runtimeProps) {
         String env = System.getenv(key);
         if (!isBlank(env)) return env.trim();
-        String prop = props.getProperty(key);
+        String prop = localProps.getProperty(key);
+        if (!isBlank(prop)) return prop.trim();
+        prop = runtimeProps.getProperty(key);
         return prop == null ? "" : prop.trim();
     }
 
@@ -272,6 +342,21 @@ public class FeishuBotService {
         return isBlank(a) ? (isBlank(b) ? "" : b) : a;
     }
 
+    private static boolean containsAny(String text, String... needles) {
+        if (text == null) return false;
+        for (String n : needles) {
+            if (text.contains(n)) return true;
+        }
+        return false;
+    }
+
+    private static String mask(String value) {
+        if (isBlank(value)) return "";
+        String v = value.trim();
+        if (v.length() <= 8) return "****";
+        return v.substring(0, 4) + "****" + v.substring(v.length() - 4);
+    }
+
     private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
@@ -284,6 +369,7 @@ public class FeishuBotService {
         boolean rememberLastChat;
         boolean dailySummaryEnabled;
         String dailyChatId;
+        String lastChatId;
         LocalTime dailyTime;
     }
 }

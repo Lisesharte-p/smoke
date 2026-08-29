@@ -190,6 +190,9 @@ public class DBUtil {
     public static void ensureAlarmHandleColumns() {
         try (Connection conn = getConnection();
              Statement st = conn.createStatement()) {
+            if (columnExists(conn, "alarm", "value")) {
+                st.execute("ALTER TABLE alarm MODIFY COLUMN value VARCHAR(255) DEFAULT NULL COMMENT '触发时的值或综合告警描述'");
+            }
             if (!columnExists(conn, "alarm", "handled_at")) {
                 st.execute("ALTER TABLE alarm ADD COLUMN handled_at DATETIME DEFAULT NULL COMMENT '处理时间' AFTER status");
             }

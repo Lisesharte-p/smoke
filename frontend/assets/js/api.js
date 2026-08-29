@@ -12,7 +12,7 @@ window.API = (function () {
 
   var config = {
     baseUrl: '',            // 后端地址；由 WebServer 同源托管时留空，分开部署时填 'http://localhost:8080'
-    useMock: false,         // 默认真实接口；模拟模式由 URL / 本地设置显式开启
+    useMock: true,          // 答辩演示默认模拟接口；可用 ?simulator=0 或顶栏按钮切回真实接口
     endpoints: {
       login:      '/api/auth/login',
       register:   '/api/auth/register',
@@ -39,13 +39,18 @@ window.API = (function () {
     }
   };
 
-  /* ---------- 模拟器模式：真实接口为默认，显式开启后所有请求留在浏览器 ---------- */
+  /* ---------- 模拟器模式：默认模拟；URL / 本地设置可显式切换 ---------- */
   var MODE_KEY = 'agri_simulator_mode';
   var queryMode = new URLSearchParams(window.location.search).get('simulator');
   if (queryMode === '1' || queryMode === '0') {
     try { localStorage.setItem(MODE_KEY, queryMode === '1' ? '1' : '0'); } catch (e) {}
   }
-  try { config.useMock = localStorage.getItem(MODE_KEY) === '1'; } catch (e) { config.useMock = queryMode === '1'; }
+  try {
+    var savedMode = localStorage.getItem(MODE_KEY);
+    if (savedMode === '1' || savedMode === '0') config.useMock = savedMode === '1';
+  } catch (e) {
+    if (queryMode === '1' || queryMode === '0') config.useMock = queryMode === '1';
+  }
 
   function isSimulatorMode() { return !!config.useMock; }
 

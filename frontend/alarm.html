@@ -29,7 +29,7 @@
           <div class="card-header">
             <div>
               <div class="card-title">告警阈值设置</div>
-              <div class="card-sub">启用的指标全部越过阈值时，系统自动触发综合告警</div>
+              <div class="card-sub">任一启用指标越过阈值时，系统自动触发综合告警</div>
             </div>
             <div class="flex gap-8">
               <select class="form-control" id="alarmPlotFilter" style="width: 180px"></select>
@@ -523,6 +523,7 @@
         } else {
           Toast.success('阈值已保存');
         }
+        loadAlarms();
       });
     }
 
@@ -563,7 +564,7 @@
 
     function loadAlarms() {
       return API.getAlarms({ plotId: currentPlotFilter(), loader: true }).then(function (res) {
-        alarms = res.data;
+        alarms = (res && res.data) || [];
         renderAlarms();
       });
     }
