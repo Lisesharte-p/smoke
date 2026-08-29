@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Base64;
+import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -44,7 +46,15 @@ import java.util.zip.GZIPInputStream;
  * 每个接口独立一个方法，路由在 handle() 里分发；以后新增接口加一行即可。
  */
 public class Api {
+    private static final Path LOCAL_CONFIG = Paths.get("config", "feishu.local.properties");
     private static final int THRESHOLD_ALARM_COOLDOWN_SECONDS = 60;
+    private static final String[] CAMERA_HTTP_STREAM_PATHS = {
+            "/video",
+            "/videofeed",
+            "/mjpegfeed",
+            "/mjpeg",
+            "/stream"
+    };
 
 
     /** 读取环境变量，为空时使用默认值。 */
@@ -59,7 +69,23 @@ public class Api {
             String v = System.getenv(key);
             if (v != null && !v.trim().isEmpty()) return v.trim();
         }
+        Properties props = localConfigProperties();
+        for (String key : keys) {
+            String v = props.getProperty(key);
+            if (v != null && !v.trim().isEmpty()) return v.trim();
+        }
         return "";
+    }
+
+    private static Properties localConfigProperties() {
+        Properties props = new Properties();
+        if (!Files.isRegularFile(LOCAL_CONFIG)) return props;
+        try (InputStream in = Files.newInputStream(LOCAL_CONFIG)) {
+            props.load(in);
+        } catch (IOException e) {
+            System.out.println("[Api] 读取本地配置失败: " + e.getMessage());
+        }
+        return props;
     }
 
     private static String trimTrailingSlash(String s) {
@@ -144,6 +170,14 @@ public class Api {
             }
 
             /* ---------- 摄像头画面（MJPEG/HTTP 代理，供浏览器同源播放） ---------- */
+            if ("GET".equals(method) && path.equals("/api/camera/player")) {
+                streamCameraPlayer(ex);
+                return true;
+            }
+            if ("GET".equals(method) && path.equals("/api/camera/proxy")) {
+                streamCameraProxy(ex);
+                return true;
+            }
             if ("GET".equals(method) && path.equals("/api/camera/mjpeg")) {
                 streamCameraMjpeg(ex);
                 return true;
@@ -756,12 +790,19 @@ public class Api {
             return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换地址") + "}";
         }
 
-        String sql = "UPDATE device SET ip = ?, port = ?, online = 0, running = 0, last_heartbeat = NULL WHERE id = ?";
+        String protocol = trimToNull(body.get("protocol"));
+        String username = body.containsKey("username") ? trimToNull(body.get("username")) : null;
+        String password = body.containsKey("password") ? trimToNull(body.get("password")) : null;
+        String sql = "UPDATE device SET ip = ?, port = ?, protocol = COALESCE(?, protocol), username = COALESCE(?, username)," +
+                " password = COALESCE(?, password), online = 0, running = 0, last_heartbeat = NULL WHERE id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, ip);
             ps.setInt(2, port);
-            ps.setString(3, id.trim());
+            ps.setString(3, protocol);
+            ps.setString(4, username);
+            ps.setString(5, password);
+            ps.setString(6, id.trim());
             ps.executeUpdate();
         }
         boolean connected;
@@ -951,24 +992,10 @@ public class Api {
 
         HttpURLConnection conn = null;
         try {
-            URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(8000);
-            conn.setUseCaches(false);
-            conn.setRequestProperty("User-Agent", "SmartAgriCameraProxy");
-            conn.setRequestProperty("Cache-Control", "no-cache");
-            conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("Connection", "close");
-            if (c.username != null && !c.username.isEmpty()) {
-                String pass = c.password == null ? "" : c.password;
-                String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
-                conn.setRequestProperty("Authorization", "Basic " + token);
-            }
-            int code = conn.getResponseCode();
-            if (code < 200 || code >= 300) {
+            conn = openCameraStream(c, 5000, 8000, "SmartAgriCameraProxy");
+            if (conn == null) {
                 updateDeviceOnlineQuietly(c.id, false);
-                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头返回 HTTP " + code) + "}");
+                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头连接失败，请检查 IP、端口、账号密码和视频流路径") + "}");
                 return;
             }
             updateDeviceOnlineQuietly(c.id, true);
@@ -1029,7 +1056,7 @@ public class Api {
         });
     }
 
-    /** 刷新摄像头设备在线状态；HTTP/MJPEG 看 /video 是否可连接，RTSP 先做 TCP 端口探测。 */
+    /** 刷新摄像头设备在线状态；HTTP/MJPEG 自动尝试常见手机摄像头流路径，RTSP 先做 TCP 端口探测。 */
     private static void refreshCameraOnlineStates() throws SQLException {
         List<CameraConfig> cameras = new ArrayList<>();
         String sql = "SELECT id, name, ip, port, protocol, username, password FROM device WHERE type='摄像头'";
@@ -1065,25 +1092,135 @@ public class Api {
                 return false;
             }
         }
-        HttpURLConnection conn = null;
-        try {
-            URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(900);
-            conn.setReadTimeout(1200);
-            conn.setRequestProperty("User-Agent", "SmartAgriCameraHealthCheck");
-            if (c.username != null && !c.username.isEmpty()) {
-                String pass = c.password == null ? "" : c.password;
-                String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
-                conn.setRequestProperty("Authorization", "Basic " + token);
+        if ("http".equals(protocol)) {
+            HttpURLConnection conn = null;
+            try {
+                conn = openCameraPath(c, "/", 900, 1200, "SmartAgriCameraHealthCheck");
+                int code = conn.getResponseCode();
+                return code >= 200 && code < 400;
+            } catch (IOException e) {
+                return false;
+            } finally {
+                if (conn != null) conn.disconnect();
             }
-            int code = conn.getResponseCode();
-            return code >= 200 && code < 400;
+        }
+        try {
+            HttpURLConnection conn = openCameraStream(c, 900, 1200, "SmartAgriCameraHealthCheck");
+            if (conn == null) return false;
+            conn.disconnect();
+            return true;
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /** GET /api/camera/player?deviceId=D025 —— 同源 FLV 摄像头播放器，适配沈垚 IP 摄像头 App。 */
+    private static void streamCameraPlayer(HttpExchange ex) throws IOException, SQLException {
+        String deviceId = trimToNull(queryParam(ex.getRequestURI().getQuery(), "deviceId"));
+        CameraConfig c = cameraConfig(deviceId);
+        if (c == null) {
+            sendHtml(ex, 404, "<!doctype html><meta charset=\"utf-8\"><body>未找到摄像头设备</body>");
+            return;
+        }
+        String scriptUrl = "/api/camera/proxy?deviceId=" + urlEncode(c.id) + "&path=" + urlEncode("/res/mpegts.js");
+        String flvUrl = "/api/camera/proxy?deviceId=" + urlEncode(c.id) + "&path=" + urlEncode("/live.flv");
+        String html = "<!doctype html><html><head><meta charset=\"utf-8\">"
+                + "<style>html,body{margin:0;width:100%;height:100%;background:#020617;overflow:hidden}"
+                + "video{width:100%;height:100%;object-fit:contain;background:#020617}"
+                + ".msg{position:absolute;inset:0;display:grid;place-items:center;color:#e2e8f0;font:14px system-ui}</style>"
+                + "</head><body><video id=\"v\" autoplay muted controls playsinline></video><div class=\"msg\" id=\"m\">正在连接摄像头...</div>"
+                + "<script src=\"" + scriptUrl + "\"></script>"
+                + "<script>var msg=document.getElementById('m'),video=document.getElementById('v');"
+                + "function show(t){msg.textContent=t;msg.style.display='grid'}function hide(){msg.style.display='none'}"
+                + "if(window.mpegts&&mpegts.getFeatureList().mseLivePlayback){"
+                + "var player=mpegts.createPlayer({type:'flv',isLive:true,url:" + Json.str(flvUrl) + "});"
+                + "player.attachMediaElement(video);player.load();player.play().then(hide).catch(function(){show('请点击播放按钮');});"
+                + "player.on(mpegts.Events.ERROR,function(){show('摄像头视频流连接失败');});"
+                + "}else{show('当前浏览器不支持 FLV 直播播放');}</script></body></html>";
+        sendHtml(ex, 200, html);
+    }
+
+    /** GET /api/camera/proxy?deviceId=D025&path=/live.flv —— 摄像头同源资源/流代理。 */
+    private static void streamCameraProxy(HttpExchange ex) throws IOException, SQLException {
+        String query = ex.getRequestURI().getQuery();
+        CameraConfig c = cameraConfig(queryParam(query, "deviceId"));
+        String targetPath = trimToNull(queryParam(query, "path"));
+        if (c == null || targetPath == null || (!targetPath.equals("/live.flv") && !targetPath.startsWith("/res/"))) {
+            send(ex, 400, "{\"code\":1,\"msg\":" + Json.str("摄像头代理参数错误") + "}");
+            return;
+        }
+        HttpURLConnection conn = null;
+        try {
+            conn = openCameraPath(c, targetPath, 5000, targetPath.equals("/live.flv") ? 0 : 8000, "SmartAgriCameraProxy");
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 400) {
+                updateDeviceOnlineQuietly(c.id, false);
+                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头返回 HTTP " + code) + "}");
+                return;
+            }
+            updateDeviceOnlineQuietly(c.id, true);
+            String contentType = conn.getContentType();
+            if (contentType == null || contentType.trim().isEmpty()) {
+                contentType = targetPath.endsWith(".js") ? "application/javascript; charset=utf-8" : "video/x-flv";
+            }
+            ex.getResponseHeaders().set("Content-Type", contentType);
+            ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
+            ex.sendResponseHeaders(200, 0);
+            try (InputStream in = conn.getInputStream();
+                 OutputStream out = ex.getResponseBody()) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                    out.flush();
+                }
+            } catch (IOException clientClosed) {
+                // 浏览器关闭播放器时结束代理即可。
+            }
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    private static HttpURLConnection openCameraStream(CameraConfig c, int connectTimeout, int readTimeout, String userAgent) throws IOException {
+        IOException lastError = null;
+        for (String path : CAMERA_HTTP_STREAM_PATHS) {
+            HttpURLConnection conn = null;
+            try {
+                conn = openCameraPath(c, path, connectTimeout, readTimeout, userAgent);
+                int code = conn.getResponseCode();
+                if (code >= 200 && code < 400) {
+                    System.out.println("[Api] 摄像头流连接成功: " + c.id + " " + c.ip + ":" + c.port + path);
+                    return conn;
+                }
+                conn.disconnect();
+            } catch (IOException e) {
+                lastError = e;
+                if (conn != null) conn.disconnect();
+            }
+        }
+        if (lastError != null) {
+            System.out.println("[Api] 摄像头流连接失败: " + c.id + " " + c.ip + ":" + c.port + " - " + lastError.getMessage());
+        }
+        return null;
+    }
+
+    private static HttpURLConnection openCameraPath(CameraConfig c, String path, int connectTimeout, int readTimeout, String userAgent) throws IOException {
+        URL url = new URL("http://" + c.ip.trim() + ":" + c.port + path);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setConnectTimeout(connectTimeout);
+        conn.setReadTimeout(readTimeout);
+        conn.setUseCaches(false);
+        conn.setRequestProperty("User-Agent", userAgent);
+        conn.setRequestProperty("Cache-Control", "no-cache");
+        conn.setRequestProperty("Pragma", "no-cache");
+        conn.setRequestProperty("Connection", "close");
+        if (c.username != null && !c.username.isEmpty()) {
+            String pass = c.password == null ? "" : c.password;
+            String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
+            conn.setRequestProperty("Authorization", "Basic " + token);
+        }
+        return conn;
     }
 
     private static void updateDeviceOnline(String deviceId, boolean online) throws SQLException {
@@ -3168,7 +3305,7 @@ public class Api {
      */
     private static String deepseekChat(List<Map<String, String>> msgs, String kbContext) throws Exception {
         if (SMART_QA_API_KEY == null || SMART_QA_API_KEY.isEmpty()) {
-            throw new IOException("未配置环境变量 SMART_QA_API_KEY");
+            throw new IOException("未配置 SMART_QA_API_KEY，请设置环境变量或 config/feishu.local.properties");
         }
         // 系统提示：基础角色 + 当前时间 + 实时数据 + 地块/灌溉历史（让回答结合实时数据）
         String dataCtx = latestReadingsContext();
@@ -3338,6 +3475,14 @@ public class Api {
     private static String urlDecode(String s) {
         try {
             return URLDecoder.decode(s, StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
+    private static String urlEncode(String s) {
+        try {
+            return URLEncoder.encode(s, StandardCharsets.UTF_8.name());
         } catch (Exception e) {
             return s;
         }
@@ -3983,6 +4128,16 @@ public class Api {
     private static void send(HttpExchange ex, int status, String json) throws IOException {
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream os = ex.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    private static void sendHtml(HttpExchange ex, int status, String html) throws IOException {
+        byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
         ex.sendResponseHeaders(status, bytes.length);
         try (OutputStream os = ex.getResponseBody()) {
             os.write(bytes);

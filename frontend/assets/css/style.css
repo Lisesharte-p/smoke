@@ -1802,12 +1802,18 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   background-size: 34px 34px;
 }
 
-.monitor-frame img {
+.monitor-frame img,
+.monitor-frame iframe {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: contain;
   background: #020617;
+}
+
+.monitor-frame iframe {
+  display: none;
+  border: 0;
 }
 
 .monitor-hud,
@@ -1934,12 +1940,17 @@ select.form-control option { background: var(--card-solid); color: var(--text); 
   background: #020617;
 }
 
-.zoom-camera-frame img {
+.zoom-camera-frame img,
+.zoom-camera-frame iframe {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: contain;
   background: #020617;
+}
+
+.zoom-camera-frame iframe {
+  border: 0;
 }
 
 .zoom-camera-frame .monitor-zoom-img {

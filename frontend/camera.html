@@ -188,6 +188,14 @@
       return useProxy ? proxyCameraUrl(cam) : directCameraUrl(cam);
     }
 
+    function useCameraPlayer(cam) {
+      return String((cam && cam.protocol) || '').toLowerCase() === 'http';
+    }
+
+    function cameraPlayerUrl(cam) {
+      return 'api/camera/player?deviceId=' + encodeURIComponent(cam.id) + '&_=' + Date.now();
+    }
+
     function cameraById(id) {
       return cameras.filter(function (cam) { return cam.id === id; })[0] || null;
     }
@@ -259,6 +267,7 @@
         return '<article class="monitor-tile ' + (screen.status === 'live' && powered ? 'is-live' : '') + (!powered ? ' is-off' : '') + '" data-slot="' + screen.slot + '">' +
           '<div class="monitor-frame">' +
             '<img id="cameraImg' + screen.slot + '" alt="监控屏 ' + (screen.slot + 1) + '">' +
+            '<iframe id="cameraFrame' + screen.slot + '" title="监控屏 ' + (screen.slot + 1) + '" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>' +
             '<div class="camera-placeholder" id="cameraPlaceholder' + screen.slot + '">' +
               '<div class="placeholder-title">' + esc(statusText) + '</div>' +
               '<div class="placeholder-sub">' + esc(cam ? cam.ip + ':' + cam.port : '未绑定或未连接摄像头，点击添加摄像头设备。') + '</div>' +
@@ -358,12 +367,20 @@
         img.onload = null;
         img.onerror = null;
         img.removeAttribute('src');
+        img.style.display = '';
+      }
+      var frame = document.getElementById('cameraFrame' + screen.slot);
+      if (frame) {
+        frame.onload = null;
+        frame.removeAttribute('src');
+        frame.style.display = 'none';
       }
     }
 
     function attachScreenStream(screen, showConnecting) {
       var cam = screen.camera;
       var img = document.getElementById('cameraImg' + screen.slot);
+      var frame = document.getElementById('cameraFrame' + screen.slot);
       if (!cam || !img) return;
       stopScreenStream(screen);
       screen.status = 'connecting';
@@ -372,6 +389,16 @@
       if (String(cam.protocol || 'mjpeg').toLowerCase() === 'rtsp') {
         screen.status = 'failed';
         setScreenPlaceholder(screen.slot, '连接失败', 'RTSP 需要转码后才能在浏览器播放。', false);
+        return;
+      }
+      if (useCameraPlayer(cam) && frame) {
+        img.style.display = 'none';
+        frame.style.display = 'block';
+        frame.onload = function () {
+          screen.status = 'live';
+          hideScreenPlaceholder(screen.slot);
+        };
+        frame.src = cameraPlayerUrl(cam);
         return;
       }
       function attach(showProxyHint) {
@@ -665,6 +692,7 @@
         img.onerror = null;
         img.removeAttribute('src');
         img.style.display = 'none';
+        if (img.tagName === 'IFRAME' && img.parentNode) img.parentNode.removeChild(img);
       }
       zoomStream.screen = null;
       zoomStream.movedImg = null;
@@ -698,6 +726,18 @@
       }
       var img = fallbackImg;
       img.style.display = 'block';
+      if (useCameraPlayer(cam)) {
+        var frameEl = document.createElement('iframe');
+        frameEl.className = 'monitor-zoom-frame';
+        frameEl.title = cam.name;
+        frameEl.allow = 'autoplay; fullscreen';
+        frameEl.referrerPolicy = 'no-referrer';
+        frameEl.src = cameraPlayerUrl(cam);
+        frame.insertBefore(frameEl, placeholder);
+        placeholder.style.display = 'none';
+        zoomStream.fallbackImg = frameEl;
+        return;
+      }
       zoomStream.useProxy = false;
       function show(title, sub, loading) {
         placeholder.style.display = 'grid';
