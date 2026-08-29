@@ -10,19 +10,15 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.math.BigDecimal;
-import java.net.URI;
 import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -36,6 +32,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Base64;
+import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -46,6 +46,16 @@ import java.util.zip.GZIPInputStream;
  * 每个接口独立一个方法，路由在 handle() 里分发；以后新增接口加一行即可。
  */
 public class Api {
+    private static final Path LOCAL_CONFIG = Paths.get("config", "feishu.local.properties");
+    private static final int THRESHOLD_ALARM_COOLDOWN_SECONDS = 60;
+    private static final String[] CAMERA_HTTP_STREAM_PATHS = {
+            "/video",
+            "/videofeed",
+            "/mjpegfeed",
+            "/mjpeg",
+            "/stream"
+    };
+
 
     /** 读取环境变量，为空时使用默认值。 */
     private static String env(String key, String def) {
@@ -59,7 +69,23 @@ public class Api {
             String v = System.getenv(key);
             if (v != null && !v.trim().isEmpty()) return v.trim();
         }
+        Properties props = localConfigProperties();
+        for (String key : keys) {
+            String v = props.getProperty(key);
+            if (v != null && !v.trim().isEmpty()) return v.trim();
+        }
         return "";
+    }
+
+    private static Properties localConfigProperties() {
+        Properties props = new Properties();
+        if (!Files.isRegularFile(LOCAL_CONFIG)) return props;
+        try (InputStream in = Files.newInputStream(LOCAL_CONFIG)) {
+            props.load(in);
+        } catch (IOException e) {
+            System.out.println("[Api] 读取本地配置失败: " + e.getMessage());
+        }
+        return props;
     }
 
     private static String trimTrailingSlash(String s) {
@@ -80,6 +106,18 @@ public class Api {
     private static final String QW_LOCATION = env("QWEATHER_LOCATION", "106.565952,29.642614"); // 重庆两江新区，和风格式：经度,纬度
     private static final String QW_HOST = trimTrailingSlash(env("QWEATHER_HOST", "https://ma5rk8cjh3.re.qweatherapi.com"));
 
+    private static final long CAMERA_ONLINE_REFRESH_INTERVAL_MS =
+            Long.parseLong(env("CAMERA_ONLINE_REFRESH_INTERVAL_MS", "30000"));
+    private static final Object CAMERA_ONLINE_REFRESH_LOCK = new Object();
+    private static final AtomicBoolean CAMERA_ONLINE_REFRESH_RUNNING = new AtomicBoolean(false);
+    private static volatile long lastCameraOnlineRefreshAt = 0L;
+    private static final ExecutorService CAMERA_ONLINE_REFRESH_EXECUTOR =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "camera-online-refresh");
+                t.setDaemon(true);
+                return t;
+            });
+
     /* ==================================================================
        YOLO 人体识别配置
        DETECTION_STORAGE_DIR：识别截图和回放视频保存目录，默认 data/detections
@@ -88,6 +126,8 @@ public class Api {
     private static final Path DETECTION_STORAGE = Paths.get(env("DETECTION_STORAGE_DIR", "data/detections"))
             .toAbsolutePath().normalize();
     private static final String DETECTION_WORKER_TOKEN = env("DETECTION_WORKER_TOKEN", "");
+    private static final Object DETECTION_WORKER_LOCK = new Object();
+    private static volatile Process detectionWorkerProcess = null;
 
     /** 处理 /api/* 请求，返回 true 表示已处理（false 交给 WebServer 走静态页面） */
     public static boolean handle(HttpExchange ex) throws IOException {
@@ -120,12 +160,24 @@ public class Api {
                 ok(ex, addDeviceJson(ex));
                 return true;
             }
+            if ("PUT".equals(method) && path.matches("/api/devices/[^/]+")) {
+                ok(ex, updateDeviceJson(path.substring("/api/devices/".length()), ex));
+                return true;
+            }
             if ("DELETE".equals(method) && path.matches("/api/devices/[^/]+")) {
                 ok(ex, deleteDeviceJson(path.substring("/api/devices/".length())));
                 return true;
             }
 
             /* ---------- 摄像头画面（MJPEG/HTTP 代理，供浏览器同源播放） ---------- */
+            if ("GET".equals(method) && path.equals("/api/camera/player")) {
+                streamCameraPlayer(ex);
+                return true;
+            }
+            if ("GET".equals(method) && path.equals("/api/camera/proxy")) {
+                streamCameraProxy(ex);
+                return true;
+            }
             if ("GET".equals(method) && path.equals("/api/camera/mjpeg")) {
                 streamCameraMjpeg(ex);
                 return true;
@@ -154,6 +206,10 @@ public class Api {
             }
             if ("POST".equals(method) && path.equals("/api/camera/detection/settings")) {
                 ok(ex, saveDetectionSettingsJson(ex));
+                return true;
+            }
+            if ("POST".equals(method) && path.equals("/api/camera/detection/worker/start")) {
+                ok(ex, startDetectionWorkerJson(ex));
                 return true;
             }
             if ("GET".equals(method) && path.equals("/api/internal/camera-configs")) {
@@ -190,15 +246,15 @@ public class Api {
 
             /* ---------- 阈值 / 告警 ---------- */
             if ("GET".equals(method) && path.equals("/api/thresholds")) {
-                ok(ex, thresholdsJson());
+                ok(ex, thresholdsJson(ex.getRequestURI().getQuery()));
                 return true;
             }
             if ("PUT".equals(method) && path.equals("/api/thresholds")) {
-                ok(ex, saveThresholdsJson(ex));
+                ok(ex, saveThresholdsJson(ex, ex.getRequestURI().getQuery()));
                 return true;
             }
             if ("GET".equals(method) && path.equals("/api/alarms")) {
-                ok(ex, alarmsJson());
+                ok(ex, alarmsJson(ex.getRequestURI().getQuery()));
                 return true;
             }
             if ("PUT".equals(method) && path.matches("/api/alarms/[^/]+")) {
@@ -230,7 +286,7 @@ public class Api {
 
             /* ---------- 控制日志 ---------- */
             if ("GET".equals(method) && path.equals("/api/control-logs")) {
-                ok(ex, controlLogsJson());
+                ok(ex, controlLogsJson(ex.getRequestURI().getQuery()));
                 return true;
             }
 
@@ -301,11 +357,11 @@ public class Api {
      * temp/humidity 取该地块最新一条传感器读数；deviceCount/onlineCount 由 device 聚合。
      */
     private static String plotsJson() throws SQLException {
-        refreshCameraOnlineStates();
+        scheduleCameraOnlineRefresh();
         StringBuilder sb = new StringBuilder();
         sb.append("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT p.id, p.name, p.crop, p.area," +
+                "SELECT p.id, p.name, p.crop, p.area, p.map_shape, p.crop_style," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id) AS deviceCount," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id AND d.online=1) AS onlineCount," +
                 "  (SELECT s.value FROM sensor_data s JOIN device d ON d.id=s.device_id" +
@@ -329,6 +385,8 @@ public class Api {
                   .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
                   .append("\"crop\":").append(Json.str(rs.getString("crop"))).append(',')
                   .append("\"area\":").append(Json.str(areaStr(rs.getBigDecimal("area")))).append(',')
+                  .append("\"mapShape\":").append(jsonObjectOrNull(rs.getString("map_shape"))).append(',')
+                  .append("\"cropStyle\":").append(Json.str(rs.getString("crop_style"))).append(',')
                   .append("\"temp\":").append(Json.num(rs.getBigDecimal("temp"))).append(',')
                   .append("\"humidity\":").append(Json.num(rs.getBigDecimal("humidity"))).append(',')
                   .append("\"deviceCount\":").append(rs.getInt("deviceCount")).append(',')
@@ -361,7 +419,7 @@ public class Api {
     /** 按地块编号查单个地块 JSON（与列表项形状一致）；不存在返回 null */
     private static String plotJson(String plotId) throws SQLException {
         String sql =
-                "SELECT p.id, p.name, p.crop, p.area," +
+                "SELECT p.id, p.name, p.crop, p.area, p.map_shape, p.crop_style," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id) AS deviceCount," +
                 "  (SELECT COUNT(*) FROM device d WHERE d.plot_id=p.id AND d.online=1) AS onlineCount" +
                 " FROM plot p WHERE p.id = ?";
@@ -374,6 +432,8 @@ public class Api {
                         + ",\"name\":" + Json.str(rs.getString("name"))
                         + ",\"crop\":" + Json.str(rs.getString("crop"))
                         + ",\"area\":" + Json.str(areaStr(rs.getBigDecimal("area")))
+                        + ",\"mapShape\":" + jsonObjectOrNull(rs.getString("map_shape"))
+                        + ",\"cropStyle\":" + Json.str(rs.getString("crop_style"))
                         + ",\"temp\":" + Json.num(latestValue(plotId, "temp"))
                         + ",\"humidity\":" + Json.num(latestValue(plotId, "humidity"))
                         + ",\"deviceCount\":" + rs.getInt("deviceCount")
@@ -399,6 +459,8 @@ public class Api {
         String name = body.get("name");
         String crop = body.get("crop");
         String area = body.get("area");
+        String mapShape = normalizeJsonObject(body.get("mapShape"));
+        String cropStyle = trimToNull(body.get("cropStyle"));
         if (name == null || name.trim().isEmpty()
                 || crop == null || crop.trim().isEmpty()
                 || area == null || area.trim().isEmpty()) {
@@ -422,11 +484,13 @@ public class Api {
             try {
                 // 1. 插入地块
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "INSERT INTO plot(id, name, crop, area) VALUES (?, ?, ?, ?)")) {
+                        "INSERT INTO plot(id, name, crop, area, map_shape, crop_style) VALUES (?, ?, ?, ?, ?, ?)")) {
                     ps.setString(1, plotId);
                     ps.setString(2, name.trim());
                     ps.setString(3, crop.trim());
                     ps.setBigDecimal(4, areaVal);
+                    ps.setString(5, mapShape);
+                    ps.setString(6, cropStyle);
                     ps.executeUpdate();
                 }
                 // 2. 绑定设备（校验后逐个插入；编号在事务内递增，避免重复）
@@ -564,39 +628,41 @@ public class Api {
      * plotName 由 join plot 得出；controllable 由 type=='灌溉设备' 推出。
      */
     private static String devicesJson() throws SQLException {
-        refreshCameraOnlineStates();
-        Map<String, Map<String, BigDecimal>> latest = latestByDevice();
+        scheduleCameraOnlineRefresh();
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT d.id, d.name, d.type, d.plot_id, p.name AS plotName, d.online, d.running, d.ip, d.port, d.protocol, d.username, d.password" +
                 " FROM device d LEFT JOIN plot p ON p.id = d.plot_id ORDER BY d.id";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
+        try (Connection conn = DBUtil.getConnection()) {
+            Map<String, Map<String, BigDecimal>> latest = latestByDevice(conn);
+            try (PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
-            boolean first = true;
-            while (rs.next()) {
-                if (!first) sb.append(',');
-                first = false;
-                String type = rs.getString("type");
-                Map<String, BigDecimal> vals = latest.get(rs.getString("id"));
-                sb.append('{')
-                  .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
-                  .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
-                  .append("\"type\":").append(Json.str(typeMap(type))).append(',')
-                  .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
-                  .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
-                  .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
-                  .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
-                  .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
-                  .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
-                  .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
-                  .append("\"online\":").append(rs.getInt("online") == 1).append(',')
-                  .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
-                  .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
-                  .append("\"lux\":").append(numOrNull(vals, "lux")).append(',')
-                  .append("\"controllable\":").append("灌溉设备".equals(type)).append(',')
-                  .append("\"running\":").append(rs.getInt("running") == 1)
-                  .append('}');
+                boolean first = true;
+                while (rs.next()) {
+                    if (!first) sb.append(',');
+                    first = false;
+                    String type = rs.getString("type");
+                    boolean online = rs.getInt("online") == 1;
+                    Map<String, BigDecimal> vals = online ? latest.get(rs.getString("id")) : null;
+                    sb.append('{')
+                      .append("\"id\":").append(Json.str(rs.getString("id"))).append(',')
+                      .append("\"name\":").append(Json.str(rs.getString("name"))).append(',')
+                      .append("\"type\":").append(Json.str(typeMap(type))).append(',')
+                      .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
+                      .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
+                      .append("\"ip\":").append(Json.str(rs.getString("ip"))).append(',')
+                      .append("\"port\":").append(Json.num(rs.getObject("port"))).append(',')
+                      .append("\"protocol\":").append(Json.str(rs.getString("protocol"))).append(',')
+                      .append("\"username\":").append(Json.str(rs.getString("username"))).append(',')
+                      .append("\"password\":").append(Json.str(rs.getString("password"))).append(',')
+                      .append("\"online\":").append(online).append(',')
+                      .append("\"temp\":").append(numOrNull(vals, "temp")).append(',')
+                      .append("\"humidity\":").append(numOrNull(vals, "humidity")).append(',')
+                      .append("\"lux\":").append(numOrNull(vals, "lux")).append(',')
+                      .append("\"controllable\":").append("灌溉设备".equals(type)).append(',')
+                      .append("\"running\":").append(rs.getInt("running") == 1)
+                      .append('}');
+                }
             }
         }
         sb.append("]}");
@@ -604,14 +670,13 @@ public class Api {
     }
 
     /** 每台设备各指标的最新一条读数：deviceId -> {temp, humidity, lux} */
-    private static Map<String, Map<String, BigDecimal>> latestByDevice() throws SQLException {
+    private static Map<String, Map<String, BigDecimal>> latestByDevice(Connection conn) throws SQLException {
         Map<String, Map<String, BigDecimal>> map = new HashMap<>();
         String sql =
                 "SELECT device_id, metric, value FROM sensor_data WHERE id IN (" +
                 " SELECT MAX(id) FROM sensor_data WHERE metric IN ('temp','humidity','lux')" +
                 " GROUP BY device_id, metric)";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
+        try (PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 String deviceId = rs.getString("device_id");
@@ -668,6 +733,9 @@ public class Api {
         if (sameTypeAddrExists(type, ip.trim(), port)) {
             return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换类型或地址") + "}";
         }
+        if (!exists("SELECT 1 FROM plot WHERE id = ?", plotId)) {
+            return "{\"code\":1,\"msg\":" + Json.str("不存在地块") + "}";
+        }
         String id = nextDeviceId();
         String sql = "INSERT INTO device(id, plot_id, name, type, ip, port, protocol, username, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
@@ -684,6 +752,70 @@ public class Api {
             ps.executeUpdate();
         }
         return "{\"code\":0,\"data\":" + deviceJson(id) + "}";
+    }
+
+    /** PUT /api/devices/{id} —— 修改设备 IP/端口，并立刻触发在线状态重扫 */
+    private static String updateDeviceJson(String id, HttpExchange ex) throws IOException, SQLException {
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String ip = trimToNull(body.get("ip"));
+        String portStr = trimToNull(body.get("port"));
+        if (id == null || id.trim().isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("缺少设备编号") + "}";
+        }
+        if (ip == null || portStr == null) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：ip/port 必填") + "}";
+        }
+        int port;
+        try {
+            port = Integer.parseInt(portStr);
+        } catch (NumberFormatException e) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 必须是数字") + "}";
+        }
+        if (port < 1 || port > 65535) {
+            return "{\"code\":1,\"msg\":" + Json.str("参数错误：port 需在 1-65535 之间") + "}";
+        }
+
+        String type;
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT type FROM device WHERE id = ?")) {
+            ps.setString(1, id.trim());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "{\"code\":1,\"msg\":" + Json.str("设备不存在：" + id.trim()) + "}";
+                }
+                type = rs.getString("type");
+            }
+        }
+        if (sameTypeAddrExistsExcept(type, ip, port, id.trim())) {
+            return "{\"code\":1,\"msg\":" + Json.str("已存在同类型且同 IP/端口的设备，请更换地址") + "}";
+        }
+
+        String protocol = trimToNull(body.get("protocol"));
+        String username = body.containsKey("username") ? trimToNull(body.get("username")) : null;
+        String password = body.containsKey("password") ? trimToNull(body.get("password")) : null;
+        String sql = "UPDATE device SET ip = ?, port = ?, protocol = COALESCE(?, protocol), username = COALESCE(?, username)," +
+                " password = COALESCE(?, password), online = 0, running = 0, last_heartbeat = NULL WHERE id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ip);
+            ps.setInt(2, port);
+            ps.setString(3, protocol);
+            ps.setString(4, username);
+            ps.setString(5, password);
+            ps.setString(6, id.trim());
+            ps.executeUpdate();
+        }
+        boolean connected;
+        if ("摄像头".equals(type)) {
+            connected = probeCamera(cameraConfig(id.trim()));
+            updateDeviceOnline(id.trim(), connected);
+            scheduleCameraOnlineRefresh(true);
+        } else {
+            connected = BoardCollector.probeAddress(ip, port);
+            updateDeviceOnline(id.trim(), connected);
+            BoardCollector.rescanNow();
+        }
+        return "{\"code\":0,\"data\":" + deviceJson(id.trim()) + "}";
     }
 
     /** DELETE /api/devices/{id} —— 解绑设备 */
@@ -737,7 +869,8 @@ public class Api {
             ps.setString(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return "null";
-                Map<String, BigDecimal> vals = latestByDevice().get(id);
+                boolean online = rs.getInt("online") == 1;
+                Map<String, BigDecimal> vals = online ? latestByDevice(conn).get(id) : null;
                 return "{\"id\":" + Json.str(rs.getString("id"))
                         + ",\"name\":" + Json.str(rs.getString("name"))
                         + ",\"type\":" + Json.str(typeMap(rs.getString("type")))
@@ -748,7 +881,7 @@ public class Api {
                         + ",\"protocol\":" + Json.str(rs.getString("protocol"))
                         + ",\"username\":" + Json.str(rs.getString("username"))
                         + ",\"password\":" + Json.str(rs.getString("password"))
-                        + ",\"online\":" + (rs.getInt("online") == 1)
+                        + ",\"online\":" + online
                         + ",\"temp\":" + numOrNull(vals, "temp")
                         + ",\"humidity\":" + numOrNull(vals, "humidity")
                         + ",\"lux\":" + numOrNull(vals, "lux")
@@ -762,7 +895,9 @@ public class Api {
     /** 设备类型映射：数据库类型 → 前端契约类型 */
     private static String typeMap(String type) {
         if ("灌溉设备".equals(type)) return "灌溉设备";
+        if ("温度".equals(type)) return "温度";
         if ("温度传感器".equals(type)) return "温度";
+        if ("亮度".equals(type)) return "亮度";
         if ("亮度传感器".equals(type)) return "亮度";
         if ("环境监测板".equals(type)) return "环境监测板";
         if ("摄像头".equals(type)) return "摄像头";
@@ -788,6 +923,17 @@ public class Api {
         if (s == null) return null;
         String v = s.trim();
         return v.isEmpty() ? null : v;
+    }
+
+    private static String normalizeJsonObject(String s) {
+        String v = trimToNull(s);
+        if (v == null) return null;
+        return v.startsWith("{") && v.endsWith("}") ? v : null;
+    }
+
+    private static String jsonObjectOrNull(String s) {
+        String v = normalizeJsonObject(s);
+        return v == null ? "null" : v;
     }
 
     private static class CameraConfig {
@@ -846,20 +992,10 @@ public class Api {
 
         HttpURLConnection conn = null;
         try {
-            URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(15000);
-            conn.setRequestProperty("User-Agent", "SmartAgriCameraProxy");
-            if (c.username != null && !c.username.isEmpty()) {
-                String pass = c.password == null ? "" : c.password;
-                String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
-                conn.setRequestProperty("Authorization", "Basic " + token);
-            }
-            int code = conn.getResponseCode();
-            if (code < 200 || code >= 300) {
+            conn = openCameraStream(c, 5000, 8000, "SmartAgriCameraProxy");
+            if (conn == null) {
                 updateDeviceOnlineQuietly(c.id, false);
-                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头返回 HTTP " + code) + "}");
+                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头连接失败，请检查 IP、端口、账号密码和视频流路径") + "}");
                 return;
             }
             updateDeviceOnlineQuietly(c.id, true);
@@ -871,11 +1007,14 @@ public class Api {
             ex.getResponseHeaders().set("Content-Type", contentType);
             ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
             ex.getResponseHeaders().set("Pragma", "no-cache");
+            ex.getResponseHeaders().set("Expires", "0");
+            ex.getResponseHeaders().set("X-Accel-Buffering", "no");
+            ex.getResponseHeaders().set("Connection", "close");
             ex.sendResponseHeaders(200, 0);
 
             try (InputStream in = conn.getInputStream();
                  OutputStream out = ex.getResponseBody()) {
-                byte[] buf = new byte[8192];
+                byte[] buf = new byte[2048];
                 int n;
                 while ((n = in.read(buf)) != -1) {
                     out.write(buf, 0, n);
@@ -892,7 +1031,32 @@ public class Api {
         }
     }
 
-    /** 刷新摄像头设备在线状态；HTTP/MJPEG 看 /video 是否可连接，RTSP 先做 TCP 端口探测。 */
+    /** 页面列表接口只触发后台刷新，避免离线摄像头探测阻塞页面切换。 */
+    private static void scheduleCameraOnlineRefresh() {
+        scheduleCameraOnlineRefresh(false);
+    }
+
+    /** force=true 用于设备地址刚修改后，绕过间隔限制立即检查一次。 */
+    private static void scheduleCameraOnlineRefresh(boolean force) {
+        long now = System.currentTimeMillis();
+        synchronized (CAMERA_ONLINE_REFRESH_LOCK) {
+            if (!force && now - lastCameraOnlineRefreshAt < CAMERA_ONLINE_REFRESH_INTERVAL_MS) return;
+            lastCameraOnlineRefreshAt = now;
+        }
+        if (!CAMERA_ONLINE_REFRESH_RUNNING.compareAndSet(false, true)) return;
+
+        CAMERA_ONLINE_REFRESH_EXECUTOR.submit(() -> {
+            try {
+                refreshCameraOnlineStates();
+            } catch (SQLException e) {
+                System.out.println("[Api] 摄像头在线状态后台刷新失败: " + e.getMessage());
+            } finally {
+                CAMERA_ONLINE_REFRESH_RUNNING.set(false);
+            }
+        });
+    }
+
+    /** 刷新摄像头设备在线状态；HTTP/MJPEG 自动尝试常见手机摄像头流路径，RTSP 先做 TCP 端口探测。 */
     private static void refreshCameraOnlineStates() throws SQLException {
         List<CameraConfig> cameras = new ArrayList<>();
         String sql = "SELECT id, name, ip, port, protocol, username, password FROM device WHERE type='摄像头'";
@@ -928,25 +1092,135 @@ public class Api {
                 return false;
             }
         }
-        HttpURLConnection conn = null;
-        try {
-            URL url = new URL("http://" + c.ip.trim() + ":" + c.port + "/video");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(900);
-            conn.setReadTimeout(1200);
-            conn.setRequestProperty("User-Agent", "SmartAgriCameraHealthCheck");
-            if (c.username != null && !c.username.isEmpty()) {
-                String pass = c.password == null ? "" : c.password;
-                String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
-                conn.setRequestProperty("Authorization", "Basic " + token);
+        if ("http".equals(protocol)) {
+            HttpURLConnection conn = null;
+            try {
+                conn = openCameraPath(c, "/", 900, 1200, "SmartAgriCameraHealthCheck");
+                int code = conn.getResponseCode();
+                return code >= 200 && code < 400;
+            } catch (IOException e) {
+                return false;
+            } finally {
+                if (conn != null) conn.disconnect();
             }
-            int code = conn.getResponseCode();
-            return code >= 200 && code < 400;
+        }
+        try {
+            HttpURLConnection conn = openCameraStream(c, 900, 1200, "SmartAgriCameraHealthCheck");
+            if (conn == null) return false;
+            conn.disconnect();
+            return true;
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /** GET /api/camera/player?deviceId=D025 —— 同源 FLV 摄像头播放器，适配沈垚 IP 摄像头 App。 */
+    private static void streamCameraPlayer(HttpExchange ex) throws IOException, SQLException {
+        String deviceId = trimToNull(queryParam(ex.getRequestURI().getQuery(), "deviceId"));
+        CameraConfig c = cameraConfig(deviceId);
+        if (c == null) {
+            sendHtml(ex, 404, "<!doctype html><meta charset=\"utf-8\"><body>未找到摄像头设备</body>");
+            return;
+        }
+        String scriptUrl = "/api/camera/proxy?deviceId=" + urlEncode(c.id) + "&path=" + urlEncode("/res/mpegts.js");
+        String flvUrl = "/api/camera/proxy?deviceId=" + urlEncode(c.id) + "&path=" + urlEncode("/live.flv");
+        String html = "<!doctype html><html><head><meta charset=\"utf-8\">"
+                + "<style>html,body{margin:0;width:100%;height:100%;background:#020617;overflow:hidden}"
+                + "video{width:100%;height:100%;object-fit:contain;background:#020617}"
+                + ".msg{position:absolute;inset:0;display:grid;place-items:center;color:#e2e8f0;font:14px system-ui}</style>"
+                + "</head><body><video id=\"v\" autoplay muted controls playsinline></video><div class=\"msg\" id=\"m\">正在连接摄像头...</div>"
+                + "<script src=\"" + scriptUrl + "\"></script>"
+                + "<script>var msg=document.getElementById('m'),video=document.getElementById('v');"
+                + "function show(t){msg.textContent=t;msg.style.display='grid'}function hide(){msg.style.display='none'}"
+                + "if(window.mpegts&&mpegts.getFeatureList().mseLivePlayback){"
+                + "var player=mpegts.createPlayer({type:'flv',isLive:true,url:" + Json.str(flvUrl) + "});"
+                + "player.attachMediaElement(video);player.load();player.play().then(hide).catch(function(){show('请点击播放按钮');});"
+                + "player.on(mpegts.Events.ERROR,function(){show('摄像头视频流连接失败');});"
+                + "}else{show('当前浏览器不支持 FLV 直播播放');}</script></body></html>";
+        sendHtml(ex, 200, html);
+    }
+
+    /** GET /api/camera/proxy?deviceId=D025&path=/live.flv —— 摄像头同源资源/流代理。 */
+    private static void streamCameraProxy(HttpExchange ex) throws IOException, SQLException {
+        String query = ex.getRequestURI().getQuery();
+        CameraConfig c = cameraConfig(queryParam(query, "deviceId"));
+        String targetPath = trimToNull(queryParam(query, "path"));
+        if (c == null || targetPath == null || (!targetPath.equals("/live.flv") && !targetPath.startsWith("/res/"))) {
+            send(ex, 400, "{\"code\":1,\"msg\":" + Json.str("摄像头代理参数错误") + "}");
+            return;
+        }
+        HttpURLConnection conn = null;
+        try {
+            conn = openCameraPath(c, targetPath, 5000, targetPath.equals("/live.flv") ? 0 : 8000, "SmartAgriCameraProxy");
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 400) {
+                updateDeviceOnlineQuietly(c.id, false);
+                send(ex, 502, "{\"code\":1,\"msg\":" + Json.str("摄像头返回 HTTP " + code) + "}");
+                return;
+            }
+            updateDeviceOnlineQuietly(c.id, true);
+            String contentType = conn.getContentType();
+            if (contentType == null || contentType.trim().isEmpty()) {
+                contentType = targetPath.endsWith(".js") ? "application/javascript; charset=utf-8" : "video/x-flv";
+            }
+            ex.getResponseHeaders().set("Content-Type", contentType);
+            ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
+            ex.sendResponseHeaders(200, 0);
+            try (InputStream in = conn.getInputStream();
+                 OutputStream out = ex.getResponseBody()) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                    out.flush();
+                }
+            } catch (IOException clientClosed) {
+                // 浏览器关闭播放器时结束代理即可。
+            }
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    private static HttpURLConnection openCameraStream(CameraConfig c, int connectTimeout, int readTimeout, String userAgent) throws IOException {
+        IOException lastError = null;
+        for (String path : CAMERA_HTTP_STREAM_PATHS) {
+            HttpURLConnection conn = null;
+            try {
+                conn = openCameraPath(c, path, connectTimeout, readTimeout, userAgent);
+                int code = conn.getResponseCode();
+                if (code >= 200 && code < 400) {
+                    System.out.println("[Api] 摄像头流连接成功: " + c.id + " " + c.ip + ":" + c.port + path);
+                    return conn;
+                }
+                conn.disconnect();
+            } catch (IOException e) {
+                lastError = e;
+                if (conn != null) conn.disconnect();
+            }
+        }
+        if (lastError != null) {
+            System.out.println("[Api] 摄像头流连接失败: " + c.id + " " + c.ip + ":" + c.port + " - " + lastError.getMessage());
+        }
+        return null;
+    }
+
+    private static HttpURLConnection openCameraPath(CameraConfig c, String path, int connectTimeout, int readTimeout, String userAgent) throws IOException {
+        URL url = new URL("http://" + c.ip.trim() + ":" + c.port + path);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setConnectTimeout(connectTimeout);
+        conn.setReadTimeout(readTimeout);
+        conn.setUseCaches(false);
+        conn.setRequestProperty("User-Agent", userAgent);
+        conn.setRequestProperty("Cache-Control", "no-cache");
+        conn.setRequestProperty("Pragma", "no-cache");
+        conn.setRequestProperty("Connection", "close");
+        if (c.username != null && !c.username.isEmpty()) {
+            String pass = c.password == null ? "" : c.password;
+            String token = Base64.getEncoder().encodeToString((c.username + ":" + pass).getBytes(StandardCharsets.UTF_8));
+            conn.setRequestProperty("Authorization", "Basic " + token);
+        }
+        return conn;
     }
 
     private static void updateDeviceOnline(String deviceId, boolean online) throws SQLException {
@@ -1256,6 +1530,52 @@ public class Api {
         return detectionStatusJson("deviceId=" + deviceId);
     }
 
+    /** POST /api/camera/detection/worker/start —— 从页面启动本机人体识别 worker。 */
+    private static String startDetectionWorkerJson(HttpExchange ex) {
+        synchronized (DETECTION_WORKER_LOCK) {
+            if (detectionWorkerProcess != null && detectionWorkerProcess.isAlive()) {
+                return "{\"code\":0,\"msg\":" + Json.str("worker 已在运行") +
+                        ",\"data\":{\"running\":true,\"pid\":" + detectionWorkerProcess.pid() + "}}";
+            }
+
+            Path root = Paths.get("").toAbsolutePath().normalize();
+            Path python = root.resolve(".venv-detection").resolve("Scripts").resolve("python.exe");
+            Path script = root.resolve("workers").resolve("human_detection_worker.py");
+            Path outLog = root.resolve("worker.run.out.log");
+            Path errLog = root.resolve("worker.run.err.log");
+            Path ffmpeg = root.resolve("tools").resolve("ffmpeg-9.0.1-essentials_build").resolve("bin").resolve("ffmpeg.exe");
+
+            if (!Files.exists(python)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到 worker Python 环境：" + python) + "}";
+            }
+            if (!Files.exists(script)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到 worker 脚本：" + script) + "}";
+            }
+
+            try {
+                ProcessBuilder pb = new ProcessBuilder(python.toString(), "-u", script.toString());
+                pb.directory(root.toFile());
+                Map<String, String> procEnv = pb.environment();
+                procEnv.put("SERVER_URL", "http://localhost:" + ex.getLocalAddress().getPort());
+                procEnv.put("DETECTION_STORAGE_DIR", env("DETECTION_STORAGE_DIR", root.resolve("data").resolve("detections").toString()));
+                procEnv.put("YOLO_MODEL", env("YOLO_MODEL", root.resolve("models").resolve("yolov8n.pt").toString()));
+                if (Files.exists(ffmpeg)) {
+                    procEnv.put("FFMPEG_PATH", env("FFMPEG_PATH", ffmpeg.toString()));
+                }
+                if (!DETECTION_WORKER_TOKEN.isEmpty()) {
+                    procEnv.put("DETECTION_WORKER_TOKEN", DETECTION_WORKER_TOKEN);
+                }
+                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(outLog.toFile()));
+                pb.redirectError(ProcessBuilder.Redirect.appendTo(errLog.toFile()));
+                detectionWorkerProcess = pb.start();
+                return "{\"code\":0,\"msg\":" + Json.str("worker 启动中") +
+                        ",\"data\":{\"running\":true,\"pid\":" + detectionWorkerProcess.pid() + "}}";
+            } catch (IOException e) {
+                return "{\"code\":1,\"msg\":" + Json.str("worker 启动失败：" + e.getMessage()) + "}";
+            }
+        }
+    }
+
     private static class DetectionSetting {
         boolean enabled = true;
         BigDecimal confidenceThreshold = new BigDecimal("0.50");
@@ -1444,6 +1764,7 @@ public class Api {
         } else if ("error".equals(status) || "unknown".equals(status)) {
             updateDeviceOnline(deviceId, false);
         }
+        BoardCollector.rescanNow();
         return "{\"code\":0}";
     }
 
@@ -1716,7 +2037,7 @@ public class Api {
      * 天气类建议因后端无气象数据源暂不生成，其余规则与前端 mock 保持一致。
      */
     private static String adviceJson() throws SQLException {
-        ThresholdConfig t = currentThresholds();
+        ThresholdConfig t = currentThresholds(null);
 
         // 先取出所有地块编号与名称，再逐地块取最新温湿度和亮度（复用 latestValue 的在线+类型过滤）
         List<String[]> plots = new ArrayList<>();
@@ -1906,20 +2227,65 @@ public class Api {
     }
 
     /** 简易 HTTP GET，返回响应体（UTF-8） */
-    private static String httpGet(String url) throws IOException, InterruptedException {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(5))
-                .header("Accept", "application/json")
-                .header("Accept-Encoding", "identity")
-                .GET()
-                .build();
-        HttpResponse<byte[]> res = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            throw new IOException("HTTP " + res.statusCode());
+    private static String httpGet(String url) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setRequestProperty("Accept-Encoding", "identity");
+        try {
+            int status = conn.getResponseCode();
+            String body = readHttpBody(conn, status);
+            if (status < 200 || status >= 300) {
+                throw new IOException("HTTP " + status);
+            }
+            return body;
+        } finally {
+            conn.disconnect();
         }
-        byte[] body = res.body();
-        String encoding = res.headers().firstValue("Content-Encoding").orElse("");
+    }
+
+    private static String httpPostJson(String url, String payload, String bearerToken,
+                                       int connectTimeoutMs, int readTimeoutMs) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setConnectTimeout(connectTimeoutMs);
+        conn.setReadTimeout(readTimeoutMs);
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setRequestProperty("Accept-Encoding", "identity");
+        if (bearerToken != null && !bearerToken.isEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
+        byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
+        conn.setFixedLengthStreamingMode(bytes.length);
+        conn.setRequestProperty("Connection", "close");
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(bytes);
+        }
+        try {
+            int status = conn.getResponseCode();
+            String body = readHttpBody(conn, status);
+            if (status < 200 || status >= 300) {
+                throw new IOException("HTTP " + status + ": "
+                        + (body != null && body.length() > 200 ? body.substring(0, 200) : body));
+            }
+            return body;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    private static String readHttpBody(HttpURLConnection conn, int status) throws IOException {
+        InputStream raw = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+        if (raw == null) return "";
+        byte[] body;
+        try (InputStream in = raw) {
+            body = in.readAllBytes();
+        }
+        String encoding = conn.getContentEncoding();
         if ("gzip".equalsIgnoreCase(encoding)) {
             try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(body))) {
                 body = gzip.readAllBytes();
@@ -1973,19 +2339,22 @@ public class Api {
        ================================================================== */
 
     /** 当前阈值：取第一个地块的配置（每地块一行）；无配置行时使用默认上下限。 */
-    private static ThresholdConfig currentThresholds() throws SQLException {
+    private static ThresholdConfig currentThresholds(String plotId) throws SQLException {
         ThresholdConfig cfg = ThresholdConfig.defaults();
-        String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold ORDER BY plot_id LIMIT 1";
+        String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold" +
+                (plotId == null ? " ORDER BY plot_id LIMIT 1" : " WHERE plot_id = ?");
         try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) {
-                cfg.humidityMin = rs.getBigDecimal("humidity_min");
-                cfg.humidityMax = rs.getBigDecimal("humidity_max");
-                cfg.tempMin = rs.getBigDecimal("temp_min");
-                cfg.tempMax = rs.getBigDecimal("temp_max");
-                cfg.luxMin = rs.getBigDecimal("lux_min");
-                cfg.luxMax = rs.getBigDecimal("lux_max");
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (plotId != null) ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    cfg.humidityMin = rs.getBigDecimal("humidity_min");
+                    cfg.humidityMax = rs.getBigDecimal("humidity_max");
+                    cfg.tempMin = rs.getBigDecimal("temp_min");
+                    cfg.tempMax = rs.getBigDecimal("temp_max");
+                    cfg.luxMin = rs.getBigDecimal("lux_min");
+                    cfg.luxMax = rs.getBigDecimal("lux_max");
+                }
             }
         }
         return cfg;
@@ -1996,8 +2365,8 @@ public class Api {
      * 前端只有一个全局编辑器，DB 是每地块一行（plot_threshold）；
      * 这里返回当前阈值（首个地块），null 表示该类阈值已删除/禁用。
      */
-    private static String thresholdsJson() throws SQLException {
-        ThresholdConfig t = currentThresholds();
+    private static String thresholdsJson(String query) throws SQLException {
+        ThresholdConfig t = currentThresholds(trimToNull(queryParam(query, "plotId")));
         return "{\"code\":0,\"data\":{"
                 + "\"humidityMin\":" + Json.num(numLit(t.humidityMin))
                 + ",\"humidityMax\":" + Json.num(numLit(t.humidityMax))
@@ -2012,7 +2381,8 @@ public class Api {
      * PUT /api/thresholds —— 保存阈值。
      * body: {humidityMin, humidityMax, tempMin, tempMax, luxMin, luxMax}；值为 null 表示删除对应阈值。
      */
-    private static String saveThresholdsJson(HttpExchange ex) throws IOException, SQLException {
+    private static String saveThresholdsJson(HttpExchange ex, String query) throws IOException, SQLException {
+        String selectedPlotId = trimToNull(queryParam(query, "plotId"));
         Map<String, String> body = Json.parseObject(readBody(ex));
         ThresholdConfig cfg;
         try {
@@ -2037,9 +2407,13 @@ public class Api {
         try (Connection conn = DBUtil.getConnection()) {
             // 1. 收集全部地块编号
             List<String> plotIds = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
-                 ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) plotIds.add(rs.getString(1));
+            if (selectedPlotId != null) {
+                plotIds.add(selectedPlotId);
+            } else {
+                try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
+                     ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) plotIds.add(rs.getString(1));
+                }
             }
             // 2. 每个地块 upsert 一份同样的阈值
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -2055,6 +2429,19 @@ public class Api {
                 }
                 ps.executeBatch();
             }
+        }
+        List<String> checkedPlotIds = new ArrayList<>();
+        if (selectedPlotId != null) {
+            checkedPlotIds.add(selectedPlotId);
+        } else {
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement("SELECT id FROM plot");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) checkedPlotIds.add(rs.getString(1));
+            }
+        }
+        for (String plotId : checkedPlotIds) {
+            checkThresholdAlarm(plotId, true);
         }
         return "{\"code\":0}";
     }
@@ -2093,6 +2480,22 @@ public class Api {
             return c;
         }
 
+        boolean humidityEnabled() {
+            return humidityMin != null || humidityMax != null;
+        }
+
+        boolean tempEnabled() {
+            return tempMin != null || tempMax != null;
+        }
+
+        boolean luxEnabled() {
+            return luxMin != null || luxMax != null;
+        }
+
+        boolean hasEnabledMetric() {
+            return humidityEnabled() || tempEnabled() || luxEnabled();
+        }
+
         private static BigDecimal nullableDecimal(String value) {
             if (value == null) return null;
             String v = value.trim();
@@ -2103,38 +2506,48 @@ public class Api {
 
     /**
      * GET /api/alarms —— 告警列表。
-     * 返回：id,time,plotId,plotName,type,value,level,status。
+     * 返回：id,time,plotId,plotName,type,value,level,status,handler,handledAt,handleLog。
      * time 格式与 mock 一致（yyyy-MM-dd HH:mm）；type 直接用库里的中文 alarm_type。
      */
-    private static String alarmsJson() throws SQLException {
+    private static String alarmsJson(String query) throws SQLException {
+        String plotId = trimToNull(queryParam(query, "plotId"));
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
-                "SELECT a.id, a.plot_id, a.alarm_type, a.value, a.level, a.status, a.created_at," +
+                "SELECT a.id, a.plot_id, a.device_id, a.alarm_type, a.value, a.level, a.status, a.created_at, a.handled_at, a.handler, a.handle_log," +
                 " r.id AS detectionRecordId," +
                 " p.name AS plotName FROM alarm a LEFT JOIN plot p ON p.id = a.plot_id" +
                 " LEFT JOIN human_detection_record r ON r.alarm_id = a.id" +
+                (plotId == null ? "" : " WHERE a.plot_id = ?") +
                 " ORDER BY a.created_at DESC, a.id DESC";
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
         try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (plotId != null) ps.setString(1, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
             boolean first = true;
             while (rs.next()) {
                 if (!first) sb.append(',');
                 first = false;
                 Timestamp ts = rs.getTimestamp("created_at");
                 String time = ts == null ? "" : fmt.format(ts);
+                Timestamp handledTs = rs.getTimestamp("handled_at");
+                String handledAt = handledTs == null ? "" : fmt.format(handledTs);
                 sb.append('{')
                   .append("\"id\":").append(rs.getLong("id")).append(',')
                   .append("\"time\":").append(Json.str(time)).append(',')
                   .append("\"plotId\":").append(Json.str(rs.getString("plot_id"))).append(',')
+                  .append("\"deviceId\":").append(Json.str(rs.getString("device_id"))).append(',')
                   .append("\"plotName\":").append(Json.str(rs.getString("plotName"))).append(',')
                   .append("\"type\":").append(Json.str(rs.getString("alarm_type"))).append(',')
                   .append("\"value\":").append(Json.str(rs.getString("value"))).append(',')
                   .append("\"level\":").append(Json.str(rs.getString("level"))).append(',')
                   .append("\"status\":").append(Json.str(rs.getString("status"))).append(',')
+                  .append("\"handler\":").append(Json.str(rs.getString("handler"))).append(',')
+                  .append("\"handledAt\":").append(Json.str(handledAt)).append(',')
+                  .append("\"handleLog\":").append(Json.str(rs.getString("handle_log"))).append(',')
                   .append("\"detectionRecordId\":").append(rs.getObject("detectionRecordId") == null ? "null" : rs.getLong("detectionRecordId"))
                   .append('}');
+            }
             }
         }
         sb.append("]}");
@@ -2143,7 +2556,7 @@ public class Api {
 
     /**
      * PUT /api/alarms/{id} —— 标记处理。
-     * body: {status:'已处理'}；顺手记录处理人和处理时间。
+     * body: {status:'已处理', handler:'处理人', handleLog:'处理日志'}；顺手记录处理人和处理时间。
      */
     private static String updateAlarmJson(String id, HttpExchange ex) throws IOException, SQLException {
         Map<String, String> body = Json.parseObject(readBody(ex));
@@ -2151,14 +2564,20 @@ public class Api {
         if (status == null || status.isEmpty()) {
             return "{\"code\":1,\"msg\":" + Json.str("参数不完整：status 必填") + "}";
         }
-        String handler = body.containsKey("handler") && body.get("handler") != null
-                ? body.get("handler") : "演示用户";
-        String sql = "UPDATE alarm SET status = ?, handled_at = NOW(), handler = ? WHERE id = ?";
+        String handler = body.containsKey("handler") && body.get("handler") != null && !body.get("handler").trim().isEmpty()
+                ? body.get("handler").trim() : "演示用户";
+        String handleLog = body.containsKey("handleLog") && body.get("handleLog") != null
+                ? body.get("handleLog").trim() : "";
+        if ("已处理".equals(status) && handleLog.isEmpty()) {
+            return "{\"code\":1,\"msg\":" + Json.str("请填写处理日志") + "}";
+        }
+        String sql = "UPDATE alarm SET status = ?, handled_at = NOW(), handler = ?, handle_log = ? WHERE id = ?";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, status);
             ps.setString(2, handler);
-            ps.setLong(3, Long.parseLong(id));
+            ps.setString(3, handleLog);
+            ps.setLong(4, Long.parseLong(id));
             if (ps.executeUpdate() == 0) {
                 return "{\"code\":1,\"msg\":" + Json.str("告警不存在: " + id) + "}";
             }
@@ -2237,13 +2656,13 @@ public class Api {
        ================================================================== */
 
     /** 智能问答 API Key：从环境变量读取，勿硬编码（避免随代码提交泄露）。 */
-    private static final String SMART_QA_API_KEY = envFirst("SMART_QA_API_KEY", "DEEPSEEK_API_KEY");
+    private static final String SMART_QA_API_KEY = envFirst("SMART_QA_API_KEY", "DEEPSEEK_API_KEY", "API");
     private static final String SMART_QA_URL   = env("SMART_QA_API_URL", "https://api.deepseek.com/chat/completions");
     private static final String SMART_QA_MODEL = env("SMART_QA_MODEL", "deepseek-chat");
     /** 多轮对话最多带上多少条历史（防止上下文过长、超 token 上限） */
-    private static final int MAX_CHAT_HISTORY = 20;
+    private static final int MAX_CHAT_HISTORY = 8;
     /** RAG 知识库检索返回的最相关知识块条数 */
-    private static final int RAG_TOP_K = 3;
+    private static final int RAG_TOP_K = 2;
 
     /**
      * POST /api/assistant/chat —— 智能问答（DeepSeek 大模型，支持多轮对话）。
@@ -2284,22 +2703,16 @@ public class Api {
 
         String question = lastUserQuestion(valid);
 
+        // 所有智能问答都调用大模型；RAG 只作为参考资料，不再走本地固定回答分支。
+        String kbContext = Rag.buildContext(question, RAG_TOP_K);
         String answer;
-        String sourcesJson;
-        if (isIrrigationPredictionQuestion(question)) {
-            answer = irrigationPredictionAnswer(question);
-            sourcesJson = Json.arrStr(java.util.Arrays.asList("历史温湿度光照数据", "1层GRU预测模型"));
-        } else {
-            // RAG 检索：拿最后一条用户问题去知识库检索相关资料，命中则拼入「参考资料」段给大模型
-            String kbContext = Rag.buildContext(question, RAG_TOP_K);
-            try {
-                answer = deepseekChat(valid, kbContext);
-            } catch (Exception e) {
-                return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
-            }
-            // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
-            sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
+        try {
+            answer = deepseekChat(valid, kbContext);
+        } catch (Exception e) {
+            return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
         }
+        // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
+        String sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
 
         // 落库（按用户名隔离）；未传 user（未登录）则不保存，仅返回回答
         Long conversationId = null;
@@ -2892,7 +3305,7 @@ public class Api {
      */
     private static String deepseekChat(List<Map<String, String>> msgs, String kbContext) throws Exception {
         if (SMART_QA_API_KEY == null || SMART_QA_API_KEY.isEmpty()) {
-            throw new IOException("未配置环境变量 SMART_QA_API_KEY");
+            throw new IOException("未配置 SMART_QA_API_KEY，请设置环境变量或 config/feishu.local.properties");
         }
         // 系统提示：基础角色 + 当前时间 + 实时数据 + 地块/灌溉历史（让回答结合实时数据）
         String dataCtx = latestReadingsContext();
@@ -2916,7 +3329,7 @@ public class Api {
 
         StringBuilder req = new StringBuilder();
         req.append("{\"model\":\"").append(SMART_QA_MODEL)
-           .append("\",\"temperature\":0.7,\"messages\":[");
+           .append("\",\"temperature\":0.5,\"max_tokens\":700,\"messages\":[");
         req.append("{\"role\":\"system\",\"content\":")
            .append(Json.str(system))
            .append('}');
@@ -2926,28 +3339,31 @@ public class Api {
         }
         req.append("]}");
 
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(SMART_QA_URL))
-                .timeout(Duration.ofSeconds(15))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + SMART_QA_API_KEY)
-                .POST(HttpRequest.BodyPublishers.ofString(req.toString(), StandardCharsets.UTF_8))
-                .build();
-
-        HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        String body = resp.body();
-        if (resp.statusCode() != 200) {
-            throw new IOException("HTTP " + resp.statusCode() + ": "
-                    + (body != null && body.length() > 200 ? body.substring(0, 200) : body));
-        }
+        String body = smartQaPostWithRetry(req.toString());
         String content = Json.strValue(body, "content");
         if (content == null) {
             throw new IOException("响应解析失败，未找到 content 字段");
         }
         return content;
+    }
+
+    private static String smartQaPostWithRetry(String payload) throws IOException {
+        IOException last = null;
+        for (int i = 1; i <= 3; i++) {
+            try {
+                return httpPostJson(SMART_QA_URL, payload, SMART_QA_API_KEY, 2500, 30000);
+            } catch (IOException e) {
+                last = e;
+                if (i == 3) break;
+                try {
+                    Thread.sleep(250L * i);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+        throw last == null ? new IOException("模型接口请求失败") : last;
     }
 
     /**
@@ -3059,6 +3475,14 @@ public class Api {
     private static String urlDecode(String s) {
         try {
             return URLDecoder.decode(s, StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
+    private static String urlEncode(String s) {
+        try {
+            return URLEncoder.encode(s, StandardCharsets.UTF_8.name());
         } catch (Exception e) {
             return s;
         }
@@ -3252,12 +3676,23 @@ public class Api {
 
     /** 是否存在同类型且同 IP/端口的设备（同类型设备不能共享同一个板子地址） */
     private static boolean sameTypeAddrExists(String type, String ip, int port) throws SQLException {
+        return sameTypeAddrExistsExcept(type, ip, port, null);
+    }
+
+    /** 修改设备地址时排除当前设备自身，避免原地址保存被误判为重复。 */
+    private static boolean sameTypeAddrExistsExcept(String type, String ip, int port, String excludeId) throws SQLException {
         String sql = "SELECT 1 FROM device WHERE type = ? AND ip = ? AND port = ?";
+        if (excludeId != null && !excludeId.trim().isEmpty()) {
+            sql += " AND id <> ?";
+        }
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, type);
             ps.setString(2, ip);
             ps.setInt(3, port);
+            if (excludeId != null && !excludeId.trim().isEmpty()) {
+                ps.setString(4, excludeId.trim());
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
@@ -3385,7 +3820,8 @@ public class Api {
      * GET /api/control-logs —— 灌溉控制日志列表。
      * deviceName / plotName 由 join 得出，operator 存库。
      */
-    private static String controlLogsJson() throws SQLException {
+    private static String controlLogsJson(String query) throws SQLException {
+        int limit = parseLimit(queryParam(query, "limit"), 0);
         StringBuilder sb = new StringBuilder("{\"code\":0,\"data\":[");
         String sql =
                 "SELECT c.id, c.action, c.result, c.operator, c.created_at," +
@@ -3393,11 +3829,13 @@ public class Api {
                 " FROM control_log c" +
                 " LEFT JOIN device d ON d.id = c.device_id" +
                 " LEFT JOIN plot p ON p.id = d.plot_id" +
-                " ORDER BY c.created_at DESC, c.id DESC";
+                " ORDER BY c.created_at DESC, c.id DESC" +
+                (limit > 0 ? " LIMIT ?" : "");
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
         try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (limit > 0) ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
             boolean first = true;
             while (rs.next()) {
                 if (!first) sb.append(',');
@@ -3414,9 +3852,20 @@ public class Api {
                   .append("\"operator\":").append(Json.str(rs.getString("operator")))
                   .append('}');
             }
+            }
         }
         sb.append("]}");
         return sb.toString();
+    }
+
+    private static int parseLimit(String raw, int def) {
+        if (raw == null || raw.trim().isEmpty()) return def;
+        try {
+            int n = Integer.parseInt(raw.trim());
+            return n < 1 ? def : Math.min(n, 100);
+        } catch (NumberFormatException e) {
+            return def;
+        }
     }
 
     /* ==================================================================
@@ -3479,7 +3928,7 @@ public class Api {
         // 2. 阈值告警检查
         String plotId = plotOfDevice(deviceId);
         if (plotId != null) {
-            checkThresholdAlarm(plotId, metric, v);
+            checkThresholdAlarm(plotId);
         }
         return "{\"code\":0}";
     }
@@ -3496,8 +3945,18 @@ public class Api {
         }
     }
 
-    /** 越过阈值时插入一条告警（同一地块同类型未处理告警不重复插） */
+    /** 兼容旧调用：新逻辑按该地块全部最新指标统一判断。 */
     static void checkThresholdAlarm(String plotId, String metric, BigDecimal value) throws SQLException {
+        checkThresholdAlarm(plotId);
+    }
+
+    /** 任一启用指标越过阈值时，插入一条告警记录。 */
+    static void checkThresholdAlarm(String plotId) throws SQLException {
+        checkThresholdAlarm(plotId, false);
+    }
+
+    /** 任一启用指标越过阈值时，插入一条告警记录；forceInsert 用于阈值保存后的立即留档。 */
+    static void checkThresholdAlarm(String plotId, boolean forceInsert) throws SQLException {
         ThresholdConfig cfg = null;
         String sql = "SELECT humidity_min, humidity_max, temp_min, temp_max, lux_min, lux_max FROM plot_threshold WHERE plot_id = ?";
         try (Connection conn = DBUtil.getConnection();
@@ -3516,45 +3975,61 @@ public class Api {
             }
         }
         if (cfg == null) cfg = ThresholdConfig.defaults();
+        if (!cfg.hasEnabledMetric()) return;
 
-        String alarmType = null;
-        String alarmValue = null;
-        String level = null;
-        if ("humidity".equals(metric) && cfg.humidityMin != null && value.compareTo(cfg.humidityMin) < 0) {
-            alarmType = "土壤湿度过低";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "%";
-            level = "警告";
-        } else if ("humidity".equals(metric) && cfg.humidityMax != null && value.compareTo(cfg.humidityMax) > 0) {
-            alarmType = "土壤湿度过高";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "%";
-            level = "警告";
-        } else if ("temp".equals(metric) && cfg.tempMin != null && value.compareTo(cfg.tempMin) < 0) {
-            alarmType = "温度过低";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
-            level = "警告";
-        } else if ("temp".equals(metric) && cfg.tempMax != null && value.compareTo(cfg.tempMax) > 0) {
-            alarmType = "温度过高";
-            alarmValue = value.stripTrailingZeros().toPlainString() + "℃";
-            level = "严重";
-        } else if ("lux".equals(metric) && cfg.luxMin != null && value.compareTo(cfg.luxMin) < 0) {
-            alarmType = "亮度过低";
-            alarmValue = value.stripTrailingZeros().toPlainString() + " lx";
-            level = "警告";
-        } else if ("lux".equals(metric) && cfg.luxMax != null && value.compareTo(cfg.luxMax) > 0) {
-            alarmType = "亮度过高";
-            alarmValue = value.stripTrailingZeros().toPlainString() + " lx";
-            level = "警告";
+        Map<String, BigDecimal> latest = latestMetricsForPlot(plotId);
+        List<MetricBreach> details = new ArrayList<>();
+        boolean severe = false;
+        if (cfg.humidityEnabled()) {
+            MetricBreach b = breach(latest.get("humidity"), cfg.humidityMin, cfg.humidityMax,
+                    "土壤湿度过低", "土壤湿度过高", "%", false);
+            if (b != null) {
+                details.add(b);
+                severe = severe || b.severe;
+            }
         }
-        if (alarmType == null) return;
+        if (cfg.tempEnabled()) {
+            MetricBreach b = breach(latest.get("temp"), cfg.tempMin, cfg.tempMax,
+                    "温度过低", "温度过高", "℃", true);
+            if (b != null) {
+                details.add(b);
+                severe = severe || b.severe;
+            }
+        }
+        if (cfg.luxEnabled()) {
+            MetricBreach b = breach(latest.get("lux"), cfg.luxMin, cfg.luxMax,
+                    "亮度过低", "亮度过高", " lx", false);
+            if (b != null) {
+                details.add(b);
+                severe = severe || b.severe;
+            }
+        }
+        if (details.isEmpty()) return;
 
-        // 去重：同一地块同类型且未处理的告警不重复插入
-        String dup = "SELECT 1 FROM alarm WHERE plot_id = ? AND alarm_type = ? AND status = '未处理'";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(dup)) {
-            ps.setString(1, plotId);
-            ps.setString(2, alarmType);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return;
+        String alarmType;
+        String alarmValue;
+        if (details.size() == 1) {
+            MetricBreach only = details.get(0);
+            alarmType = only.type;
+            alarmValue = only.valueText;
+        } else {
+            alarmType = "综合阈值告警";
+            alarmValue = String.join("；", textsOf(details));
+        }
+        String level = severe || details.size() >= 2 ? "严重" : "警告";
+
+        // 采集循环不覆盖旧记录，只做短时间去重；阈值保存时强制追加一条当前快照。
+        if (!forceInsert) {
+            String dup = "SELECT 1 FROM alarm WHERE plot_id = ? AND alarm_type = ? AND status = '未处理'" +
+                    " AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(dup)) {
+                ps.setString(1, plotId);
+                ps.setString(2, alarmType);
+                ps.setInt(3, THRESHOLD_ALARM_COOLDOWN_SECONDS);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return;
+                }
             }
         }
         String ins = "INSERT INTO alarm(plot_id, alarm_type, value, level, status) VALUES (?, ?, ?, ?, '未处理')";
@@ -3565,6 +4040,64 @@ public class Api {
             ps.setString(3, alarmValue);
             ps.setString(4, level);
             ps.executeUpdate();
+        }
+        FeishuBotService.pushAlarmAsync(plotId, alarmType, alarmValue, level);
+    }
+
+    private static List<String> textsOf(List<MetricBreach> breaches) {
+        List<String> texts = new ArrayList<>();
+        for (MetricBreach b : breaches) texts.add(b.text);
+        return texts;
+    }
+
+    private static Map<String, BigDecimal> latestMetricsForPlot(String plotId) throws SQLException {
+        Map<String, BigDecimal> latest = new HashMap<>();
+        String sql =
+                "SELECT s.metric, s.value FROM sensor_data s" +
+                " JOIN device d ON d.id = s.device_id" +
+                " JOIN (" +
+                "   SELECT s2.metric, MAX(s2.id) AS max_id FROM sensor_data s2" +
+                "   JOIN device d2 ON d2.id = s2.device_id" +
+                "   WHERE d2.plot_id = ? AND s2.metric IN ('temp','humidity','lux')" +
+                "   GROUP BY s2.metric" +
+                " ) m ON m.max_id = s.id" +
+                " WHERE d.plot_id = ?";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, plotId);
+            ps.setString(2, plotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) latest.put(rs.getString("metric"), rs.getBigDecimal("value"));
+            }
+        }
+        return latest;
+    }
+
+    private static MetricBreach breach(BigDecimal value, BigDecimal min, BigDecimal max,
+                                       String lowType, String highType, String unit, boolean highSevere) {
+        if (value == null) return null;
+        if (min != null && value.compareTo(min) < 0) {
+            String valueText = value.stripTrailingZeros().toPlainString() + unit;
+            return new MetricBreach(lowType, valueText, lowType + " " + valueText, false);
+        }
+        if (max != null && value.compareTo(max) > 0) {
+            String valueText = value.stripTrailingZeros().toPlainString() + unit;
+            return new MetricBreach(highType, valueText, highType + " " + valueText, highSevere);
+        }
+        return null;
+    }
+
+    private static class MetricBreach {
+        final String type;
+        final String valueText;
+        final String text;
+        final boolean severe;
+
+        MetricBreach(String type, String valueText, String text, boolean severe) {
+            this.type = type;
+            this.valueText = valueText;
+            this.text = text;
+            this.severe = severe;
         }
     }
 
@@ -3595,6 +4128,16 @@ public class Api {
     private static void send(HttpExchange ex, int status, String json) throws IOException {
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream os = ex.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    private static void sendHtml(HttpExchange ex, int status, String html) throws IOException {
+        byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");
         ex.sendResponseHeaders(status, bytes.length);
         try (OutputStream os = ex.getResponseBody()) {
             os.write(bytes);

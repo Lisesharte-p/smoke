@@ -68,6 +68,8 @@ public class WebServer {
         DBUtil.ensureKnowledgeTables();
         DBUtil.ensureThresholdColumns();
         DBUtil.ensureDeviceCameraColumns();
+        DBUtil.ensurePlotMapColumns();
+        DBUtil.ensureAlarmHandleColumns();
         DBUtil.ensureDetectionTables();
 
         // 加载智能问答知识库（RAG 检索用，启动时预载入内存）
@@ -75,6 +77,9 @@ public class WebServer {
 
         // 启动板子数据采集器（后台守护线程，周期读板子数据写入 sensor_data）
         BoardCollector.start();
+
+        // 启动飞书机器人长连接（未配置时自动跳过，不影响本地网页服务）
+        FeishuBotService.start();
 
         System.out.println("=============================================");
         System.out.println("  WebServer 已启动");

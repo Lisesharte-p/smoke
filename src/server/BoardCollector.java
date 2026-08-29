@@ -17,7 +17,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 设备数据采集器：与每台板子保持一条 TCP 长连接，持续接收板子推送的数据并写库。
@@ -37,8 +41,10 @@ public class BoardCollector {
     private static final long MONITOR_INTERVAL_MS = 30_000L;
     private static final long RECONNECT_DELAY_MS = 5_000L;
     private static final int READ_TIMEOUT_MS = 15_000;
+    private static final int POLL_TIMEOUT_MS = 500;
     private static final int CONNECT_TIMEOUT_MS = 3_000;
-    private static final int COMMAND_TIMEOUT_MS = 5_000;
+    private static final int COMMAND_TIMEOUT_MS = 15_000;
+    private static final int ONLINE_STALE_SECONDS = 25;
 
     private static volatile boolean lastOk = false;
     private static volatile String lastError = "";
@@ -59,6 +65,9 @@ public class BoardCollector {
     /** 正在运行连接的 <ip:port> 集合（地址删除后移除，线程退出） */
     private static final Set<String> runningConns = ConcurrentHashMap.newKeySet();
 
+    /** 每块板子的待发送命令队列，按 <ip:port> 共享，避免重连后命令落到旧连接对象。 */
+    private static final Map<String, BlockingQueue<CommandRequest>> commandQueues = new ConcurrentHashMap<>();
+
     /**
      * 传感器落库线程池：读循环只负责收板子数据、更新内存快照，真正的数据库写入丢给后台线程。
      * 否则每个心跳要给多台设备写库（每次都新开数据库连接，单次 ~0.5s），会长时间阻塞读循环，
@@ -77,6 +86,28 @@ public class BoardCollector {
     public static Map<String, String> getDeviceStatus() { return deviceStatus; }
 
     private BoardCollector() {}
+
+    /** 判断某个地址当前是否已有可用长连接。 */
+    public static boolean hasLiveConnection(String host, int port) {
+        if (host == null || host.trim().isEmpty() || port <= 0) return false;
+        String key = host.trim() + ":" + port;
+        synchronized (connectors) {
+            DeviceConn conn = connectors.get(key);
+            return conn != null && conn.hasLiveSocket();
+        }
+    }
+
+    /** 快速探测普通板载设备地址是否能建立 TCP 连接。 */
+    public static boolean probeAddress(String host, int port) {
+        if (host == null || host.trim().isEmpty() || port <= 0) return false;
+        if (hasLiveConnection(host, port)) return true;
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(host.trim(), port), CONNECT_TIMEOUT_MS);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
 
     /** 启动后台监控线程：立即扫描一次，之后每 30 秒扫描设备表，动态建连/断连 */
     public static void start() {
@@ -100,8 +131,37 @@ public class BoardCollector {
         System.out.println("[BoardCollector] 常驻长连接模式已启动：同一块板子（ip:port）共享一条 TCP 连接，数据写入所有关联传感器");
     }
 
-    /** 供 API 手动刷新调用：返回最近一次捕获的读数（不另开连接，板子单客户端） */
+    /** 设备地址变更后供 API 主动触发一次扫描，避免等后台 30 秒轮询。 */
+    public static void rescanNow() {
+        try {
+            ensureConnectors();
+        } catch (Exception e) {
+            System.out.println("[BoardCollector] 设备列表即时扫描失败: " + e);
+        }
+    }
+
+    /** 供 API 手动刷新调用：通过板子长连接发送 query，再返回最近一次捕获的读数。 */
     public static Map<String, String> refreshNow() {
+        List<String> keys;
+        synchronized (connDevices) {
+            keys = new ArrayList<>(connDevices.keySet());
+        }
+        boolean sent = false;
+        long end = System.currentTimeMillis() + COMMAND_TIMEOUT_MS;
+        while (System.currentTimeMillis() < end && !sent) {
+            for (String key : keys) {
+                if (enqueueCommand(key, "query")) {
+                    sent = true;
+                    break;
+                }
+            }
+            if (!sent) sleepQuietly(300);
+        }
+        if (!sent) {
+            lastError = "板子长连接未就绪，query 未下发";
+            return null;
+        }
+        sleepQuietly(300);
         for (Map.Entry<String, Map<String, String>> e : latestReadings.entrySet()) {
             return new HashMap<>(e.getValue());
         }
@@ -109,15 +169,50 @@ public class BoardCollector {
         return null;
     }
 
+    private static boolean enqueueCommand(String key, String action) {
+        CommandRequest req = new CommandRequest(action);
+        commandQueues.computeIfAbsent(key, k -> new LinkedBlockingQueue<>()).offer(req);
+        try {
+            return req.done.await(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS) && req.ok;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     /** 在板子共享长连接上给设备下发 on/off；该板子未连接/设备无地址返回 false */
     public static boolean sendPersistentCommand(String deviceId, String action) {
         String key = deviceKey(deviceId);
-        if (key == null) return false;
+        if (key == null) {
+            System.out.println("[BoardCollector] 控制指令失败：设备无地址 " + deviceId + " -> " + action);
+            return false;
+        }
+
         DeviceConn conn;
         synchronized (connectors) {
             conn = connectors.get(key);
         }
-        return conn != null && conn.command(action);
+        System.out.println("[BoardCollector] 控制指令入队: device=" + deviceId
+                + ", action=" + action
+                + ", key=" + key
+                + ", hasConn=" + (conn != null)
+                + ", liveSocket=" + (conn != null && conn.hasLiveSocket())
+                + ", running=" + runningConns.contains(key)
+                + ", devices=" + currentDevices(key));
+        if (enqueueCommand(key, action)) {
+            System.out.println("[BoardCollector] 控制指令成功（长连接队列）: " + deviceId + " -> " + action);
+            return true;
+        }
+        System.out.println("[BoardCollector] 控制指令失败：长连接队列超时 " + deviceId + " -> " + action + " @ " + key);
+        return false;
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** 查设备 ip:port，拼成共享连接 key；未配置地址返回 null */
@@ -158,7 +253,7 @@ public class BoardCollector {
     }
 
     /** 扫描设备表：无地址设备置离线；同一 <ip:port> 只建一条长连接（多个设备共享） */
-    private static void ensureConnectors() throws SQLException {
+    private static synchronized void ensureConnectors() throws SQLException {
         // 1. 无 ip/port 的设备不可能在线
         try (Connection c = DBUtil.getConnection();
              PreparedStatement ps = c.prepareStatement(
@@ -167,6 +262,7 @@ public class BoardCollector {
         }
         // 2. 加载目标，按 <ip:port> 分组
         List<String[]> targets = loadTargets();
+        markStaleTargetsOffline();
         Map<String, List<String>> byAddr = new HashMap<>();
         for (String[] t : targets) {
             String key = t[1] + ":" + t[2];
@@ -192,6 +288,20 @@ public class BoardCollector {
                 }
             }
         }
+        markLiveConnectorsOnline(byAddr.keySet());
+    }
+
+    /** 已存在的长连接无需等下一条读数，重扫后立刻把挂到该地址的设备同步为在线。 */
+    private static void markLiveConnectorsOnline(Iterable<String> keys) {
+        for (String key : keys) {
+            DeviceConn conn;
+            synchronized (connectors) {
+                conn = connectors.get(key);
+            }
+            if (conn != null && conn.hasLiveSocket()) {
+                setOnlineFor(key, true);
+            }
+        }
     }
 
     /**
@@ -207,7 +317,7 @@ public class BoardCollector {
             while (runningConns.contains(key)) {
                 try (Socket s = new Socket()) {
                     s.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
-                    s.setSoTimeout(READ_TIMEOUT_MS);
+                    s.setSoTimeout(POLL_TIMEOUT_MS);
                     conn.socket = s;
                     setOnlineFor(key, true);
                     putStatusFor(key, "ok:已连接");
@@ -218,10 +328,13 @@ public class BoardCollector {
                     InputStream in = s.getInputStream();
                     StringBuilder sb = new StringBuilder();
                     byte[] buf = new byte[512];
+                    long lastReadAt = System.currentTimeMillis();
                     while (runningConns.contains(key)) {
                         try {
+                            conn.drainCommands(out);
                             int n = in.read(buf);
                             if (n < 0) break; // 板子关闭连接
+                            lastReadAt = System.currentTimeMillis();
                             for (int i = 0; i < n; i++) {
                                 if (buf[i] == 0) {
                                     String record = sb.toString().trim();
@@ -232,16 +345,18 @@ public class BoardCollector {
                                 }
                             }
                         } catch (java.net.SocketTimeoutException e) {
-                            // 心跳 5s 一条，超时说明断流 → 断开重连
-                            putStatusFor(key, "err:读超时，板子断流");
-                            break;
+                            conn.drainCommands(out);
+                            if (System.currentTimeMillis() - lastReadAt > READ_TIMEOUT_MS) {
+                                putStatusFor(key, "err:读超时，板子断流");
+                                break;
+                            }
                         }
                     }
                 } catch (IOException e) {
                     putStatusFor(key, "err:" + e.getMessage());
                 } finally {
                     conn.socket = null;
-                    setOnlineFor(key, false);
+                    markOfflineForIfStale(key);
                 }
                 if (!runningConns.contains(key)) break;
                 try {
@@ -342,17 +457,70 @@ public class BoardCollector {
             }
             c.commit();
         }
+        markDeviceOnline(deviceId);
 
-        // 阈值告警：按设备所属地块检查 temp/humidity/lux 是否越过阈值（未处理告警自动去重）
+        // 阈值告警：按地块最新 temp/humidity/lux 统一判断，任一启用指标越界就报警。
         String plotId = Api.plotOfDevice(deviceId);
         if (plotId != null) {
             try {
-                Api.checkThresholdAlarm(plotId, "temp", new BigDecimal(reading.get("temp")));
-                Api.checkThresholdAlarm(plotId, "humidity", new BigDecimal(reading.get("humidity")));
-                Api.checkThresholdAlarm(plotId, "lux", new BigDecimal(reading.get("lux")));
+                Api.checkThresholdAlarm(plotId);
             } catch (SQLException e) {
                 System.out.println("[BoardCollector] 告警检查失败（数据已入库）：" + e);
             }
+        }
+    }
+
+    /** 成功收到并写入新数据后，以最新数据为准标记设备在线。 */
+    private static void markDeviceOnline(String deviceId) {
+        try (Connection c = DBUtil.getConnection();
+             PreparedStatement ps = c.prepareStatement("UPDATE device SET online = 1, last_heartbeat = NOW(3) WHERE id = ?")) {
+            ps.setString(1, deviceId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.out.println("[BoardCollector] 更新设备在线心跳失败: " + e);
+        }
+    }
+
+    /** 周期扫描时，把一段时间内没有新传感器数据的板载设备判为离线。 */
+    private static void markStaleTargetsOffline() {
+        String sql =
+                "UPDATE device d SET d.online = 0" +
+                " WHERE d.ip IS NOT NULL AND TRIM(d.ip) <> '' AND d.port IS NOT NULL" +
+                " AND d.type <> '摄像头'" +
+                " AND NOT EXISTS (" +
+                "   SELECT 1 FROM sensor_data s" +
+                "   WHERE s.device_id = d.id AND s.collected_at >= DATE_SUB(NOW(3), INTERVAL ? SECOND)" +
+                " )";
+        try (Connection c = DBUtil.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, ONLINE_STALE_SECONDS);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.out.println("[BoardCollector] 标记超时设备离线失败: " + e);
+        }
+    }
+
+    /** 连接断开时只在数据确实过期后置离线，避免短连接板子被反复显示离线。 */
+    private static void markOfflineForIfStale(String key) {
+        List<String> ids = currentDevices(key);
+        if (ids.isEmpty()) return;
+        String sql =
+                "UPDATE device d SET d.online = 0" +
+                " WHERE d.id = ?" +
+                " AND NOT EXISTS (" +
+                "   SELECT 1 FROM sensor_data s" +
+                "   WHERE s.device_id = d.id AND s.collected_at >= DATE_SUB(NOW(3), INTERVAL ? SECOND)" +
+                " )";
+        try (Connection c = DBUtil.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            for (String id : ids) {
+                ps.setString(1, id);
+                ps.setInt(2, ONLINE_STALE_SECONDS);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            System.out.println("[BoardCollector] 检查连接离线状态失败: " + e);
         }
     }
 
@@ -396,36 +564,59 @@ public class BoardCollector {
         final String key;   // "ip:port"
         volatile Socket socket;
         final Object lock = new Object();   // 发指令与等待确认的锁
+        final BlockingQueue<CommandRequest> commands;
         volatile String pendingAction;
         volatile boolean confirmed;
 
-        DeviceConn(String key) { this.key = key; }
+        DeviceConn(String key) {
+            this.key = key;
+            this.commands = commandQueues.computeIfAbsent(key, k -> new LinkedBlockingQueue<>());
+        }
 
-        /** 在常驻连接上发 on/off，等板子 motor 确认回包；超时返回 false */
-        boolean command(String action) {
+        boolean hasLiveSocket() {
             Socket s = socket;
-            if (s == null || s.isClosed()) return false;
-            synchronized (lock) {
-                pendingAction = action;
-                confirmed = false;
+            return s != null && !s.isClosed();
+        }
+
+        void drainCommands(OutputStream out) throws IOException {
+            CommandRequest req;
+            while ((req = commands.poll()) != null) {
                 try {
-                    OutputStream out = s.getOutputStream();
-                    out.write((action + "\n").getBytes(StandardCharsets.UTF_8));
-                    out.flush();
+                    synchronized (lock) {
+                        pendingAction = req.action;
+                        confirmed = false;
+                        out.write((req.action + "\n").getBytes(StandardCharsets.UTF_8));
+                        out.flush();
+                    }
+                    req.ok = true;
+                    System.out.println("[BoardCollector] 长连接命令已发送: " + key + " -> " + req.action);
                 } catch (IOException e) {
-                    return false;
+                    req.ok = false;
+                    System.out.println("[BoardCollector] 长连接命令发送异常: " + key + " -> " + req.action + ", " + e.getMessage());
+                    throw e;
+                } finally {
+                    req.done.countDown();
                 }
             }
-            long end = System.currentTimeMillis() + COMMAND_TIMEOUT_MS;
-            while (System.currentTimeMillis() < end) {
-                if (confirmed) return true;
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException e) {
-                    return false;
-                }
+        }
+
+        void closeQuietly() {
+            Socket s = socket;
+            if (s == null) return;
+            try {
+                s.close();
+            } catch (IOException ignored) {
             }
-            return confirmed;
+        }
+    }
+
+    private static class CommandRequest {
+        final String action;
+        final CountDownLatch done = new CountDownLatch(1);
+        volatile boolean ok;
+
+        CommandRequest(String action) {
+            this.action = action;
         }
     }
 }
