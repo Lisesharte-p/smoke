@@ -1757,6 +1757,8 @@ public class Api {
                 conn.setAutoCommit(true);
             }
         }
+        String alertValue = confidence == null ? deviceName : "置信度 " + confidence.stripTrailingZeros().toPlainString();
+        FeishuBotService.pushAlarmAsync(plotId, "人体入侵", alertValue, "严重");
         return "{\"code\":0,\"data\":{\"id\":" + recordId + ",\"alarmId\":" + alarmId + "}}";
     }
 
