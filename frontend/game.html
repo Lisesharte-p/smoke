@@ -1154,20 +1154,26 @@
       var temp = metric(plot, 'temp');
       var hum = metric(plot, 'humidity');
       var lux = metric(plot, 'lux');
-      var question = '请给' + plot.name + '的' + (plot.crop || '作物') + '提供一条农事建议。当前温度 ' + (temp === null ? '--' : temp.toFixed(1) + '℃') + '，湿度 ' + (hum === null ? '--' : hum.toFixed(1) + '%') + '，光照 ' + (lux === null ? '--' : Math.round(lux) + ' lx') + '。';
+      var question = '生成农事建议：请给' + plot.name + '的' + (plot.crop || '作物') + '提供一条农事建议。当前温度 ' + (temp === null ? '--' : temp.toFixed(1) + '℃') + '，湿度 ' + (hum === null ? '--' : hum.toFixed(1) + '%') + '，光照 ' + (lux === null ? '--' : Math.round(lux) + ' lx') + '。';
+      var player = window.Layout && Layout.getUser ? Layout.getUser() : null;
+      var username = player ? (player.username || player.name || 'game-user') : 'game-user';
       showAdvice('正在获取农事建议…');
       try {
-        API.getChatReply(question).then(function (res) {
-          if (!res || res.code !== 0 || !res.data || typeof res.data.answer !== 'string') throw new Error('农事建议返回异常');
-          showAdvice(res.data.answer, res.data.action);
-        }).catch(function () {
-          showAdvice('暂时无法获取农事建议，请稍后再试。');
+        API.getChatReply(username, [{ role: 'user', content: question }], null).then(function (res) {
+          if (!res || res.code !== 0 || !res.data || typeof res.data.answer !== 'string') {
+            throw new Error((res && res.msg) || '农事建议返回异常');
+          }
+          var action = res.data.actions || res.data.action;
+          if (Array.isArray(action)) action = action[0];
+          showAdvice(res.data.answer, action);
+        }).catch(function (e) {
+          showAdvice((e && e.message) || '暂时无法获取农事建议，请稍后再试。');
         }).finally(function () {
           state.adviceLoading = false;
         });
       } catch (e) {
         state.adviceLoading = false;
-        showAdvice('暂时无法获取农事建议，请稍后再试。');
+        showAdvice((e && e.message) || '暂时无法获取农事建议，请稍后再试。');
       }
     }
 
