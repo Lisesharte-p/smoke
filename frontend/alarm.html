@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>告警管理 - 智慧农业平台</title>
+  <script>
+    // 提前应用主题，避免加载闪烁（FOUC）
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('agri_theme') || 'dark'); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body data-page="alarm">
@@ -25,46 +29,67 @@
           <div class="card-header">
             <div>
               <div class="card-title">告警阈值设置</div>
-              <div class="card-sub">当实测值越过阈值时，系统自动触发告警并通知</div>
+              <div class="card-sub">任一启用指标越过阈值时，系统自动触发综合告警</div>
+            </div>
+            <div class="flex gap-8">
+              <select class="form-control" id="alarmPlotFilter" style="width: 180px"></select>
+              <button class="btn btn-primary btn-sm" id="openAddMetric" type="button">＋ 添加指标</button>
             </div>
           </div>
-          <div class="form-row" style="max-width: 1120px;">
-            <div class="form-group mb-0">
-              <label class="form-label">土壤湿度下限（%）</label>
-              <input type="number" class="form-control" id="humidityMin" min="0" max="100">
-              <div class="form-hint">低于该值时触发「土壤湿度过低」告警</div>
+          <div class="form-row" id="thresholdFields" style="max-width: 1120px;">
+            <div class="form-group mb-0 threshold-group" data-metric="humidity">
+              <div class="flex-between">
+                <label class="form-label">土壤湿度（%）</label>
+                <button class="btn btn-outline btn-sm metric-remove" data-group="humidity" type="button">删除</button>
+              </div>
+              <div class="form-row">
+                <div class="form-group mb-0">
+                  <input type="number" class="form-control" id="humidityMin" min="0" max="100" placeholder="下限">
+                  <div class="form-hint">低于该值视为越界</div>
+                </div>
+                <div class="form-group mb-0">
+                  <input type="number" class="form-control" id="humidityMax" min="0" max="100" placeholder="上限">
+                  <div class="form-hint">高于该值视为越界</div>
+                </div>
+              </div>
             </div>
-            <div class="form-group mb-0">
-              <label class="form-label">土壤湿度上限（%）</label>
-              <input type="number" class="form-control" id="humidityMax" min="0" max="100">
-              <div class="form-hint">高于该值时触发「土壤湿度过高」告警</div>
+
+            <div class="form-group mb-0 threshold-group" data-metric="temp">
+              <div class="flex-between">
+                <label class="form-label">温度（℃）</label>
+                <button class="btn btn-outline btn-sm metric-remove" data-group="temp" type="button">删除</button>
+              </div>
+              <div class="form-row">
+                <div class="form-group mb-0">
+                  <input type="number" class="form-control" id="tempMin" min="-20" max="80" placeholder="下限">
+                  <div class="form-hint">低于该值视为越界</div>
+                </div>
+                <div class="form-group mb-0">
+                  <input type="number" class="form-control" id="tempMax" min="-20" max="80" placeholder="上限">
+                  <div class="form-hint">高于该值视为越界</div>
+                </div>
+              </div>
             </div>
-            <div class="form-group mb-0">
-              <label class="form-label">温度下限（℃）</label>
-              <input type="number" class="form-control" id="tempMin" min="-20" max="80">
-              <div class="form-hint">低于该值时触发「温度过低」告警</div>
-            </div>
-            <div class="form-group mb-0">
-              <label class="form-label">温度上限（℃）</label>
-              <input type="number" class="form-control" id="tempMax" min="-20" max="80">
-              <div class="form-hint">高于该值时触发「温度过高」告警</div>
-            </div>
-            <div class="form-group mb-0">
-              <label class="form-label">亮度下限（lx）</label>
-              <input type="number" class="form-control" id="luxMin" min="0" max="2000">
-              <div class="form-hint">低于该值时触发「亮度过低」告警</div>
-            </div>
-            <div class="form-group mb-0">
-              <label class="form-label">亮度上限（lx）</label>
-              <input type="number" class="form-control" id="luxMax" min="0" max="5000">
-              <div class="form-hint">高于该值时触发「亮度过高」告警</div>
+
+            <div class="form-group mb-0 threshold-group" data-metric="lux">
+              <div class="flex-between">
+                <label class="form-label">亮度（lx）</label>
+                <button class="btn btn-outline btn-sm metric-remove" data-group="lux" type="button">删除</button>
+              </div>
+              <div class="form-row">
+                <div class="form-group mb-0">
+                  <input type="number" class="form-control" id="luxMin" min="0" max="2000" placeholder="下限">
+                  <div class="form-hint">低于该值视为越界</div>
+                </div>
+                <div class="form-group mb-0">
+                  <input type="number" class="form-control" id="luxMax" min="0" max="5000" placeholder="上限">
+                  <div class="form-hint">高于该值视为越界</div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="mt-16">
-            <button class="btn btn-primary" id="saveThreshold">💾 保存阈值</button>
-            <button class="btn btn-outline" id="deleteHumidityThreshold">删除湿度阈值</button>
-            <button class="btn btn-outline" id="deleteTempThreshold">删除温度阈值</button>
-            <button class="btn btn-outline" id="deleteLuxThreshold">删除亮度阈值</button>
+            <button class="btn btn-primary" id="saveThreshold">保存阈值</button>
           </div>
         </div>
 
@@ -90,6 +115,9 @@
                   <th>当前值</th>
                   <th>等级</th>
                   <th>状态</th>
+                  <th>处理人</th>
+                  <th>处理时间</th>
+                  <th>处理日志</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -101,6 +129,56 @@
     </div>
   </div>
 
+  <div class="modal-mask" id="handleAlarmModal">
+    <div class="modal">
+      <div class="modal-title">填写处理日志</div>
+      <div class="form-group">
+        <label class="form-label">处理人</label>
+        <div class="readonly-field" id="handlerNameText"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">处理日志</label>
+        <textarea class="form-control" id="handleLogInput" rows="6" placeholder="请输入处理措施、复查结果或后续跟进事项"></textarea>
+        <div class="form-hint">处理日志会保存到该告警条目中，便于后续追溯。</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelHandleAlarm">取消</button>
+        <button class="btn btn-primary" id="submitHandleAlarm">确认处理</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="addMetricModal">
+    <div class="modal">
+      <div class="modal-title">添加告警指标</div>
+      <div class="form-group">
+        <label class="form-label">指标</label>
+        <select class="form-control" id="metricToAdd"></select>
+        <div class="form-hint">每次只添加一个指标，保存后参与综合告警判断。</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelAddMetric">取消</button>
+        <button class="btn btn-primary" id="confirmAddMetric">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-mask" id="logDetailModal">
+    <div class="modal">
+      <div class="modal-title">处理日志</div>
+      <div class="alarm-log-meta">
+        <div><span>报警类型</span><b id="logDetailType">-</b></div>
+        <div><span>报警时间</span><b id="logDetailAlarmTime">-</b></div>
+        <div><span>处理人</span><b id="logDetailHandler">-</b></div>
+        <div><span>处理时间</span><b id="logDetailHandledAt">-</b></div>
+      </div>
+      <div class="alarm-log-detail" id="logDetailText"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="closeLogDetail">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <script src="assets/js/mock.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/layout.js"></script>
@@ -109,11 +187,39 @@
     Layout.init();
 
     var alarms = [];
+    var plots = [];
+    var activeMetrics = {};
+    var pendingAlarmId = null;
+    var METRICS = {
+      humidity: { label: '土壤湿度', min: 'humidityMin', max: 'humidityMax', defaultMin: 40, defaultMax: 70 },
+      temp: { label: '温度', min: 'tempMin', max: 'tempMax', defaultMin: 10, defaultMax: 35 },
+      lux: { label: '亮度', min: 'luxMin', max: 'luxMax', defaultMin: 200, defaultMax: 800 }
+    };
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function currentHandlerName() {
+      var user = Layout.getUser ? Layout.getUser() : {};
+      return user.name || user.username || '演示用户';
+    }
 
     /* ---------- 渲染告警列表 ---------- */
     function renderAlarms() {
       var body = document.getElementById('alarmBody');
       body.innerHTML = '';
+
+      if (!alarms.length) {
+        body.innerHTML = '<tr><td colspan="10" class="text-muted" style="text-align:center;padding:28px">暂无告警记录</td></tr>';
+        updateBanner();
+        return;
+      }
 
       alarms.forEach(function (a) {
         var levelBadge = a.level === '严重'
@@ -123,33 +229,50 @@
           ? '<span class="badge badge-normal"><span class="dot"></span>已处理</span>'
           : '<span class="badge badge-alarm"><span class="dot"></span>未处理</span>';
         var action = a.status === '未处理'
-          ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
+          ? '<button class="btn btn-sm btn-primary handle-alarm-btn" data-id="' + a.id + '">标记处理</button>'
           : '<span class="text-muted">—</span>';
         if (a.detectionRecordId) {
           action = '<div class="flex gap-8">' +
             '<a class="btn btn-sm btn-outline" href="camera.html?recordId=' + encodeURIComponent(a.detectionRecordId) + '">查看回放</a>' +
             (a.status === '未处理'
-              ? '<button class="btn btn-sm btn-primary" data-id="' + a.id + '">标记处理</button>'
+              ? '<button class="btn btn-sm btn-primary handle-alarm-btn" data-id="' + a.id + '">标记处理</button>'
               : '') +
             '</div>';
+        }
+        var handler = a.status === '已处理' && a.handler ? escapeHtml(a.handler) : '<span class="text-muted">-</span>';
+        var handledAt = a.status === '已处理' && a.handledAt ? escapeHtml(a.handledAt) : '<span class="text-muted">-</span>';
+        var log = (a.handleLog || '').trim();
+        var logSummary = '<span class="text-muted">-</span>';
+        if (log) {
+          var summary = log.length > 12 ? log.slice(0, 12) + '...' : log;
+          logSummary = '<button class="alarm-log-link" data-log-id="' + a.id + '">' + escapeHtml(summary) + '</button>';
         }
 
         var tr = document.createElement('tr');
         tr.innerHTML =
-          '<td>' + a.time + '</td>' +
-          '<td>' + a.plotName + '</td>' +
-          '<td>' + a.type + '</td>' +
-          '<td>' + a.value + '</td>' +
+          '<td>' + escapeHtml(a.time) + '</td>' +
+          '<td>' + escapeHtml(a.plotName) + '</td>' +
+          '<td>' + escapeHtml(a.type) + '</td>' +
+          '<td>' + escapeHtml(a.value) + '</td>' +
           '<td>' + levelBadge + '</td>' +
           '<td>' + statusBadge + '</td>' +
+          '<td>' + handler + '</td>' +
+          '<td>' + handledAt + '</td>' +
+          '<td>' + logSummary + '</td>' +
           '<td>' + action + '</td>';
         body.appendChild(tr);
       });
 
       // 绑定「标记处理」
-      body.querySelectorAll('button[data-id]').forEach(function (btn) {
+      body.querySelectorAll('.handle-alarm-btn[data-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          handleAlarm(btn.getAttribute('data-id'));
+          openHandleAlarmModal(btn.getAttribute('data-id'));
+        });
+      });
+
+      body.querySelectorAll('.alarm-log-link[data-log-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          openLogDetail(btn.getAttribute('data-log-id'));
         });
       });
 
@@ -168,25 +291,101 @@
       }
     }
 
-    /* ---------- 标记处理 ---------- */
-    function handleAlarm(id) {
-      API.updateAlarmStatus(id, '已处理').then(function () {
-        var a = alarms.filter(function (x) { return x.id === id; })[0];
-        if (a) a.status = '已处理';
-        Toast.success('告警「' + (a ? a.type : id) + '」已标记为已处理');
-        renderAlarms();
+    function findAlarm(id) {
+      return alarms.filter(function (x) { return String(x.id) === String(id); })[0];
+    }
+
+    function currentPlotFilter() {
+      return document.getElementById('alarmPlotFilter').value || '';
+    }
+
+    function renderPlotFilter() {
+      var sel = document.getElementById('alarmPlotFilter');
+      var previous = sel.value || '';
+      sel.innerHTML = '';
+      plots.forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
       });
+      if (previous && plots.some(function (p) { return p.id === previous; })) {
+        sel.value = previous;
+      } else if (plots.length) {
+        sel.value = plots[0].id;
+      }
+    }
+
+    function openHandleAlarmModal(id) {
+      pendingAlarmId = id;
+      document.getElementById('handlerNameText').textContent = currentHandlerName();
+      document.getElementById('handleLogInput').value = '';
+      document.getElementById('handleAlarmModal').classList.add('show');
+      setTimeout(function () { document.getElementById('handleLogInput').focus(); }, 40);
+    }
+
+    function closeHandleAlarmModal() {
+      pendingAlarmId = null;
+      document.getElementById('handleAlarmModal').classList.remove('show');
+    }
+
+    /* ---------- 标记处理 ---------- */
+    function submitHandleAlarm() {
+      if (!pendingAlarmId) return;
+      var alarmId = pendingAlarmId;
+      var handler = currentHandlerName();
+      var handleLog = document.getElementById('handleLogInput').value.trim();
+      if (!handleLog) {
+        Toast.error('请填写处理日志');
+        return;
+      }
+
+      API.updateAlarmStatus(alarmId, '已处理', {
+        handler: handler,
+        handleLog: handleLog
+      }).then(function (res) {
+        if (res && res.code !== 0) {
+          Toast.error(res.msg || '处理失败');
+          return;
+        }
+        var a = findAlarm(alarmId);
+        closeHandleAlarmModal();
+        Toast.success('告警「' + (a ? a.type : alarmId) + '」已处理');
+        loadAlarms();
+      });
+    }
+
+    function openLogDetail(id) {
+      var a = findAlarm(id);
+      var text = a && a.handleLog ? a.handleLog : '暂无处理日志';
+      document.getElementById('logDetailType').textContent = a && a.type ? a.type : '-';
+      document.getElementById('logDetailAlarmTime').textContent = a && a.time ? a.time : '-';
+      document.getElementById('logDetailHandler').textContent = a && a.handler ? a.handler : '-';
+      document.getElementById('logDetailHandledAt').textContent = a && a.handledAt ? a.handledAt : '-';
+      document.getElementById('logDetailText').textContent = text;
+      document.getElementById('logDetailModal').classList.add('show');
+    }
+
+    function closeLogDetail() {
+      document.getElementById('logDetailModal').classList.remove('show');
     }
 
     /* ---------- 加载阈值 ---------- */
     function loadThresholds() {
-      API.getThresholds().then(function (res) {
+      var plotId = currentPlotFilter();
+      return API.getThresholds(plotId ? { plotId: plotId, loader: true } : { loader: true }).then(function (res) {
         setValue('humidityMin', res.data.humidityMin);
         setValue('humidityMax', res.data.humidityMax);
         setValue('tempMin', res.data.tempMin);
         setValue('tempMax', res.data.tempMax);
         setValue('luxMin', res.data.luxMin);
         setValue('luxMax', res.data.luxMax);
+        activeMetrics = {
+          humidity: metricEnabled('humidity'),
+          temp: metricEnabled('temp'),
+          lux: metricEnabled('lux')
+        };
+        renderThresholdGroups();
       });
     }
 
@@ -201,6 +400,57 @@
       return isNaN(n) ? NaN : n;
     }
 
+    function metricEnabled(group) {
+      var cfg = METRICS[group];
+      return thresholdValue(cfg.min) !== null || thresholdValue(cfg.max) !== null;
+    }
+
+    function renderThresholdGroups() {
+      Object.keys(METRICS).forEach(function (key) {
+        var node = document.querySelector('.threshold-group[data-metric="' + key + '"]');
+        if (node) node.style.display = activeMetrics[key] ? '' : 'none';
+      });
+      updateAddMetricOptions();
+    }
+
+    function updateAddMetricOptions() {
+      var select = document.getElementById('metricToAdd');
+      if (!select) return;
+      select.innerHTML = '';
+      Object.keys(METRICS).forEach(function (key) {
+        if (activeMetrics[key]) return;
+        var opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = METRICS[key].label;
+        select.appendChild(opt);
+      });
+      document.getElementById('openAddMetric').disabled = select.options.length === 0;
+    }
+
+    function openAddMetricModal() {
+      updateAddMetricOptions();
+      if (!document.getElementById('metricToAdd').options.length) {
+        Toast.info ? Toast.info('所有指标都已添加') : Toast.success('所有指标都已添加');
+        return;
+      }
+      document.getElementById('addMetricModal').classList.add('show');
+    }
+
+    function closeAddMetricModal() {
+      document.getElementById('addMetricModal').classList.remove('show');
+    }
+
+    function addSelectedMetric() {
+      var key = document.getElementById('metricToAdd').value;
+      if (!key || !METRICS[key]) return;
+      activeMetrics[key] = true;
+      var cfg = METRICS[key];
+      if (thresholdValue(cfg.min) === null) setValue(cfg.min, cfg.defaultMin);
+      if (thresholdValue(cfg.max) === null) setValue(cfg.max, cfg.defaultMax);
+      renderThresholdGroups();
+      closeAddMetricModal();
+    }
+
     function clearThresholdGroup(group) {
       if (group === 'humidity') {
         setValue('humidityMin', null);
@@ -212,6 +462,8 @@
         setValue('luxMin', null);
         setValue('luxMax', null);
       }
+      activeMetrics[group] = false;
+      renderThresholdGroups();
       saveThresholds(group);
     }
 
@@ -227,6 +479,18 @@
       if ([humidityMin, humidityMax, tempMin, tempMax, luxMin, luxMax].some(function (v) { return isNaN(v); })) {
         Toast.error('阈值必须是数字，留空表示不启用该项');
         return;
+      }
+      if (!activeMetrics.humidity) {
+        humidityMin = null;
+        humidityMax = null;
+      }
+      if (!activeMetrics.temp) {
+        tempMin = null;
+        tempMax = null;
+      }
+      if (!activeMetrics.lux) {
+        luxMin = null;
+        luxMax = null;
       }
       if (humidityMin !== null && humidityMax !== null && humidityMin > humidityMax) {
         Toast.error('湿度下限不能大于湿度上限');
@@ -248,7 +512,7 @@
         tempMax: tempMax,
         luxMin: luxMin,
         luxMax: luxMax
-      }).then(function (res) {
+      }, { plotId: currentPlotFilter() }).then(function (res) {
         if (res && res.code !== 0) {
           Toast.error(res.msg || '保存失败');
           return;
@@ -259,28 +523,63 @@
         } else {
           Toast.success('阈值已保存');
         }
+        loadAlarms();
       });
     }
 
     document.getElementById('saveThreshold').addEventListener('click', function () {
       saveThresholds();
     });
-    document.getElementById('deleteHumidityThreshold').addEventListener('click', function () {
-      clearThresholdGroup('humidity');
+    document.querySelectorAll('.metric-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        clearThresholdGroup(btn.getAttribute('data-group'));
+      });
     });
-    document.getElementById('deleteTempThreshold').addEventListener('click', function () {
-      clearThresholdGroup('temp');
+    document.getElementById('openAddMetric').addEventListener('click', openAddMetricModal);
+    document.getElementById('cancelAddMetric').addEventListener('click', closeAddMetricModal);
+    document.getElementById('confirmAddMetric').addEventListener('click', addSelectedMetric);
+    document.getElementById('alarmPlotFilter').addEventListener('change', function () {
+      loadThresholds();
+      loadAlarms();
     });
-    document.getElementById('deleteLuxThreshold').addEventListener('click', function () {
-      clearThresholdGroup('lux');
+    document.getElementById('cancelHandleAlarm').addEventListener('click', closeHandleAlarmModal);
+    document.getElementById('submitHandleAlarm').addEventListener('click', submitHandleAlarm);
+    document.getElementById('closeLogDetail').addEventListener('click', closeLogDetail);
+    document.getElementById('addMetricModal').addEventListener('click', function (e) {
+      if (e.target === this) closeAddMetricModal();
+    });
+    document.getElementById('handleAlarmModal').addEventListener('click', function (e) {
+      if (e.target === this) closeHandleAlarmModal();
+    });
+    document.getElementById('logDetailModal').addEventListener('click', function (e) {
+      if (e.target === this) closeLogDetail();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        closeHandleAlarmModal();
+        closeLogDetail();
+        closeAddMetricModal();
+      }
     });
 
+    function loadAlarms() {
+      return API.getAlarms({ plotId: currentPlotFilter(), loader: true }).then(function (res) {
+        alarms = (res && res.data) || [];
+        renderAlarms();
+      });
+    }
+
+    function loadPlots() {
+      return API.getPlots({ loader: true }).then(function (res) {
+        plots = res.data || [];
+        renderPlotFilter();
+      });
+    }
+
     /* ---------- 初始化 ---------- */
-    API.getAlarms().then(function (res) {
-      alarms = res.data;
-      renderAlarms();
+    loadPlots().then(function () {
+      return Promise.all([loadThresholds(), loadAlarms()]);
     });
-    loadThresholds();
   </script>
 </body>
 </html>
