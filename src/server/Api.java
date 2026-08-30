@@ -253,6 +253,11 @@ public class Api {
                 ok(ex, saveThresholdsJson(ex, ex.getRequestURI().getQuery()));
                 return true;
             }
+            if ("POST".equals(method) && path.matches("/api/plots/[^/]+/alarms/resolve")) {
+                ok(ex, resolvePlotAlarmsJson(path.substring("/api/plots/".length(),
+                        path.length() - "/alarms/resolve".length()), ex));
+                return true;
+            }
             if ("GET".equals(method) && path.equals("/api/alarms")) {
                 ok(ex, alarmsJson(ex.getRequestURI().getQuery()));
                 return true;
@@ -2561,35 +2566,101 @@ public class Api {
     private static String updateAlarmJson(String id, HttpExchange ex) throws IOException, SQLException {
         Map<String, String> body = Json.parseObject(readBody(ex));
         String status = body.get("status");
-        if (status == null || status.isEmpty()) {
-            return "{\"code\":1,\"msg\":" + Json.str("参数不完整：status 必填") + "}";
+        if (!"已处理".equals(status)) {
+            return "{\"code\":1,\"msg\":" + Json.str("仅支持将告警标记为已处理") + "}";
         }
         String handler = body.containsKey("handler") && body.get("handler") != null && !body.get("handler").trim().isEmpty()
                 ? body.get("handler").trim() : "演示用户";
         String handleLog = body.containsKey("handleLog") && body.get("handleLog") != null
                 ? body.get("handleLog").trim() : "";
-        if ("已处理".equals(status) && handleLog.isEmpty()) {
+        if (handleLog.isEmpty()) {
             return "{\"code\":1,\"msg\":" + Json.str("请填写处理日志") + "}";
         }
-        String sql = "UPDATE alarm SET status = ?, handled_at = NOW(), handler = ?, handle_log = ? WHERE id = ?";
-        try (Connection conn = DBUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, status);
-            ps.setString(2, handler);
-            ps.setString(3, handleLog);
-            ps.setLong(4, Long.parseLong(id));
-            if (ps.executeUpdate() == 0) {
-                return "{\"code\":1,\"msg\":" + Json.str("告警不存在: " + id) + "}";
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long alarmId = Long.parseLong(id);
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE alarm SET status = '已处理', handled_at = NOW(), handler = ?, handle_log = ? WHERE id = ? AND status = '未处理'")) {
+                    ps.setString(1, handler);
+                    ps.setString(2, handleLog);
+                    ps.setLong(3, alarmId);
+                    if (ps.executeUpdate() == 0) {
+                        conn.rollback();
+                        return "{\"code\":1,\"msg\":" + Json.str("告警不存在或已处理: " + id) + "}";
+                    }
+                }
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE human_detection_record SET status = '已处理' WHERE alarm_id = ?")) {
+                    ps.setLong(1, alarmId);
+                    ps.executeUpdate();
+                }
+                conn.commit();
+                return "{\"code\":0,\"data\":{\"id\":" + alarmId + ",\"status\":\"已处理\",\"handleLog\":" + Json.str(handleLog) + "}}";
+            } catch (NumberFormatException e) {
+                conn.rollback();
+                return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
             }
-            try (PreparedStatement ps2 = conn.prepareStatement("UPDATE human_detection_record SET status = ? WHERE alarm_id = ?")) {
-                ps2.setString(1, status);
-                ps2.setLong(2, Long.parseLong(id));
-                ps2.executeUpdate();
-            }
-        } catch (NumberFormatException e) {
-            return "{\"code\":1,\"msg\":" + Json.str("参数错误：id 必须是数字") + "}";
         }
-        return "{\"code\":0}";
+    }
+
+    private static String resolvePlotAlarmsJson(String plotId, HttpExchange ex) throws IOException, SQLException {
+        if (trimToNull(plotId) == null) return "{\"code\":1,\"msg\":" + Json.str("地块编号不能为空") + "}";
+        Map<String, String> body = Json.parseObject(readBody(ex));
+        String handler = body.containsKey("handler") && body.get("handler") != null && !body.get("handler").trim().isEmpty()
+                ? body.get("handler").trim() : "演示用户";
+        List<Long> resolvedIds = new ArrayList<>();
+        try (Connection conn = DBUtil.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement select = conn.prepareStatement(
+                        "SELECT id FROM alarm WHERE plot_id = ? AND status = '未处理' FOR UPDATE")) {
+                    select.setString(1, plotId);
+                    try (ResultSet rs = select.executeQuery()) {
+                        while (rs.next()) resolvedIds.add(rs.getLong(1));
+                    }
+                }
+                if (!resolvedIds.isEmpty()) {
+                    try (PreparedStatement update = conn.prepareStatement(
+                            "UPDATE alarm SET status = '已处理', handled_at = NOW(), handler = ?, handle_log = '已处理' WHERE plot_id = ? AND status = '未处理'")) {
+                        update.setString(1, handler);
+                        update.setString(2, plotId);
+                        update.executeUpdate();
+                    }
+                    try (PreparedStatement detection = conn.prepareStatement(
+                            "UPDATE human_detection_record r JOIN alarm a ON a.id = r.alarm_id SET r.status = '已处理' WHERE a.plot_id = ? AND a.id IN (" + placeholders(resolvedIds.size()) + ")")) {
+                        detection.setString(1, plotId);
+                        for (int i = 0; i < resolvedIds.size(); i++) detection.setLong(i + 2, resolvedIds.get(i));
+                        detection.executeUpdate();
+                    }
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
+        StringBuilder json = new StringBuilder("{\"code\":0,\"data\":{\"plotId\":").append(Json.str(plotId)).append(",\"resolvedAlarmIds\":[");
+        for (int i = 0; i < resolvedIds.size(); i++) {
+            if (i > 0) json.append(',');
+            json.append(resolvedIds.get(i));
+        }
+        return json.append("]}}") .toString();
+    }
+
+    private static String placeholders(int count) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            if (i > 0) sb.append(',');
+            sb.append('?');
+        }
+        return sb.toString();
     }
 
     /* ==================================================================

@@ -810,8 +810,6 @@
       targetCell: null,
       placedPlants: [],
       hiddenDevicePlants: [],
-      clearedThreatRows: [],
-      clearedZombieRows: {},
       removingMapped: [],
       effects: [],
       nextEffectId: 1,
@@ -1004,59 +1002,22 @@
       return state.alarms.filter(function (a) { return String(a.plotId) === String(plotId) && a.status === '未处理'; });
     }
 
-    function threatRowKey(plotId) {
-      return String(plotId);
-    }
-
-    function isThreatRowCleared(plotId) {
-      return state.clearedThreatRows.indexOf(threatRowKey(plotId)) !== -1;
-    }
-
-    function clearThreatRow(plotId) {
-      var key = threatRowKey(plotId);
-      if (state.clearedThreatRows.indexOf(key) === -1) state.clearedThreatRows.push(key);
-    }
-
-    function zombieRowKey(row) {
-      return String(row);
-    }
-
-    function clearZombiesOnRow(row) {
-      state.clearedZombieRows[zombieRowKey(row)] = true;
-    }
-
-    function areZombiesClearedOnRow(row) {
-      return !!state.clearedZombieRows[zombieRowKey(row)];
-    }
-
-    function threat(type, label, zombie, severity, message, alarmId) {
-      return { type: type, label: label, zombie: zombie, severity: severity, message: message, alarmId: alarmId || null };
+    function threat(label, zombie, severity, message, alarmId) {
+      return { label: label, zombie: zombie, severity: severity, message: message, alarmId: String(alarmId) };
     }
 
     function threatsFor(plot) {
-      if (!plot || plot.empty || isThreatRowCleared(plot.id)) return [];
-      var t = state.thresholds || {};
-      var temp = metric(plot, 'temp');
-      var hum = metric(plot, 'humidity');
-      var lux = metric(plot, 'lux');
-      var list = [];
-
-      if (hum !== null && t.humidityMin != null && hum < Number(t.humidityMin)) list.push(threat('humidity-low', '干旱僵尸', 'normal', 18, '湿度 ' + hum.toFixed(1) + '% 低于 ' + t.humidityMin + '%'));
-      if (hum !== null && t.humidityMax != null && hum > Number(t.humidityMax)) list.push(threat('humidity-high', '水涝僵尸', 'cone', 18, '湿度 ' + hum.toFixed(1) + '% 高于 ' + t.humidityMax + '%'));
-      if (temp !== null && t.tempMax != null && temp > Number(t.tempMax)) list.push(threat('temp-high', '高温路障僵尸', 'cone', 20, '温度 ' + temp.toFixed(1) + '℃ 高于 ' + t.tempMax + '℃'));
-      if (temp !== null && t.tempMin != null && temp < Number(t.tempMin)) list.push(threat('temp-low', '低温路障僵尸', 'cone', 16, '温度 ' + temp.toFixed(1) + '℃ 低于 ' + t.tempMin + '℃'));
-      if (lux !== null && t.luxMin != null && lux < Number(t.luxMin)) list.push(threat('lux-low', '弱光僵尸', 'normal', 12, '光照 ' + Math.round(lux) + ' lx 低于 ' + t.luxMin + ' lx'));
-      if (lux !== null && t.luxMax != null && lux > Number(t.luxMax)) list.push(threat('lux-high', '烈日僵尸', 'normal', 12, '光照 ' + Math.round(lux) + ' lx 高于 ' + t.luxMax + ' lx'));
-
-      var offline = devicesOf(plot.id).filter(function (d) { return !d.online; });
-      if (offline.length) list.push(threat('offline', '铁桶断线僵尸', 'bucket', 24, offline.length + ' 台设备离线'));
-
-      pendingAlarms(plot.id).forEach(function (alarm) {
+      if (!plot || plot.empty) return [];
+      return pendingAlarms(plot.id).map(function (alarm) {
         var severe = alarm.level === '严重' || /人体|入侵|离线|严重/.test(alarm.type || '');
-        list.push(threat('alarm', severe ? '铁桶告警僵尸' : '告警僵尸', severe ? 'bucket' : 'normal', severe ? 22 : 14, (alarm.type || '告警') + ' · ' + (alarm.value || '-'), alarm.id));
+        return threat(
+          severe ? '铁桶告警僵尸' : '告警僵尸',
+          severe ? 'bucket' : 'normal',
+          severe ? 22 : 14,
+          (alarm.type || '告警') + ' · ' + (alarm.value || '-'),
+          alarm.id
+        );
       });
-
-      return list.slice(0, 3);
     }
 
     function selectedPlot() {
@@ -1402,11 +1363,11 @@
       return (baseClass ? baseClass + ' ' : '') + (isRemovingMapped(plotId, col) ? 'removing' : '');
     }
 
-    function zombieSprite(kind, row, col, title) {
+    function zombieSprite(kind, row, col, title, alarmId, yOffset) {
       var x = GRASS_LEFT + col * CELL_W - 26;
-      var y = GRASS_TOP + row * CELL_H + 6;
+      var y = GRASS_TOP + row * CELL_H + 6 + (yOffset || 0);
       var delay = -((row * 0.19) + (col * 0.11)).toFixed(2);
-      return '<img class="zombie" src="' + esc(frame(zombieFrames[kind])) + '" alt="" data-alert="' + esc(title || '') + '" title="' + esc(title || '') + '" style="left:' + x + 'px;top:' + y + 'px;animation-delay:' + delay + 's;">';
+      return '<img class="zombie" src="' + esc(frame(zombieFrames[kind])) + '" alt="" data-alarm-id="' + esc(alarmId) + '" data-alert="' + esc(title || '') + '" title="' + esc(title || '') + '" style="left:' + x + 'px;top:' + y + 'px;animation-delay:' + delay + 's;">';
     }
 
     function showZombieAlert(text) {
@@ -1461,10 +1422,11 @@
         html += mappedPlants(plot, r);
         html += placedPlantSprites(r);
 
-        var threats = areZombiesClearedOnRow(r) ? [] : threatsFor(plot);
+        var threats = threatsFor(plot);
         for (var z = 0; z < threats.length; z++) {
           var zombieTitle = threats[z].label + '：' + threats[z].message;
-          html += zombieSprite(threats[z].zombie, r, 6 + z, zombieTitle);
+          var zombieCol = 6 + (z % 3);
+          html += zombieSprite(threats[z].zombie, r, zombieCol, zombieTitle, threats[z].alarmId, Math.floor(z / 3) * 18);
         }
         html += effectSprites(r);
       }
@@ -1753,6 +1715,11 @@
       renderAll();
     }
 
+    function currentHandlerName() {
+      var user = window.Layout && Layout.getUser ? Layout.getUser() : null;
+      return user ? ((user.roleName || '用户') + '·' + (user.name || user.username || '用户')) : '演示用户';
+    }
+
     function plantChili(plot, card, cell) {
       var row = visibleRowIndex(plot.id);
       if (row < 0) {
@@ -1761,6 +1728,11 @@
         return;
       }
       var alarms = pendingAlarms(plot.id);
+      if (!alarms.length) {
+        playSound('buzzer');
+        showStage('该地块没有未处理告警');
+        return;
+      }
       var cherryKey = 'cherry:' + plot.id + ':' + row;
       if (!beginOperation(cherryKey)) {
         showStage('该行报警正在处理中，请稍候');
@@ -1771,54 +1743,32 @@
         return;
       }
 
-      function finishClear(message) {
+      API.resolvePlotAlarms(plot.id, { handler: currentHandlerName() }).then(function (res) {
+        if (!res || res.code !== 0) throw new Error((res && res.msg) || '批量处理告警失败');
+        var resolved = (res.data && res.data.resolvedAlarmIds) || [];
+        if (!resolved.length) throw new Error('该地块告警状态已变化，请刷新后重试');
         playSound('cherry');
         playSound('siren');
-        clearThreatRow(plot.id);
-        clearZombiesOnRow(row);
-        // 樱桃炸弹是报警处理动作，不占用六个设备植物坑位。
-        var bombCell = { row: row, col: 6, plotId: plot.id };
-        var bomb = {
-          key: card.key,
-          plotId: plot.id,
-          row: row,
-          col: bombCell.col,
-          title: message,
-          time: Date.now()
-        };
+        var bomb = { key: card.key, plotId: plot.id, row: row, col: 6, title: '已处理 ' + resolved.length + ' 条告警', time: Date.now() };
         state.placedPlants.push(bomb);
-        renderBoard();
-        if (!bomb) return;
         for (var col = 1; col <= 8; col += 2) addEffect('cherry', row, col);
-        setTimeout(function () {
-          state.placedPlants = state.placedPlants.filter(function (p) { return p !== bomb; });
-          if (state.phase === 'play') renderBoard();
-        }, 220);
-        addEvent(plot.name + ' 樱桃炸弹已清空整行僵尸', 'success');
-        showStage('樱桃炸弹爆炸，整排僵尸已清除');
-        finishOperation(cherryKey);
-        renderAll();
-      }
-
-      // The battle rule is row clearing. No backend-data mismatch may leave a zombie behind.
-      if (!alarms.length) {
-        finishClear('已清空本行僵尸');
-        return;
-      }
-
-      Promise.all(alarms.map(function (alarm) {
-        return API.updateAlarmStatus(alarm.id, '已处理');
-      })).then(function (all) {
-        for (var i = 0; i < all.length; i++) {
-          if (all[i].code !== 0) throw new Error(all[i].msg || '批量处理告警失败');
-        }
-        finishClear('已清空 ' + alarms.length + ' 条告警');
-        return loadAll(false);
+        return loadAll(false).then(function () {
+          renderBoard();
+          setTimeout(function () {
+            state.placedPlants = state.placedPlants.filter(function (p) { return p !== bomb; });
+            if (state.phase === 'play') renderBoard();
+          }, 220);
+          addEvent(plot.name + ' 樱桃炸弹已处理 ' + resolved.length + ' 条告警', 'success');
+          showStage('樱桃炸弹爆炸，告警已同步处理');
+        });
       }).catch(function (e) {
-        // Keep the visual combat rule deterministic even if a stale backend alarm
-        // cannot be updated; report the sync failure without resurrecting zombies.
-        finishClear('已清空本行僵尸');
-        addEvent(e.message || '告警同步失败，已完成战场清除', 'warn');
+        refund(card.cost);
+        playSound('buzzer');
+        addEvent(e.message || '告警同步失败', 'danger');
+        showStage('告警处理失败，僵尸仍保留');
+        return loadAll(false);
+      }).finally(function () {
+        finishOperation(cherryKey);
       });
     }
 
@@ -1866,6 +1816,10 @@
       loadAll(false);
     }, 20000);
 
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) loadAll(false);
+    });
+    window.addEventListener('focus', function () { loadAll(false); });
     document.getElementById('adviceClose').addEventListener('click', function () {
       document.getElementById('adviceBox').hidden = true;
     });

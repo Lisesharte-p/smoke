@@ -242,7 +242,35 @@ window.MOCK = (function () {
   }
 
   function setThresholds(data) { thresholds = clone(data); persist(); }
-  function setAlarmStatus(id, status) { var alarm = findById(alarms, id); if (alarm) { alarm.status = status; persist(); } return alarm ? clone(alarm) : null; }
+
+  function setAlarmStatus(id, status, data) {
+    var alarm = findById(alarms, id);
+    if (!alarm) return null;
+    data = data || {};
+    alarm.status = status;
+    if (status === '已处理') {
+      alarm.handler = data.handler || alarm.handler || '演示用户';
+      alarm.handledAt = data.handledAt || nowDate();
+      alarm.handleLog = data.handleLog || '已处理';
+    }
+    persist();
+    return clone(alarm);
+  }
+
+  function resolvePlotAlarms(plotId, handler) {
+    var resolvedAlarmIds = [];
+    alarms.forEach(function (alarm) {
+      if (String(alarm.plotId) !== String(plotId) || alarm.status !== '未处理') return;
+      alarm.status = '已处理';
+      alarm.handler = handler || alarm.handler || '演示用户';
+      alarm.handledAt = nowDate();
+      alarm.handleLog = '已处理';
+      resolvedAlarmIds.push(alarm.id);
+    });
+    persist();
+    return { plotId: plotId, resolvedAlarmIds: resolvedAlarmIds };
+  }
+
   function saveDetection(data) { detectionSettings[data.deviceId] = clone(data); persist(); return clone(detectionSettings[data.deviceId]); }
   function getDetection(deviceId) { return clone(detectionSettings[deviceId] || { deviceId: deviceId, enabled: true, confidenceThreshold: 0.5, cooldownSeconds: 30, workerOnline: false, workerStatus: 'simulator', workerMessage: '本地模拟模式' }); }
 
@@ -632,6 +660,7 @@ window.MOCK = (function () {
     setIrrigation: setIrrigation,
     setThresholds: setThresholds,
     setAlarmStatus: setAlarmStatus,
+    resolvePlotAlarms: resolvePlotAlarms,
     saveDetection: saveDetection,
     getDetection: getDetection,
     saveConversation: saveConversation,

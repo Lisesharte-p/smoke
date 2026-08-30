@@ -24,6 +24,7 @@ window.API = (function () {
       control:    '/api/devices/{deviceId}/control',
       thresholds: '/api/thresholds',
       alarms:     '/api/alarms',
+      resolvePlotAlarms: '/api/plots/{plotId}/alarms/resolve',
       controlLogs:'/api/control-logs',
       boardRefresh:'/api/board/refresh',
       registerRequests: '/api/register-requests',
@@ -368,17 +369,8 @@ window.API = (function () {
   function updateAlarmStatus(alarmId, status, data) {
     data = data || {};
     if (config.useMock) {
-      var arr = window.MOCK.alarms;
-      for (var i = 0; i < arr.length; i++) {
-        if (arr[i].id === alarmId) {
-          arr[i].status = status;
-          arr[i].handler = data.handler || arr[i].handler || '演示用户';
-          arr[i].handledAt = data.handledAt || arr[i].handledAt || new Date().toLocaleString('zh-CN', { hour12: false }).slice(0, 16);
-          arr[i].handleLog = data.handleLog || arr[i].handleLog || '';
-          break;
-        }
-      }
-      return mockDelay({ code: 0 }, 300);
+      var alarm = window.MOCK.setAlarmStatus(alarmId, status, data);
+      return mockDelay(alarm ? { code: 0, data: alarm } : { code: 1, msg: '告警不存在' }, 300);
     }
     return request(config.endpoints.alarms + '/' + alarmId, {
       method: 'PUT',
@@ -387,6 +379,18 @@ window.API = (function () {
         handler: data.handler,
         handleLog: data.handleLog
       }
+    });
+  }
+
+  function resolvePlotAlarms(plotId, data) {
+    data = data || {};
+    if (config.useMock) {
+      var result = window.MOCK.resolvePlotAlarms(plotId, data.handler);
+      return mockDelay({ code: 0, data: result }, 300);
+    }
+    return request(config.endpoints.resolvePlotAlarms.replace('{plotId}', encodeURIComponent(plotId)), {
+      method: 'POST',
+      data: { handler: data.handler }
     });
   }
 
@@ -550,6 +554,7 @@ window.API = (function () {
     saveThresholds: saveThresholds,
     getAlarms: getAlarms,
     updateAlarmStatus: updateAlarmStatus,
+    resolvePlotAlarms: resolvePlotAlarms,
     getRegisterRequests: getRegisterRequests,
     reviewRegisterRequest: reviewRegisterRequest,
     getControlLogs: getControlLogs,
