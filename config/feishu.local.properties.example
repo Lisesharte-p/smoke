@@ -1,0 +1,18 @@
+# 本机/部署机私有配置示例。复制为 feishu.local.properties 后填写真实值。
+# 真实配置文件已被 .gitignore 忽略，严禁提交。
+# 请从项目根目录启动 Java 服务；修改配置后必须完整重启服务。
+
+# DeepSeek 智能问答
+SMART_QA_API_KEY=replace-with-deepseek-api-key
+SMART_QA_API_URL=https://api.deepseek.com/chat/completions
+SMART_QA_MODEL=deepseek-chat
+
+# 飞书机器人长连接
+FEISHU_ENABLED=true
+FEISHU_APP_ID=replace-with-feishu-app-id
+FEISHU_APP_SECRET=replace-with-feishu-app-secret
+FEISHU_SMART_QA_ENABLED=true
+
+# 可选：首次收到消息后记录最近会话，用于告警推送
+FEISHU_REMEMBER_LAST_CHAT=true
+# FEISHU_ALERT_CHAT_ID=oc_xxx

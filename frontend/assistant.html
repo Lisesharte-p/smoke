@@ -69,6 +69,7 @@
     var sendBtn = document.getElementById('sendBtn');
     var chatHistory = [];   // 多轮对话历史 [{role,content},...]，每次整段发给后端（勿用 history，会与浏览器内置对象冲突）
     var activeConvId = null; // 当前会话 id（null = 新建未落库）
+    var chatPending = false;
 
     /* 当前用户名（对话历史按用户隔离）；未登录兜底用 guest */
     function getUsername() {
@@ -168,18 +169,27 @@
     }
 
     /* ---------- 发送消息 ---------- */
+    function setChatPending(pending) {
+      chatPending = pending;
+      sendBtn.disabled = pending;
+      inputEl.disabled = pending;
+      document.querySelectorAll('.quick-asks .chip').forEach(function (chip) {
+        chip.disabled = pending;
+      });
+    }
+
     function send(question) {
       question = (question || '').trim();
-      if (!question) return;
+      if (!question || chatPending) return;
 
       addMessage('user', question);
       chatHistory.push({ role: 'user', content: question });
       inputEl.value = '';
+      setChatPending(true);
       showTyping();
 
       API.getChatReply(getUsername(), chatHistory, activeConvId).then(function (res) {
-        hideTyping();
-        if (res.code === 0 && res.data) {
+        if (res && res.code === 0 && res.data && res.data.answer) {
           var answer = res.data.answer;
           chatHistory.push({ role: 'assistant', content: answer });
           if (res.data.conversationId) activeConvId = res.data.conversationId;
@@ -187,8 +197,13 @@
           addSourcesLine(res.data.sources);   // RAG 命中的知识库参考来源
           renderConvs(activeConvId);   // 刷新历史列表并高亮当前会话
         } else {
-          addMessage('bot', '😅 ' + (res.msg || '大模型暂时不可用，请稍后再试。'));
+          addMessage('bot', '😅 ' + ((res && res.msg) || '大模型暂时不可用，请稍后再试。'));
         }
+      }).catch(function (err) {
+        addMessage('bot', '😅 ' + ((err && err.message) || '连接智能问答服务失败，请检查网络后重试。'));
+      }).then(function () {
+        hideTyping();
+        setChatPending(false);
       });
     }
 

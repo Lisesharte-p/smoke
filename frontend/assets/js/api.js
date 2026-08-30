@@ -190,8 +190,19 @@ window.API = (function () {
       headers: { 'Content-Type': 'application/json' },
       body: options.data ? JSON.stringify(options.data) : undefined
     }).then(function (res) {
-      endLoader(loaderStarted);
-      return res.json();
+      return res.text().then(function (text) {
+        endLoader(loaderStarted);
+        var data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (e) {
+          throw new Error(res.ok ? '服务返回了无法识别的响应' : '服务暂时不可用，请稍后重试');
+        }
+        if (!res.ok) {
+          throw new Error((data && data.msg) || '服务暂时不可用，请稍后重试');
+        }
+        return data;
+      });
     }, function (err) {
       endLoader(loaderStarted);
       throw err;

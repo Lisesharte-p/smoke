@@ -1,13 +1,16 @@
 param(
-  [string]$ServerUrl = "http://localhost:8888",
-  [string]$StorageDir = "D:\smoke\data\detections",
-  [string]$ModelPath = "D:\smoke\models\yolov8n.pt",
-  [string]$FfmpegPath = "D:\smoke\tools\ffmpeg-9.0.1-essentials_build\bin\ffmpeg.exe"
+  [string]$ServerUrl = "http://localhost:8080",
+  [string]$StorageDir = "",
+  [string]$ModelPath = "",
+  [string]$FfmpegPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $python = Join-Path $root ".venv-detection\Scripts\python.exe"
+if ([string]::IsNullOrWhiteSpace($StorageDir)) { $StorageDir = Join-Path $root "data\detections" }
+if ([string]::IsNullOrWhiteSpace($ModelPath)) { $ModelPath = Join-Path $root "models\yolov8n.pt" }
+if ([string]::IsNullOrWhiteSpace($FfmpegPath)) { $FfmpegPath = Join-Path $root "tools\ffmpeg-9.0.1-essentials_build\bin\ffmpeg.exe" }
 
 if (!(Test-Path $python)) {
   throw "未找到 D 盘识别环境：$python。请先运行：python -m venv .venv-detection; .\.venv-detection\Scripts\python.exe -m pip install -r workers\requirements-detection.txt"

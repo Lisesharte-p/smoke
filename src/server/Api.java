@@ -77,6 +77,12 @@ public class Api {
         return "";
     }
 
+    /** 先按环境变量、本机配置读取，全部为空时使用默认值。 */
+    private static String envFirstOrDefault(String def, String... keys) {
+        String value = envFirst(keys);
+        return value.isEmpty() ? def : value;
+    }
+
     private static Properties localConfigProperties() {
         Properties props = new Properties();
         if (!Files.isRegularFile(LOCAL_CONFIG)) return props;
@@ -1549,12 +1555,24 @@ public class Api {
             Path outLog = root.resolve("worker.run.out.log");
             Path errLog = root.resolve("worker.run.err.log");
             Path ffmpeg = root.resolve("tools").resolve("ffmpeg-9.0.1-essentials_build").resolve("bin").resolve("ffmpeg.exe");
+            Path storage = Paths.get(env("DETECTION_STORAGE_DIR", root.resolve("data").resolve("detections").toString()))
+                    .toAbsolutePath().normalize();
+            Path model = Paths.get(env("YOLO_MODEL", root.resolve("models").resolve("yolov8n.pt").toString()))
+                    .toAbsolutePath().normalize();
 
-            if (!Files.exists(python)) {
-                return "{\"code\":1,\"msg\":" + Json.str("未找到 worker Python 环境：" + python) + "}";
+            if (!Files.isRegularFile(python)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到人体识别 Python 环境，请先执行 workers/start_human_detection.ps1 的环境安装步骤：" + python) + "}";
             }
-            if (!Files.exists(script)) {
-                return "{\"code\":1,\"msg\":" + Json.str("未找到 worker 脚本：" + script) + "}";
+            if (!Files.isRegularFile(script)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到人体识别 worker 脚本：" + script) + "}";
+            }
+            if (!Files.isRegularFile(model)) {
+                return "{\"code\":1,\"msg\":" + Json.str("未找到 YOLO 人体识别模型：" + model) + "}";
+            }
+            try {
+                Files.createDirectories(storage);
+            } catch (IOException e) {
+                return "{\"code\":1,\"msg\":" + Json.str("无法创建识别证据存储目录：" + storage) + "}";
             }
 
             try {
@@ -1562,8 +1580,8 @@ public class Api {
                 pb.directory(root.toFile());
                 Map<String, String> procEnv = pb.environment();
                 procEnv.put("SERVER_URL", "http://localhost:" + ex.getLocalAddress().getPort());
-                procEnv.put("DETECTION_STORAGE_DIR", env("DETECTION_STORAGE_DIR", root.resolve("data").resolve("detections").toString()));
-                procEnv.put("YOLO_MODEL", env("YOLO_MODEL", root.resolve("models").resolve("yolov8n.pt").toString()));
+                procEnv.put("DETECTION_STORAGE_DIR", storage.toString());
+                procEnv.put("YOLO_MODEL", model.toString());
                 if (Files.exists(ffmpeg)) {
                     procEnv.put("FFMPEG_PATH", env("FFMPEG_PATH", ffmpeg.toString()));
                 }
@@ -2728,8 +2746,8 @@ public class Api {
 
     /** 智能问答 API Key：从环境变量读取，勿硬编码（避免随代码提交泄露）。 */
     private static final String SMART_QA_API_KEY = envFirst("SMART_QA_API_KEY", "DEEPSEEK_API_KEY", "API");
-    private static final String SMART_QA_URL   = env("SMART_QA_API_URL", "https://api.deepseek.com/chat/completions");
-    private static final String SMART_QA_MODEL = env("SMART_QA_MODEL", "deepseek-chat");
+    private static final String SMART_QA_URL   = envFirstOrDefault("https://api.deepseek.com/chat/completions", "SMART_QA_API_URL");
+    private static final String SMART_QA_MODEL = envFirstOrDefault("deepseek-chat", "SMART_QA_MODEL");
     /** 多轮对话最多带上多少条历史（防止上下文过长、超 token 上限） */
     private static final int MAX_CHAT_HISTORY = 8;
     /** RAG 知识库检索返回的最相关知识块条数 */
@@ -2779,8 +2797,11 @@ public class Api {
         String answer;
         try {
             answer = deepseekChat(valid, kbContext);
+        } catch (SmartQaException e) {
+            return smartQaError(e.errorCode, e.getMessage());
         } catch (Exception e) {
-            return "{\"code\":1,\"msg\":" + Json.str("大模型调用失败：" + e.getMessage()) + "}";
+            System.out.println("[SmartQA] 调用异常: " + e.getClass().getSimpleName());
+            return smartQaError("SMART_QA_UNAVAILABLE", "智能问答服务暂时不可用，请稍后重试。");
         }
         // RAG 命中来源（标题数组，前端展示「📚 参考」；未命中为空数组）
         String sourcesJson = Json.arrStr(Rag.searchTitles(question, RAG_TOP_K));
@@ -3376,7 +3397,7 @@ public class Api {
      */
     private static String deepseekChat(List<Map<String, String>> msgs, String kbContext) throws Exception {
         if (SMART_QA_API_KEY == null || SMART_QA_API_KEY.isEmpty()) {
-            throw new IOException("未配置 SMART_QA_API_KEY，请设置环境变量或 config/feishu.local.properties");
+            throw new SmartQaException("SMART_QA_NOT_CONFIGURED", "智能问答服务尚未配置，请联系管理员。");
         }
         // 系统提示：基础角色 + 当前时间 + 实时数据 + 地块/灌溉历史（让回答结合实时数据）
         String dataCtx = latestReadingsContext();
@@ -3410,10 +3431,15 @@ public class Api {
         }
         req.append("]}");
 
-        String body = smartQaPostWithRetry(req.toString());
+        String body;
+        try {
+            body = smartQaPostWithRetry(req.toString());
+        } catch (IOException e) {
+            throw smartQaProviderException(e);
+        }
         String content = Json.strValue(body, "content");
-        if (content == null) {
-            throw new IOException("响应解析失败，未找到 content 字段");
+        if (content == null || content.trim().isEmpty()) {
+            throw new SmartQaException("SMART_QA_BAD_RESPONSE", "智能问答服务返回异常，请稍后重试。");
         }
         return content;
     }
@@ -3425,7 +3451,7 @@ public class Api {
                 return httpPostJson(SMART_QA_URL, payload, SMART_QA_API_KEY, 2500, 30000);
             } catch (IOException e) {
                 last = e;
-                if (i == 3) break;
+                if (!isRetryableSmartQaFailure(e) || i == 3) break;
                 try {
                     Thread.sleep(250L * i);
                 } catch (InterruptedException ie) {
@@ -3435,6 +3461,37 @@ public class Api {
             }
         }
         throw last == null ? new IOException("模型接口请求失败") : last;
+    }
+
+    private static boolean isRetryableSmartQaFailure(IOException error) {
+        String message = error.getMessage();
+        return message == null || !(message.startsWith("HTTP 400") || message.startsWith("HTTP 401")
+                || message.startsWith("HTTP 403") || message.startsWith("HTTP 404") || message.startsWith("HTTP 429"));
+    }
+
+    private static SmartQaException smartQaProviderException(IOException error) {
+        String message = error.getMessage() == null ? "" : error.getMessage();
+        String code = message.startsWith("HTTP 401") || message.startsWith("HTTP 403") ? "SMART_QA_AUTH_FAILED"
+                : message.startsWith("HTTP 429") ? "SMART_QA_RATE_LIMITED"
+                : "SMART_QA_UNAVAILABLE";
+        String userMessage = "SMART_QA_AUTH_FAILED".equals(code) ? "智能问答服务认证失败，请联系管理员更新服务配置。"
+                : "SMART_QA_RATE_LIMITED".equals(code) ? "智能问答服务繁忙，请稍后重试。"
+                : "智能问答服务暂时不可用，请稍后重试。";
+        System.out.println("[SmartQA] 上游调用失败: " + code);
+        return new SmartQaException(code, userMessage);
+    }
+
+    private static String smartQaError(String errorCode, String message) {
+        return "{\"code\":1,\"errorCode\":" + Json.str(errorCode) + ",\"msg\":" + Json.str(message) + "}";
+    }
+
+    private static final class SmartQaException extends Exception {
+        private final String errorCode;
+
+        private SmartQaException(String errorCode, String message) {
+            super(message);
+            this.errorCode = errorCode;
+        }
     }
 
     /**

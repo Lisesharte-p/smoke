@@ -423,9 +423,6 @@
         img.src = cameraUrl(cam, screen.useProxy);
       }
       attach(showConnecting);
-      screen.timer = setInterval(function () {
-        if (screen.useProxy && isScreenPowered(screen.slot)) attach(false);
-      }, 12000);
     }
 
     function setCameraPower(slot, on, quiet, skipAdd) {
@@ -564,7 +561,17 @@
           if (showToast !== false) Toast.error((res && res.msg) || 'worker 启动失败');
           return false;
         }
-        if (showToast !== false) Toast.success((res && res.msg) || 'worker 已启动');
+        if (showToast !== false) {
+          var pid = res.data && res.data.pid ? '（PID ' + res.data.pid + '）' : '';
+          Toast.success((res && res.msg ? res.msg : 'worker 已启动') + pid + '；请稍候查看识别状态和告警。');
+          setTimeout(function () {
+            API.getAlarms({ loader: false }).then(function (alarmRes) {
+              alarms = (alarmRes && alarmRes.data) || [];
+              updateAlarmBadges();
+            }).catch(function () {});
+            loadDetectionRecords('');
+          }, 1500);
+        }
         return true;
       }).catch(function (e) {
         if (showToast !== false) Toast.error(e.message || 'worker 启动失败');
@@ -765,9 +772,6 @@
         img.src = cameraUrl(cam, zoomStream.useProxy);
       }
       attach();
-      zoomStream.timer = setInterval(function () {
-        if (zoomStream.useProxy) attach();
-      }, 12000);
     }
 
     function closeCameraZoom() {
@@ -793,7 +797,6 @@
         alarms = (res[2].data || []);
         buildScreens(targetCameraId);
         renderMonitorWall(targetCameraId);
-        enableWorkerForCameras();
         loadDetectionRecords('');
         if (initialRecordId) {
           openDetectionModal(initialRecordId);
