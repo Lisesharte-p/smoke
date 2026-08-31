@@ -56,4 +56,6 @@ data/detections/
 tools/ffmpeg*/
 *.pt
 worker.run.out.log
+worker.run.err.log
+
 

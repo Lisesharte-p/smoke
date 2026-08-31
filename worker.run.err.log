@@ -596,4 +596,88 @@ requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: 
 [tcp @ 000002592c8ecb00] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
 [tcp @ 000002592c8ec200] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
 [tcp @ 000002592c8ec540] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
-[tcp @ 000002592c8ec540] Connectio
+[tcp @ 000002592c8ec540] ConnectioTraceback (most recent call last):
+  File "D:\smoke\workers\human_detection_worker.py", line 326, in <module>
+    main()
+    ~~~~^^
+  File "D:\smoke\workers\human_detection_worker.py", line 305, in main
+    cameras = load_cameras()
+  File "D:\smoke\workers\human_detection_worker.py", line 291, in load_cameras
+    cameras = api_get("/api/internal/camera-configs")
+  File "D:\smoke\workers\human_detection_worker.py", line 41, in api_get
+    res.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\smoke\.venv-detection\Lib\site-packages\requests\models.py", line 1167, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: http://localhost:8080/api/internal/camera-configs
+//192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86640] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c85fc0] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c85c80] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c868c0] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86980] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86640] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86300] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c85c80] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c85e40] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86180] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[http @ 000001eb35d1de80] Stream ends prematurely at 5288152, should be 18446744073709551615
+[tcp @ 000001eb60c868c0] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86580] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c85d40] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86240] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86300] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86180] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86240] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86700] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86700] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86980] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86300] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86800] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86800] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86a40] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c86300] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000001eb60c85c80] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+Traceback (most recent call last):
+  File "D:\smoke\workers\human_detection_worker.py", line 326, in <module>
+    main()
+    ~~~~^^
+  File "D:\smoke\workers\human_detection_worker.py", line 305, in main
+    cameras = load_cameras()
+  File "D:\smoke\workers\human_detection_worker.py", line 291, in load_cameras
+    cameras = api_get("/api/internal/camera-configs")
+  File "D:\smoke\workers\human_detection_worker.py", line 41, in api_get
+    res.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\smoke\.venv-detection\Lib\site-packages\requests\models.py", line 1167, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: http://localhost:8080/api/internal/camera-configs
+n to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec600] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec7c0] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec040] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec6c0] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec140] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec380] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecbc0] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecb00] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec140] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec940] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[http @ 00000259579e2ec0] Stream ends prematurely at 2976367, should be 18446744073709551615
+[tcp @ 000002592c8ecd40] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec940] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec540] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecb00] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecb00] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecb00] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec040] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec6c0] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec880] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec540] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecd40] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec7c0] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec7c0] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec200] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ecbc0] Connection to tcp://192.168.43.91:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec6c0] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
+[tcp @ 000002592c8ec600] Connection to tcp://192.168.43.1:8081 failed: Error number -138 occurred
