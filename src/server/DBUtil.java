@@ -15,12 +15,12 @@ import java.sql.Statement;
  *   DB_NAME 库名（默认 farm）
  *   DB_USER 用户名（默认 root）
  *   DB_PASS 密码（默认 123456）
- * 例：连队友远程库 -> set DB_HOST=192.168.12.235 && set DB_USER=newuser
+ * 例：默认连接本机 MySQL；需要覆盖时可设置 DB_HOST、DB_USER 等环境变量。
  */
 public class DBUtil {
 
-    // ================== 连接配置（默认连共享库，可用环境变量覆盖） ==================
-    public static final String HOST = env("DB_HOST", "192.168.70.189");
+    // ================== 连接配置（默认连本机库，可用环境变量覆盖） ==================
+    public static final String HOST = env("DB_HOST", "127.0.0.1");
     public static final int    PORT = Integer.parseInt(env("DB_PORT", "3306"));
     public static final String DB   = env("DB_NAME", "farm");
     public static final String USER = env("DB_USER", "newuser");

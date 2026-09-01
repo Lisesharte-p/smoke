@@ -60,6 +60,9 @@ public class Api {
     /** 读取环境变量，为空时使用默认值。 */
     private static String env(String key, String def) {
         String v = System.getenv(key);
+        if (v != null && !v.trim().isEmpty()) return v.trim();
+        Properties props = localConfigProperties();
+        v = props.getProperty(key);
         return (v == null || v.trim().isEmpty()) ? def : v.trim();
     }
 

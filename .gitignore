@@ -49,6 +49,7 @@ server.run.err.log
 server.run.out.log
 worker.run.err.log
 worker.run.out.log
+tmp/.smoke-server.pid
 .env.local
 start-server-local.ps1
 
@@ -59,6 +60,8 @@ data/detections/
 tools/ffmpeg*/
 tools/apache-maven-3.9.9/
 tools/apache-maven-3.9.9-bin.zip
+tools/mysql-installer-*.msi
+tools/python-*.exe
 *.pt
 
 ### PVZ 游戏本地打包产物 / Claude 本地配置 ###

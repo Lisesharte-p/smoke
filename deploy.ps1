@@ -1,4 +1,4 @@
-<#
+﻿<#
  .SYNOPSIS
    编译并启动智慧农业平台，首次部署时可导入 mysql.sql。
 
@@ -43,6 +43,8 @@ param(
     [switch]$Force,
     [switch]$StartDetectionWorker,
     [switch]$SkipDatabaseCheck,
+    [switch]$SkipMySqlInstallerDownload,
+    [switch]$SkipOptionalConfigPrompt,
     [switch]$OpenFirewall,
     [switch]$Stop,
 
@@ -66,7 +68,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot ".")).Path
-$PidFile = Join-Path $Root ".smoke-server.pid"
+$RuntimeDir = Join-Path $Root "tmp"
+$PidFile = Join-Path $RuntimeDir ".smoke-server.pid"
+$LegacyPidFile = Join-Path $Root ".smoke-server.pid"
+$MySqlInstallerVersion = "8.0.46.0"
+$MySqlInstallerUrl = "https://cdn.mysql.com/Downloads/MySQLInstaller/mysql-installer-web-community-$MySqlInstallerVersion.msi"
+$MySqlInstallerMd5 = "210420AEF5B5006AB54BB1DAB4183768"
+$PythonInstallerVersion = "3.11.9"
+$PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonInstallerVersion/python-$PythonInstallerVersion-amd64.exe"
+$PythonInstallerFileName = "python-$PythonInstallerVersion-amd64.exe"
+$LocalConfigFile = Join-Path $Root "config\feishu.local.properties"
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -92,6 +103,39 @@ function Resolve-RequiredFile([string]$Path, [string]$Description) {
     return (Resolve-Path -LiteralPath $Path).Path
 }
 
+function Get-JavaVersion([string]$Java) {
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $Java
+    $info.Arguments = "-version"
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $info
+    if (-not $process.Start()) {
+        Fail "无法启动 Java：$Java"
+    }
+
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.Result.Trim()
+    $stderr = $stderrTask.Result.Trim()
+
+    if ($process.ExitCode -ne 0) {
+        $detail = if ($stderr) { $stderr } else { $stdout }
+        Fail "Java 版本检查失败：$detail"
+    }
+
+    $versionOutput = if ($stderr) { $stderr } else { $stdout }
+    if (-not $versionOutput) {
+        Fail "Java 版本检查未返回任何输出：$Java"
+    }
+    return ($versionOutput -split "[`r`n]+" | Select-Object -First 1)
+}
+
 function Read-EnvFile([string]$Path) {
     $values = @{}
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -113,6 +157,265 @@ function Read-EnvFile([string]$Path) {
     return $values
 }
 
+function ConvertFrom-SecureStringPlain([securestring]$SecureValue) {
+    $ptr = [IntPtr]::Zero
+    try {
+        $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureValue)
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    } finally {
+        if ($ptr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+        }
+    }
+}
+
+function Read-ConfigSecret([string]$Prompt) {
+    $secure = Read-Host $Prompt -AsSecureString
+    if (-not $secure -or $secure.Length -eq 0) {
+        return ""
+    }
+    return ConvertFrom-SecureStringPlain $secure
+}
+
+function Set-PlainConfigValue([string]$Path, [string]$Name, [string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return
+    }
+
+    $lines = @()
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        $lines = @(Get-Content -LiteralPath $Path -Encoding UTF8)
+    }
+
+    $escaped = $Value.Replace("\", "\\")
+    $updated = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*#?\s*$([regex]::Escape($Name))\s*=") {
+            $lines[$i] = "$Name=$escaped"
+            $updated = $true
+            break
+        }
+    }
+    if (-not $updated) {
+        if ($lines.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($lines[-1])) {
+            $lines += ""
+        }
+        $lines += "$Name=$escaped"
+    }
+
+    $dir = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, (($lines -join "`r`n") + "`r`n"), $encoding)
+    [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
+}
+
+function Read-LocalConfigFile([string]$Path) {
+    $values = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $values
+    }
+    Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
+            return
+        }
+        $parts = $line.Split("=", 2)
+        $name = $parts[0].Trim()
+        $value = $parts[1].Trim()
+        if ($name) {
+            $values[$name] = $value
+        }
+    }
+    return $values
+}
+
+function Get-OptionalConfigValue([hashtable]$FileValues, [hashtable]$LocalValues, [string[]]$Names) {
+    foreach ($name in $Names) {
+        $fromProcess = [Environment]::GetEnvironmentVariable($name, "Process")
+        if (-not (Test-PlaceholderConfigValue $fromProcess)) {
+            return $fromProcess
+        }
+        if ($FileValues.ContainsKey($name) -and -not (Test-PlaceholderConfigValue ([string]$FileValues[$name]))) {
+            return [string]$FileValues[$name]
+        }
+        if ($LocalValues.ContainsKey($name) -and -not (Test-PlaceholderConfigValue ([string]$LocalValues[$name]))) {
+            return [string]$LocalValues[$name]
+        }
+    }
+    return ""
+}
+
+function Test-PlaceholderConfigValue([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $true
+    }
+    $text = $Value.Trim()
+    return (
+        $text -like "replace-with-*" -or
+        $text -like "your-*" -or
+        $text.Contains("你的") -or
+        $text.Contains("请填写")
+    )
+}
+
+function Initialize-LocalConfigFile {
+    if (Test-Path -LiteralPath $LocalConfigFile -PathType Leaf) {
+        return
+    }
+
+    $example = Join-Path $Root "config\feishu.local.properties.example"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LocalConfigFile) | Out-Null
+    if (Test-Path -LiteralPath $example -PathType Leaf) {
+        Copy-Item -LiteralPath $example -Destination $LocalConfigFile
+    } else {
+        $content = @(
+            "# 本机私有配置，已被 .gitignore 忽略。",
+            "SMART_QA_API_URL=https://api.deepseek.com/chat/completions",
+            "SMART_QA_MODEL=deepseek-chat",
+            "QWEATHER_LOCATION=106.565952,29.642614",
+            "QWEATHER_HOST=https://ma5rk8cjh3.re.qweatherapi.com",
+            "FEISHU_ENABLED=true",
+            "FEISHU_SMART_QA_ENABLED=true",
+            "FEISHU_REMEMBER_LAST_CHAT=true"
+        )
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($LocalConfigFile, (($content -join "`r`n") + "`r`n"), $encoding)
+    }
+}
+
+function Ensure-OptionalApiConfig([hashtable]$FileValues) {
+    if ($SkipOptionalConfigPrompt) {
+        return
+    }
+
+    Initialize-LocalConfigFile
+    $localValues = Read-LocalConfigFile $LocalConfigFile
+    $changed = $false
+
+    if (-not (Get-OptionalConfigValue $FileValues $localValues @("SMART_QA_API_KEY", "DEEPSEEK_API_KEY", "API"))) {
+        Write-Step "配置 DeepSeek API"
+        $value = Read-ConfigSecret "请输入 DeepSeek API Key（留空跳过）"
+        if ($value) {
+            Set-PlainConfigValue $LocalConfigFile "SMART_QA_API_KEY" $value
+            Set-PlainConfigValue $LocalConfigFile "SMART_QA_API_URL" "https://api.deepseek.com/chat/completions"
+            Set-PlainConfigValue $LocalConfigFile "SMART_QA_MODEL" "deepseek-chat"
+            $changed = $true
+        } else {
+            Write-Warn "未填写 DeepSeek API Key，智能问答会不可用。"
+        }
+    }
+
+    $localValues = Read-LocalConfigFile $LocalConfigFile
+    if (-not (Get-OptionalConfigValue $FileValues $localValues @("QWEATHER_API_KEY", "WEATHER_API_KEY"))) {
+        Write-Step "配置和风天气 API"
+        $value = Read-ConfigSecret "请输入和风天气 API Key（留空跳过）"
+        if ($value) {
+            Set-PlainConfigValue $LocalConfigFile "QWEATHER_API_KEY" $value
+            Set-PlainConfigValue $LocalConfigFile "QWEATHER_LOCATION" "106.565952,29.642614"
+            Set-PlainConfigValue $LocalConfigFile "QWEATHER_HOST" "https://ma5rk8cjh3.re.qweatherapi.com"
+            $changed = $true
+        } else {
+            Write-Warn "未填写和风天气 API Key，天气接口会回退到模拟数据。"
+        }
+    }
+
+    $localValues = Read-LocalConfigFile $LocalConfigFile
+    if (-not (Get-OptionalConfigValue $FileValues $localValues @("FEISHU_APP_ID"))) {
+        Write-Step "配置飞书机器人 APPID"
+        $value = Read-Host "请输入飞书 APPID（留空跳过）"
+        if ($value) {
+            Set-PlainConfigValue $LocalConfigFile "FEISHU_APP_ID" $value.Trim()
+            $changed = $true
+        } else {
+            Write-Warn "未填写飞书 APPID，飞书机器人不会启动。"
+        }
+    }
+
+    $localValues = Read-LocalConfigFile $LocalConfigFile
+    if (-not (Get-OptionalConfigValue $FileValues $localValues @("FEISHU_APP_SECRET"))) {
+        Write-Step "配置飞书机器人 APPSECRET"
+        $value = Read-ConfigSecret "请输入飞书 APPSECRET（留空跳过）"
+        if ($value) {
+            Set-PlainConfigValue $LocalConfigFile "FEISHU_APP_SECRET" $value
+            Set-PlainConfigValue $LocalConfigFile "FEISHU_ENABLED" "true"
+            Set-PlainConfigValue $LocalConfigFile "FEISHU_SMART_QA_ENABLED" "true"
+            Set-PlainConfigValue $LocalConfigFile "FEISHU_REMEMBER_LAST_CHAT" "true"
+            $changed = $true
+        } else {
+            Write-Warn "未填写飞书 APPSECRET，飞书机器人不会启动。"
+        }
+    }
+
+    if ($changed) {
+        Write-Ok "本机私有配置已写入：$LocalConfigFile"
+    }
+}
+
+function Test-BoardHostValue([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+    return $Value -match "^[A-Za-z0-9][A-Za-z0-9.-]*$"
+}
+
+function Ensure-BoardConfig([hashtable]$FileValues, [string]$EnvFilePath, [string]$BoardIpOverride, [int]$BoardPortOverride) {
+    $effectiveBoardIp = Get-ConfigValue $FileValues "BOARD_IP" $BoardIpOverride ""
+    $boardPortOverrideText = if ($BoardPortOverride -gt 0) { [string]$BoardPortOverride } else { "" }
+    $effectiveBoardPortText = Get-ConfigValue $FileValues "BOARD_PORT" $boardPortOverrideText "8888"
+    $shouldPromptBoardIp = [string]::IsNullOrWhiteSpace($BoardIpOverride)
+    $shouldPromptBoardPort = [string]::IsNullOrWhiteSpace($boardPortOverrideText)
+
+    if ($shouldPromptBoardIp) {
+        Write-Step "配置开发板连接"
+        $prompt = if ($effectiveBoardIp) {
+            "请输入板子 IP（当前：$effectiveBoardIp，直接回车保持不变）"
+        } else {
+            "请输入板子 IP（留空表示不配置开发板）"
+        }
+        $input = Read-Host $prompt
+        if (-not [string]::IsNullOrWhiteSpace($input)) {
+            $effectiveBoardIp = $input.Trim()
+        }
+    }
+
+    if ($shouldPromptBoardPort) {
+        $prompt = if ($effectiveBoardPortText) {
+            "请输入板子端口（当前：$effectiveBoardPortText，直接回车保持不变）"
+        } else {
+            "请输入板子端口（默认 8888）"
+        }
+        $input = Read-Host $prompt
+        if (-not [string]::IsNullOrWhiteSpace($input)) {
+            $effectiveBoardPortText = $input.Trim()
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($effectiveBoardPortText)) {
+        $effectiveBoardPortText = "8888"
+    }
+
+    if ($effectiveBoardIp -and -not (Test-BoardHostValue $effectiveBoardIp)) {
+        Fail "BOARD_IP 或 -BoardIp 含有不支持的字符：$effectiveBoardIp"
+    }
+
+    $effectiveBoardPort = 0
+    if (-not [int]::TryParse($effectiveBoardPortText, [ref]$effectiveBoardPort) -or $effectiveBoardPort -lt 1 -or $effectiveBoardPort -gt 65535) {
+        Fail "BOARD_PORT 或 -BoardPort 必须是 1 到 65535 的整数。"
+    }
+
+    if ($effectiveBoardIp) {
+        Set-PlainConfigValue $EnvFilePath "BOARD_IP" $effectiveBoardIp
+    }
+    Set-PlainConfigValue $EnvFilePath "BOARD_PORT" $effectiveBoardPortText
+
+    return @{
+        Ip = $effectiveBoardIp
+        PortText = $effectiveBoardPortText
+        Port = $effectiveBoardPort
+    }
+}
+
 function Get-ConfigValue([hashtable]$Values, [string]$Name, [string]$Override, [string]$Default) {
     if (-not [string]::IsNullOrWhiteSpace($Override)) {
         return $Override
@@ -131,6 +434,18 @@ function Set-ProcessEnvironment([hashtable]$Values) {
     foreach ($key in $Values.Keys) {
         [Environment]::SetEnvironmentVariable($key, [string]$Values[$key], "Process")
     }
+}
+
+function Update-BoardDeviceAddresses([string]$Mysql, [string]$BoardIp, [int]$BoardPort) {
+    if (-not $BoardIp) {
+        return
+    }
+    if (-not (Test-BoardHostValue $BoardIp)) {
+        Fail "BOARD_IP 或 -BoardIp 含有不支持的字符：$BoardIp"
+    }
+    $safeBoardIp = $BoardIp.Replace("'", "''")
+    $sql = "USE farm; UPDATE device SET ip='$safeBoardIp', port=$BoardPort, online=0 WHERE type <> '摄像头';"
+    Invoke-MySqlText $Mysql $sql
 }
 
 function Find-Mysql([string]$Requested) {
@@ -155,6 +470,210 @@ function Find-Mysql([string]$Requested) {
         }
     }
     Fail "未找到 mysql.exe。请安装 MySQL 客户端并加入 PATH，或使用 -MysqlExe 指定完整路径。"
+}
+
+function Find-Python {
+    $candidatePaths = @()
+    $commands = @(Get-Command python.exe -ErrorAction SilentlyContinue)
+    foreach ($command in $commands) {
+        if ($command.Source -and $command.Source -notlike "*\WindowsApps\*") {
+            $candidatePaths += $command.Source
+        }
+    }
+    $candidatePaths += @(
+        (Join-Path $env:LocalAppData "Programs\Python\Python311\python.exe"),
+        (Join-Path $env:ProgramFiles "Python311\python.exe")
+    )
+
+    foreach ($candidate in ($candidatePaths | Select-Object -Unique)) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    return ""
+}
+
+function Download-PythonInstaller {
+    $toolsDir = Join-Path $Root "tools"
+    $installer = Join-Path $toolsDir $PythonInstallerFileName
+    New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+    if (Test-Path -LiteralPath $installer -PathType Leaf) {
+        Write-Ok "已找到 Python 安装包：$installer"
+        return $installer
+    }
+
+    Write-Host "下载地址：$PythonInstallerUrl"
+    try {
+        Invoke-WebRequest -Uri $PythonInstallerUrl -OutFile $installer -UseBasicParsing
+    } catch {
+        Fail "下载 Python 安装包失败：$($_.Exception.Message)"
+    }
+    Write-Ok "Python 安装包下载完成：$installer"
+    return $installer
+}
+
+function Install-PythonIfMissing {
+    $python = Find-Python
+    if ($python) {
+        return $python
+    }
+
+    Write-Step "下载并安装 Python $PythonInstallerVersion"
+    $installer = Download-PythonInstaller
+    $installArgs = @(
+        "/quiet",
+        "InstallAllUsers=0",
+        "PrependPath=1",
+        "Include_pip=1",
+        "Include_launcher=1",
+        "Include_test=0",
+        "SimpleInstall=1"
+    )
+    $process = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        Fail "Python 安装失败，返回码：$($process.ExitCode)。也可以手动安装：https://www.python.org/downloads/windows/"
+    }
+
+    $python = Find-Python
+    if (-not $python) {
+        Fail "Python 安装完成但未找到 python.exe。请重新打开 PowerShell 后再运行脚本。"
+    }
+    Write-Ok "Python 已安装：$python"
+    return $python
+}
+
+function Invoke-PythonCommand([string]$Python, [string[]]$Arguments, [string]$Description) {
+    $previousPythonIoEncoding = $env:PYTHONIOENCODING
+    $previousPipVersionCheck = $env:PIP_DISABLE_PIP_VERSION_CHECK
+    try {
+        $env:PYTHONIOENCODING = "utf-8"
+        $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
+        & $Python @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            Fail "$Description 失败，返回码：$LASTEXITCODE"
+        }
+    } finally {
+        $env:PYTHONIOENCODING = $previousPythonIoEncoding
+        $env:PIP_DISABLE_PIP_VERSION_CHECK = $previousPipVersionCheck
+    }
+}
+
+function Ensure-DetectionPythonEnvironment {
+    $venvPython = Join-Path $Root ".venv-detection\Scripts\python.exe"
+    $requirements = Resolve-RequiredFile (Join-Path $Root "workers\requirements-detection.txt") "人体识别 Python 依赖清单"
+    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        $systemPython = Install-PythonIfMissing
+        Write-Step "创建人体识别 Python 虚拟环境"
+        Invoke-PythonCommand $systemPython @("-m", "venv", (Join-Path $Root ".venv-detection")) "创建人体识别 Python 虚拟环境"
+    }
+
+    $venvPython = Resolve-RequiredFile $venvPython "人体识别 Python 环境"
+    Write-Step "安装人体识别 Python 依赖"
+    Invoke-PythonCommand $venvPython @("-m", "pip", "install", "--upgrade", "pip") "升级 pip"
+    Invoke-PythonCommand $venvPython @("-m", "pip", "install", "-r", $requirements) "安装人体识别 Python 依赖"
+    Write-Ok "人体识别 Python 环境已就绪：$venvPython"
+    return $venvPython
+}
+
+function Test-LocalDatabaseHost([string]$DatabaseHost) {
+    $normalized = $DatabaseHost.Trim().TrimEnd(".").ToLowerInvariant()
+    if ($normalized -in @("localhost", "127.0.0.1", "::1")) {
+        return $true
+    }
+
+    if ($env:COMPUTERNAME -and $normalized -eq $env:COMPUTERNAME.ToLowerInvariant()) {
+        return $true
+    }
+    return $false
+}
+
+function Get-LocalMySqlServices {
+    return @(Get-Service -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match "(?i)mysql|mariadb" -or $_.DisplayName -match "(?i)mysql|mariadb"
+    })
+}
+
+function Download-MySqlInstaller {
+    $toolsDir = Join-Path $Root "tools"
+    $installer = Join-Path $toolsDir "mysql-installer-web-community-$MySqlInstallerVersion.msi"
+    New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+    if (Test-Path -LiteralPath $installer -PathType Leaf) {
+        $existingHash = (Get-FileHash -LiteralPath $installer -Algorithm MD5).Hash
+        if ($existingHash -eq $MySqlInstallerMd5) {
+            Write-Ok "已找到已校验的 MySQL Installer：$installer"
+            return $installer
+        }
+        Fail "已有 MySQL Installer 文件校验失败：$installer。请删除该文件后重新运行脚本。"
+    }
+
+    Write-Host "下载地址：$MySqlInstallerUrl"
+    try {
+        Invoke-WebRequest -Uri $MySqlInstallerUrl -OutFile $installer -UseBasicParsing
+    } catch {
+        Fail "下载 MySQL Installer 失败：$($_.Exception.Message)"
+    }
+
+    $downloadedHash = (Get-FileHash -LiteralPath $installer -Algorithm MD5).Hash
+    if ($downloadedHash -ne $MySqlInstallerMd5) {
+        Fail "MySQL Installer 下载文件校验失败：$installer。请删除该文件后重新运行脚本。"
+    }
+    Write-Ok "MySQL Installer 下载并校验完成：$installer"
+    return $installer
+}
+
+function Wait-DatabasePort([string]$DatabaseHost, [int]$DatabasePort, [int]$TimeoutSeconds = 30) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $reachable = Test-NetConnection -ComputerName $DatabaseHost -Port $DatabasePort -InformationLevel Quiet -WarningAction SilentlyContinue
+        if ($reachable) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
+function Start-LocalMySqlInstallation([int]$DatabasePort) {
+    $installedServices = @(Get-LocalMySqlServices)
+    if ($installedServices.Count -gt 0) {
+        foreach ($service in $installedServices) {
+            if ($service.Status -in @("Stopped", "Paused")) {
+                Write-Step "启动本机数据库服务：$($service.Name)"
+                try {
+                    Start-Service -Name $service.Name -ErrorAction Stop
+                } catch {
+                    Fail "无法启动本机数据库服务 $($service.Name)：$($_.Exception.Message)。请以管理员身份运行 PowerShell。"
+                }
+            }
+        }
+
+        if (Wait-DatabasePort $env:DB_HOST $DatabasePort 30) {
+            Write-Ok "本机数据库服务已启动并监听：$($env:DB_HOST):$DatabasePort"
+            return
+        }
+
+        $serviceNames = ($installedServices | ForEach-Object { "$($_.Name)($($_.Status))" }) -join "、"
+        Fail "检测到本机已有 MySQL/MariaDB 服务：$serviceNames，但 $($env:DB_HOST):$DatabasePort 仍不可连接。请检查 MySQL 配置文件中的 port 是否为 $DatabasePort，或查看错误日志。脚本不会重复下载安装。"
+    }
+
+    if ($SkipMySqlInstallerDownload) {
+        Fail "未检测到本机 MySQL 服务，且已使用 -SkipMySqlInstallerDownload 禁用自动下载。请按 部署文档.md 的 5.2 节安装 MySQL。"
+    }
+
+    Write-Step "下载 MySQL Installer"
+    $installer = Download-MySqlInstaller
+    Write-Step "启动 MySQL 安装向导"
+    try {
+        Start-Process -FilePath "msiexec.exe" -ArgumentList ('/i "{0}"' -f $installer) -Verb RunAs
+    } catch {
+        Fail "无法启动 MySQL 安装向导：$($_.Exception.Message)"
+    }
+
+    Fail ("未检测到本机 MySQL 服务，已下载并启动 MySQL Installer。" +
+        "`n请在向导中选择 Server only，设置 root 密码并完成配置后，重新运行 .\deploy.ps1。" +
+        "`n安装包位置：$installer")
 }
 
 function Find-Maven([string]$Requested) {
@@ -264,19 +783,59 @@ function Invoke-MySqlText([string]$Client, [string]$Sql) {
     Invoke-MySqlBytes $Client $encoding.GetBytes($Sql)
 }
 
-function Stop-KnownServer {
-    if (-not (Test-Path -LiteralPath $PidFile -PathType Leaf)) {
-        return
+function Get-PidFilePaths {
+    @($PidFile, $LegacyPidFile) | Select-Object -Unique
+}
+
+function Read-KnownPid([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return 0
     }
 
     $knownPid = 0
-    $pidText = (Get-Content -LiteralPath $PidFile -Raw).Trim()
-    if ([int]::TryParse($pidText, [ref]$knownPid) -and $knownPid -gt 0) {
+    if ([int]::TryParse((Get-Content -LiteralPath $Path -Raw).Trim(), [ref]$knownPid) -and $knownPid -gt 0) {
+        return $knownPid
+    }
+    return 0
+}
+
+function Test-ManagedServerProcess([int]$ProcessId) {
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    if (-not $processInfo) {
+        return $false
+    }
+
+    $commandLine = [string]$processInfo.CommandLine
+    return ($commandLine -like "*server.PlainWebServer*" -or $commandLine -like "*server.WebServer*")
+}
+
+function Get-KnownServerPids {
+    foreach ($path in (Get-PidFilePaths)) {
+        $knownPid = Read-KnownPid $path
+        if ($knownPid -gt 0 -and (Test-ManagedServerProcess $knownPid)) {
+            $knownPid
+        }
+    }
+}
+
+function Stop-KnownServer {
+    $stopped = @{}
+    foreach ($path in (Get-PidFilePaths)) {
+        $knownPid = Read-KnownPid $path
+        if ($knownPid -le 0 -or $stopped.ContainsKey($knownPid)) {
+            continue
+        }
+
         $process = Get-Process -Id $knownPid -ErrorAction SilentlyContinue
         if ($process) {
-            Write-Host "停止上次由 deploy.ps1 启动的服务：PID=$knownPid"
-            Stop-Process -Id $knownPid -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 800
+            if (Test-ManagedServerProcess $knownPid) {
+                Write-Host "停止上次由 deploy.ps1 启动的服务：PID=$knownPid"
+                Stop-Process -Id $knownPid -Force -ErrorAction SilentlyContinue
+                $stopped[$knownPid] = $true
+                Start-Sleep -Milliseconds 800
+            } elseif ($path -eq $PidFile) {
+                Write-Warn "PID 文件指向的进程不是本项目服务，已跳过：PID=$knownPid"
+            }
         }
     }
     Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
@@ -288,11 +847,8 @@ function Test-PortAvailable([int]$CheckPort) {
         return
     }
 
-    $knownPid = 0
-    if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
-        [int]::TryParse((Get-Content -LiteralPath $PidFile -Raw).Trim(), [ref]$knownPid) | Out-Null
-    }
-    $other = @($listeners | Where-Object { $_.OwningProcess -ne $knownPid })
+    $knownPids = @(Get-KnownServerPids)
+    $other = @($listeners | Where-Object { $knownPids -notcontains $_.OwningProcess })
     if ($other.Count -gt 0) {
         $owner = $other | Select-Object -First 1 -ExpandProperty OwningProcess
         $ownerName = (Get-Process -Id $owner -ErrorAction SilentlyContinue).ProcessName
@@ -315,6 +871,25 @@ function Wait-Http([string]$Url, [int]$TimeoutSeconds) {
     return $null
 }
 
+function Wait-BoardRefresh([string]$BaseUrl, [int]$TimeoutSeconds) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest -Uri "$BaseUrl/api/board/refresh" -Method Post -UseBasicParsing -TimeoutSec 8
+            if ($response.StatusCode -eq 200) {
+                $json = $response.Content | ConvertFrom-Json
+                if ($json.code -eq 0) {
+                    return $true
+                }
+            }
+        } catch {
+            Start-Sleep -Seconds 2
+        }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
 function Start-PlatformServer([string]$Java, [string]$Classpath, [int]$ListenPort) {
     $outLog = Join-Path $Root "server.run.out.log"
     $errLog = Join-Path $Root "server.run.err.log"
@@ -334,6 +909,7 @@ function Start-PlatformServer([string]$Java, [string]$Classpath, [int]$ListenPor
         -WindowStyle Hidden `
         -PassThru
 
+    New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
     Set-Content -LiteralPath $PidFile -Value $process.Id -Encoding ASCII
     $baseUrl = "http://localhost:$ListenPort"
     $homepageResponse = Wait-Http "$baseUrl/" 45
@@ -373,26 +949,24 @@ try {
     $envFile = Join-Path $Root ".env.local"
     $fileValues = Read-EnvFile $envFile
     Set-ProcessEnvironment $fileValues
+    Ensure-OptionalApiConfig $fileValues
 
     $dbPortOverride = if ($DatabasePort -gt 0) { [string]$DatabasePort } else { "" }
-    $boardPortOverride = if ($BoardPort -gt 0) { [string]$BoardPort } else { "" }
     $env:DB_HOST = Get-ConfigValue $fileValues "DB_HOST" $DatabaseHost "127.0.0.1"
     $env:DB_PORT = Get-ConfigValue $fileValues "DB_PORT" $dbPortOverride "3306"
     $env:DB_NAME = Get-ConfigValue $fileValues "DB_NAME" $DatabaseName "farm"
-    $env:DB_USER = Get-ConfigValue $fileValues "DB_USER" $DatabaseUser "root"
+    $env:DB_USER = Get-ConfigValue $fileValues "DB_USER" $DatabaseUser "newuser"
     $env:DB_PASS = Get-ConfigValue $fileValues "DB_PASS" $DatabasePassword "123456"
     $env:DB_ADMIN_USER = Get-ConfigValue $fileValues "DB_ADMIN_USER" $DatabaseAdminUser $env:DB_USER
     $env:DB_ADMIN_PASS = Get-ConfigValue $fileValues "DB_ADMIN_PASS" $DatabaseAdminPassword $env:DB_PASS
-    $effectiveBoardIp = Get-ConfigValue $fileValues "BOARD_IP" $BoardIp ""
-    $effectiveBoardPortText = Get-ConfigValue $fileValues "BOARD_PORT" $boardPortOverride "8888"
+    $boardConfig = Ensure-BoardConfig $fileValues $envFile $BoardIp $BoardPort
+    $effectiveBoardIp = [string]$boardConfig.Ip
+    $effectiveBoardPortText = [string]$boardConfig.PortText
+    $effectiveBoardPort = [int]$boardConfig.Port
 
     $effectiveDbPort = 0
-    $effectiveBoardPort = 0
     if (-not [int]::TryParse($env:DB_PORT, [ref]$effectiveDbPort) -or $effectiveDbPort -lt 1 -or $effectiveDbPort -gt 65535) {
         Fail "DB_PORT 必须是 1 到 65535 的整数。"
-    }
-    if (-not [int]::TryParse($effectiveBoardPortText, [ref]$effectiveBoardPort) -or $effectiveBoardPort -lt 1 -or $effectiveBoardPort -gt 65535) {
-        Fail "BOARD_PORT 或 -BoardPort 必须是 1 到 65535 的整数。"
     }
     $env:BOARD_PORT = [string]$effectiveBoardPort
     if ($effectiveBoardIp) { $env:BOARD_IP = $effectiveBoardIp }
@@ -401,7 +975,7 @@ try {
     if ($effectiveBoardIp) {
         Write-Host "开发板：$effectiveBoardIp`:$effectiveBoardPort"
     } else {
-        Write-Warn "未配置 BOARD_IP；数据库初始化后不会自动修改 mysql.sql 中的设备地址。"
+        Write-Warn "未配置板子 IP；开发板设备不会自动连通。"
     }
 
     Write-Step "检查项目文件"
@@ -421,7 +995,7 @@ try {
     $env:JAVA_HOME = (Resolve-Path -LiteralPath $selectedJavaHome).Path
     $env:Path = "$(Split-Path $java -Parent);$env:Path"
     Write-Host "Java：$java"
-    & $java -version 2>&1 | Select-Object -First 1
+    Write-Host (Get-JavaVersion $java)
 
     $maven = Find-Maven $MavenHome
     Write-Host "Maven：$maven"
@@ -430,7 +1004,14 @@ try {
         Write-Step "检查数据库 TCP 连通性"
         $dbTest = Test-NetConnection -ComputerName $env:DB_HOST -Port $effectiveDbPort -InformationLevel Quiet
         if (-not $dbTest) {
-            Fail "无法连接 MySQL：$($env:DB_HOST):$effectiveDbPort。请检查数据库授权、网络和防火墙。"
+            if (Test-LocalDatabaseHost $env:DB_HOST) {
+                Start-LocalMySqlInstallation $effectiveDbPort
+                $dbTest = Test-NetConnection -ComputerName $env:DB_HOST -Port $effectiveDbPort -InformationLevel Quiet
+            }
+            if (-not $dbTest) {
+                Fail ("无法连接 MySQL：$($env:DB_HOST):$effectiveDbPort。请检查 .env.local 中的 DB_HOST/DB_PORT、MySQL 服务状态、授权、网络和防火墙。" +
+                    "`n如果只是验证前端和 Java 服务启动链路，可临时使用：.\deploy.ps1 -SkipDatabaseCheck")
+            }
         }
         Write-Ok "数据库 TCP 端口可达。"
     }
@@ -453,15 +1034,15 @@ try {
         Write-Ok "mysql.sql 导入完成。"
 
         if ($effectiveBoardIp) {
-            if ($effectiveBoardIp -notmatch "^[A-Za-z0-9][A-Za-z0-9.-]*$") {
-                Fail "BOARD_IP 或 -BoardIp 含有不支持的字符：$effectiveBoardIp"
-            }
             Write-Step "更新数据库中的开发板地址"
-            $safeBoardIp = $effectiveBoardIp.Replace("'", "''")
-            $sql = "USE farm; UPDATE device SET ip='$safeBoardIp', port=$effectiveBoardPort, online=0 WHERE type <> '摄像头';"
-            Invoke-MySqlText $mysql $sql
+            Update-BoardDeviceAddresses $mysql $effectiveBoardIp $effectiveBoardPort
             Write-Ok "已将非摄像头设备指向 $effectiveBoardIp`:$effectiveBoardPort。"
         }
+    } elseif ($effectiveBoardIp) {
+        Write-Step "更新数据库中的开发板地址"
+        $mysql = Find-Mysql $MysqlExe
+        Update-BoardDeviceAddresses $mysql $effectiveBoardIp $effectiveBoardPort
+        Write-Ok "已将非摄像头设备指向 $effectiveBoardIp`:$effectiveBoardPort。"
     }
 
     Write-Step "构建 Java 后端"
@@ -509,6 +1090,21 @@ try {
         Write-Ok "/api/plots 返回 code=0。"
     }
 
+    if ($effectiveBoardIp) {
+        Write-Step "连接开发板"
+        $boardTcpOk = Test-NetConnection -ComputerName $effectiveBoardIp -Port $effectiveBoardPort -InformationLevel Quiet -WarningAction SilentlyContinue
+        if ($boardTcpOk) {
+            Write-Ok "开发板 TCP 端口可达：$effectiveBoardIp`:$effectiveBoardPort"
+            if (Wait-BoardRefresh $baseUrl 20) {
+                Write-Ok "服务端已触发开发板刷新，开始通过长连接采集数据。"
+            } else {
+                Write-Warn "开发板端口可达，但暂时没有拿到有效读数。请确认开发板固件已运行，且当前没有其他 TCP 客户端占用连接。"
+            }
+        } else {
+            Write-Warn "无法连接开发板：$effectiveBoardIp`:$effectiveBoardPort。请确认板子已上电、已连接 Wi-Fi、端口监听正常，并且电脑和板子在同一网络。"
+        }
+    }
+
     if ($OpenFirewall) {
         Write-Step "配置 Windows 防火墙"
         Add-FirewallRule $Port
@@ -517,7 +1113,7 @@ try {
     if ($StartDetectionWorker) {
         Write-Step "启动 YOLO 人体识别 Worker"
         $workerScript = Resolve-RequiredFile (Join-Path $Root "workers\start_human_detection.ps1") "人体识别启动脚本"
-        Resolve-RequiredFile (Join-Path $Root ".venv-detection\Scripts\python.exe") "人体识别 Python 环境" | Out-Null
+        Ensure-DetectionPythonEnvironment | Out-Null
         Resolve-RequiredFile (Join-Path $Root "models\yolov8n.pt") "YOLO 模型" | Out-Null
         $workerOut = Join-Path $Root "worker.run.out.log"
         $workerErr = Join-Path $Root "worker.run.err.log"
@@ -538,6 +1134,10 @@ try {
     Write-Host "服务 PID：$($serverProcess.Id)"
     Write-Host "标准输出：$(Join-Path $Root "server.run.out.log")"
     Write-Host "错误输出：$(Join-Path $Root "server.run.err.log")"
+} catch {
+    Write-Host ""
+    Write-Host "[ERROR] 部署失败：$($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 } finally {
     Pop-Location
 }

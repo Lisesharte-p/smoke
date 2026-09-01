@@ -7,6 +7,11 @@ SMART_QA_API_KEY=replace-with-deepseek-api-key
 SMART_QA_API_URL=https://api.deepseek.com/chat/completions
 SMART_QA_MODEL=deepseek-chat
 
+# 和风天气
+QWEATHER_API_KEY=replace-with-qweather-api-key
+QWEATHER_LOCATION=106.565952,29.642614
+QWEATHER_HOST=https://ma5rk8cjh3.re.qweatherapi.com
+
 # 飞书机器人长连接
 FEISHU_ENABLED=true
 FEISHU_APP_ID=replace-with-feishu-app-id
