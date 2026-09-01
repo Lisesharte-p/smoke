@@ -14,7 +14,7 @@ import java.sql.Statement;
  *   DB_PORT 端口（默认 3306）
  *   DB_NAME 库名（默认 farm）
  *   DB_USER 用户名（默认 root）
- *   DB_PASS 密码（默认 123456）
+ *   DB_PASS 密码（默认空密码；建议通过 deploy.ps1 输入或环境变量提供）
  * 例：默认连接本机 MySQL；需要覆盖时可设置 DB_HOST、DB_USER 等环境变量。
  */
 public class DBUtil {
@@ -23,8 +23,8 @@ public class DBUtil {
     public static final String HOST = env("DB_HOST", "127.0.0.1");
     public static final int    PORT = Integer.parseInt(env("DB_PORT", "3306"));
     public static final String DB   = env("DB_NAME", "farm");
-    public static final String USER = env("DB_USER", "newuser");
-    public static final String PASS = env("DB_PASS", "123456");
+    public static final String USER = env("DB_USER", "root");
+    public static final String PASS = env("DB_PASS", "");
     // =========================================================================
 
     private static final String URL_TEMPLATE =

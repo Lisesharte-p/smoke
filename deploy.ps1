@@ -187,32 +187,6 @@ function Find-ExistingJavaHome([string]$Requested) {
     if (Test-JavaHomeRuntime $bundled) {
         return (Resolve-Path -LiteralPath $bundled).Path
     }
-
-    $downloadedRoot = Join-Path $Root "tools\jdk-download\extracted"
-    $downloadedJavaFiles = @(Get-ChildItem -LiteralPath $downloadedRoot -Filter "java.exe" -File -Recurse -ErrorAction SilentlyContinue)
-    foreach ($javaFile in $downloadedJavaFiles) {
-        $downloadedHome = Get-JavaHomeFromExecutable $javaFile.FullName
-        if ($downloadedHome) {
-            return $downloadedHome
-        }
-    }
-
-    if ($env:JAVA_HOME) {
-        if (Test-JavaHomeRuntime $env:JAVA_HOME) {
-            return (Resolve-Path -LiteralPath $env:JAVA_HOME).Path
-        }
-        Write-Warn "JAVA_HOME 指向的 JDK 无法启动 Java：$($env:JAVA_HOME)，将继续查找系统 PATH。"
-    }
-
-    $javaCommand = Get-Command java.exe -ErrorAction SilentlyContinue
-    $javacCommand = Get-Command javac.exe -ErrorAction SilentlyContinue
-    if ($javaCommand -and $javacCommand) {
-        $pathJavaHome = Get-JavaHomeFromExecutable $javaCommand.Source
-        if ($pathJavaHome -and (Test-Path -LiteralPath (Join-Path $pathJavaHome "bin\javac.exe") -PathType Leaf)) {
-            return $pathJavaHome
-        }
-    }
-
     return ""
 }
 
@@ -227,6 +201,7 @@ function Ensure-JavaHome([string]$Requested) {
     Write-Host $JdkDownloadUrl -ForegroundColor Yellow
     Write-Host "下载并解压后，推荐放到项目目录：$(Join-Path $Root 'jdk-17.0.2')" -ForegroundColor Yellow
     Write-Host "或者使用参数指定 JDK 根目录：.\deploy.ps1 -JavaHome `"C:\Java\jdk-17`"" -ForegroundColor Yellow
+    Write-Host "为避免误用其他电脑上的错误 JAVA_HOME，脚本默认不会自动使用系统 Java。" -ForegroundColor Yellow
     Fail "Java 环境不可用。脚本不会自动下载 JDK。"
 }
 
@@ -1095,10 +1070,20 @@ try {
     $env:DB_HOST = Get-ConfigValue $fileValues "DB_HOST" $DatabaseHost "127.0.0.1"
     $env:DB_PORT = Get-ConfigValue $fileValues "DB_PORT" $dbPortOverride "3306"
     $env:DB_NAME = Get-ConfigValue $fileValues "DB_NAME" $DatabaseName "farm"
-    $env:DB_USER = Get-ConfigValue $fileValues "DB_USER" $DatabaseUser "newuser"
-    $env:DB_PASS = Get-ConfigValue $fileValues "DB_PASS" $DatabasePassword "123456"
+    $env:DB_USER = Get-ConfigValue $fileValues "DB_USER" $DatabaseUser "root"
+    $env:DB_PASS = Get-ConfigValue $fileValues "DB_PASS" $DatabasePassword ""
+    if (Test-PlaceholderConfigValue $env:DB_PASS) {
+        Write-Step "配置本机 MySQL 密码"
+        $env:DB_PASS = Read-ConfigSecret "请输入本机 MySQL $($env:DB_USER) 密码（留空表示无密码）"
+    }
     $env:DB_ADMIN_USER = Get-ConfigValue $fileValues "DB_ADMIN_USER" $DatabaseAdminUser $env:DB_USER
     $env:DB_ADMIN_PASS = Get-ConfigValue $fileValues "DB_ADMIN_PASS" $DatabaseAdminPassword $env:DB_PASS
+    if (Test-PlaceholderConfigValue $env:DB_ADMIN_PASS) {
+        $env:DB_ADMIN_PASS = $env:DB_PASS
+    }
+    if ($fileValues.ContainsKey("DB_USER") -and $env:DB_USER -ne "root" -and [string]::IsNullOrWhiteSpace($DatabaseUser)) {
+        Write-Warn ".env.local 中配置了 DB_USER=$($env:DB_USER)，脚本将使用该账号；如需默认 root，请删除或修改 .env.local 中的 DB_USER/DB_PASS。"
+    }
     $boardConfig = Ensure-BoardConfig $fileValues $envFile $BoardIp $BoardPort
     $effectiveBoardIp = [string]$boardConfig.Ip
     $effectiveBoardPortText = [string]$boardConfig.PortText
