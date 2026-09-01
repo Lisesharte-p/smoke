@@ -45,6 +45,7 @@ param(
     [switch]$SkipDatabaseCheck,
     [switch]$SkipMySqlInstallerDownload,
     [switch]$SkipOptionalConfigPrompt,
+    [switch]$NoPauseOnError,
     [switch]$OpenFirewall,
     [switch]$Stop,
 
@@ -77,6 +78,7 @@ $MySqlInstallerMd5 = "210420AEF5B5006AB54BB1DAB4183768"
 $PythonInstallerVersion = "3.11.9"
 $PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonInstallerVersion/python-$PythonInstallerVersion-amd64.exe"
 $PythonInstallerFileName = "python-$PythonInstallerVersion-amd64.exe"
+$JdkDownloadUrl = "https://adoptium.net/temurin/releases/?version=17&os=windows&arch=x64"
 $LocalConfigFile = Join-Path $Root "config\feishu.local.properties"
 
 function Write-Step([string]$Message) {
@@ -134,6 +136,98 @@ function Get-JavaVersion([string]$Java) {
         Fail "Java 版本检查未返回任何输出：$Java"
     }
     return ($versionOutput -split "[`r`n]+" | Select-Object -First 1)
+}
+
+function Test-JavaHome([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return $false
+    }
+    return (
+        (Test-Path -LiteralPath (Join-Path $Candidate "bin\java.exe") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $Candidate "bin\javac.exe") -PathType Leaf)
+    )
+}
+
+function Test-JavaHomeRuntime([string]$Candidate) {
+    if (-not (Test-JavaHome $Candidate)) {
+        return $false
+    }
+    try {
+        Get-JavaVersion (Join-Path $Candidate "bin\java.exe") | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Get-JavaHomeFromExecutable([string]$Executable) {
+    if ([string]::IsNullOrWhiteSpace($Executable) -or -not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        return ""
+    }
+    $binDir = Split-Path -Parent (Resolve-Path -LiteralPath $Executable).Path
+    $candidate = Split-Path -Parent $binDir
+    if (Test-JavaHomeRuntime $candidate) {
+        return (Resolve-Path -LiteralPath $candidate).Path
+    }
+    return ""
+}
+
+function Find-ExistingJavaHome([string]$Requested) {
+    if ($Requested) {
+        if (-not (Test-JavaHome $Requested)) {
+            Fail "指定的 JavaHome 无效：$Requested。目录中必须同时存在 bin\java.exe 和 bin\javac.exe。"
+        }
+        if (-not (Test-JavaHomeRuntime $Requested)) {
+            Fail "指定的 JavaHome 无法启动 Java：$Requested。请重新安装完整 JDK，确认 lib\modules 文件存在，或改用项目自带 JDK 17。"
+        }
+        return (Resolve-Path -LiteralPath $Requested).Path
+    }
+
+    $bundled = Join-Path $Root "jdk-17.0.2"
+    if (Test-JavaHomeRuntime $bundled) {
+        return (Resolve-Path -LiteralPath $bundled).Path
+    }
+
+    $downloadedRoot = Join-Path $Root "tools\jdk-download\extracted"
+    $downloadedJavaFiles = @(Get-ChildItem -LiteralPath $downloadedRoot -Filter "java.exe" -File -Recurse -ErrorAction SilentlyContinue)
+    foreach ($javaFile in $downloadedJavaFiles) {
+        $downloadedHome = Get-JavaHomeFromExecutable $javaFile.FullName
+        if ($downloadedHome) {
+            return $downloadedHome
+        }
+    }
+
+    if ($env:JAVA_HOME) {
+        if (Test-JavaHomeRuntime $env:JAVA_HOME) {
+            return (Resolve-Path -LiteralPath $env:JAVA_HOME).Path
+        }
+        Write-Warn "JAVA_HOME 指向的 JDK 无法启动 Java：$($env:JAVA_HOME)，将继续查找系统 PATH。"
+    }
+
+    $javaCommand = Get-Command java.exe -ErrorAction SilentlyContinue
+    $javacCommand = Get-Command javac.exe -ErrorAction SilentlyContinue
+    if ($javaCommand -and $javacCommand) {
+        $pathJavaHome = Get-JavaHomeFromExecutable $javaCommand.Source
+        if ($pathJavaHome -and (Test-Path -LiteralPath (Join-Path $pathJavaHome "bin\javac.exe") -PathType Leaf)) {
+            return $pathJavaHome
+        }
+    }
+
+    return ""
+}
+
+function Ensure-JavaHome([string]$Requested) {
+    $existing = Find-ExistingJavaHome $Requested
+    if ($existing) {
+        return $existing
+    }
+    Write-Host ""
+    Write-Host "[ERROR] 未找到能够正常启动的 JDK 17。" -ForegroundColor Red
+    Write-Host "请下载 Windows x64 JDK 17：" -ForegroundColor Yellow
+    Write-Host $JdkDownloadUrl -ForegroundColor Yellow
+    Write-Host "下载并解压后，推荐放到项目目录：$(Join-Path $Root 'jdk-17.0.2')" -ForegroundColor Yellow
+    Write-Host "或者使用参数指定 JDK 根目录：.\deploy.ps1 -JavaHome `"C:\Java\jdk-17`"" -ForegroundColor Yellow
+    Fail "Java 环境不可用。脚本不会自动下载 JDK。"
 }
 
 function Read-EnvFile([string]$Path) {
@@ -703,15 +797,61 @@ function Find-Maven([string]$Requested) {
         Remove-Item -LiteralPath $mavenZip -Force
     }
     if (-not (Test-Path -LiteralPath $mavenZip -PathType Leaf)) {
-        Invoke-WebRequest `
-            -Uri "https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip" `
-            -OutFile $mavenZip `
-            -UseBasicParsing
+        $mavenUrl = "https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip"
+        Write-Host "Maven 下载地址：$mavenUrl"
+        Write-Host "[INFO] 正在下载 Maven，下载期间请不要关闭窗口..."
+        try {
+            Download-FileWithProgress $mavenUrl $mavenZip "下载 Maven 3.9.9"
+        } catch {
+            Fail "下载 Maven 失败：$($_.Exception.Message)。请检查网络，或手动下载后放到：$mavenZip"
+        }
     }
     if (-not (Test-Path -LiteralPath $mavenRoot -PathType Container)) {
+        Write-Host "[INFO] 正在解压 Maven..."
         Expand-Archive -LiteralPath $mavenZip -DestinationPath $toolsDir -Force
     }
     return Resolve-RequiredFile (Join-Path $mavenRoot "bin\mvn.cmd") "Maven"
+}
+
+function Download-FileWithProgress([string]$Uri, [string]$Destination, [string]$Activity) {
+    $client = New-Object System.Net.WebClient
+    $state = @{ Error = $null; LastPrintedPercent = -1 }
+    $progressHandler = [System.Net.DownloadProgressChangedEventHandler]{
+        param($sender, $eventArgs)
+        $percent = [int]$eventArgs.ProgressPercentage
+        $status = "$percent%"
+        if ($eventArgs.TotalBytesToReceive -gt 0) {
+            $receivedMb = [math]::Round($eventArgs.BytesReceived / 1MB, 1)
+            $totalMb = [math]::Round($eventArgs.TotalBytesToReceive / 1MB, 1)
+            $status = "$status（$receivedMb / $totalMb MB）"
+        }
+        Write-Progress -Activity $Activity -Status $status -PercentComplete $percent
+        if ($percent -eq 100 -or $percent -ge ($state.LastPrintedPercent + 5)) {
+            Write-Host "[DOWNLOAD] $Activity：$status"
+            $state.LastPrintedPercent = $percent
+        }
+    }
+    $completedHandler = [System.ComponentModel.AsyncCompletedEventHandler]{
+        param($sender, $eventArgs)
+        $state.Error = $eventArgs.Error
+    }
+
+    try {
+        $client.add_DownloadProgressChanged($progressHandler)
+        $client.add_DownloadFileCompleted($completedHandler)
+        $client.DownloadFileAsync([Uri]$Uri, $Destination)
+        while ($client.IsBusy) {
+            Start-Sleep -Milliseconds 250
+        }
+        Write-Progress -Activity $Activity -Completed
+        if ($state.Error) {
+            throw $state.Error
+        }
+    } finally {
+        $client.remove_DownloadProgressChanged($progressHandler)
+        $client.remove_DownloadFileCompleted($completedHandler)
+        $client.Dispose()
+    }
 }
 
 function New-MySqlDefaultsFile {
@@ -985,11 +1125,7 @@ try {
     Resolve-RequiredFile (Join-Path $Root "src\server\PlainWebServer.java") "Java 服务入口" | Out-Null
     Resolve-RequiredFile (Join-Path $Root "lib\mysql-connector-j-8.0.33.jar") "MySQL JDBC 驱动" | Out-Null
 
-    $bundledJavaHome = Join-Path $Root "jdk-17.0.2"
-    $selectedJavaHome = if ($JavaHome) { $JavaHome } elseif (Test-Path -LiteralPath (Join-Path $bundledJavaHome "bin\java.exe")) { $bundledJavaHome } elseif ($env:JAVA_HOME) { $env:JAVA_HOME } else { "" }
-    if (-not $selectedJavaHome) {
-        Fail "未找到项目 JDK 17。请保留项目中的 jdk-17.0.2，或使用 -JavaHome 指定 JDK 17 目录。"
-    }
+    $selectedJavaHome = Ensure-JavaHome $JavaHome
     $java = Resolve-RequiredFile (Join-Path $selectedJavaHome "bin\java.exe") "Java 可执行文件"
     $javac = Resolve-RequiredFile (Join-Path $selectedJavaHome "bin\javac.exe") "Java 编译器"
     $env:JAVA_HOME = (Resolve-Path -LiteralPath $selectedJavaHome).Path
@@ -1137,6 +1273,25 @@ try {
 } catch {
     Write-Host ""
     Write-Host "[ERROR] 部署失败：$($_.Exception.Message)" -ForegroundColor Red
+    $deployErrorLog = Join-Path $Root "deploy.error.log"
+    try {
+        $errorText = @(
+            "时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            "错误：$($_.Exception.Message)"
+            "详细信息：$($_ | Out-String)"
+        ) -join [Environment]::NewLine
+        [System.IO.File]::WriteAllText($deployErrorLog, $errorText, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "错误详情已保存：$deployErrorLog" -ForegroundColor Yellow
+    } catch {
+        Write-Host "[WARN] 无法写入错误日志：$($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    if (-not $NoPauseOnError -and $Host.Name -eq "ConsoleHost" -and -not $env:CI) {
+        try {
+            Read-Host "按 Enter 键关闭窗口"
+        } catch {
+            # 标准输入不可用时直接结束，避免脚本被卡住。
+        }
+    }
     exit 1
 } finally {
     Pop-Location
