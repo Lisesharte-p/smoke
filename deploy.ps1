@@ -4,7 +4,7 @@
 
  .DESCRIPTION
    脚本使用项目 JDK 17，自动准备 Maven，检查 MySQL 网络，
-   可选导入完整数据库，启动 server.PlainWebServer，并检查首页和数据库 API。
+   可选导入完整数据库，启动 server.WebServer，并检查首页和数据库 API。
 
  .EXAMPLE
    .\deploy.ps1 -InitializeDatabase -Force -BoardIp 10.94.204.29 -BoardPort 8888
@@ -24,7 +24,7 @@
   读取项目根目录 .env.local
   使用项目 JDK 17 编译 Java 源码
   检查数据库网络
-  启动 PlainWebServer
+  启动 WebServer
   验证首页和数据库 API
 
 首次部署：
@@ -1012,7 +1012,7 @@ function Start-PlatformServer([string]$Java, [string]$Classpath, [int]$ListenPor
     $arguments = @(
         "-Djava.net.preferIPv4Stack=true",
         "-cp", $quotedClasspath,
-        "server.PlainWebServer",
+        "server.WebServer",
         [string]$ListenPort
     )
     $process = Start-Process `
@@ -1107,7 +1107,7 @@ try {
     Resolve-RequiredFile (Join-Path $Root "pom.xml") "pom.xml" | Out-Null
     Resolve-RequiredFile (Join-Path $Root "mysql.sql") "mysql.sql" | Out-Null
     Resolve-RequiredFile (Join-Path $Root "frontend\index.html") "前端首页" | Out-Null
-    Resolve-RequiredFile (Join-Path $Root "src\server\PlainWebServer.java") "Java 服务入口" | Out-Null
+    Resolve-RequiredFile (Join-Path $Root "src\server\WebServer.java") "Java 服务入口" | Out-Null
     Resolve-RequiredFile (Join-Path $Root "lib\mysql-connector-j-8.0.33.jar") "MySQL JDBC 驱动" | Out-Null
 
     $selectedJavaHome = Ensure-JavaHome $JavaHome
@@ -1177,7 +1177,7 @@ try {
         Fail "生成运行时 classpath 失败，返回码：$LASTEXITCODE"
     }
 
-    Resolve-RequiredFile (Join-Path $Root "target\classes\server\PlainWebServer.class") "编译后的服务类" | Out-Null
+    Resolve-RequiredFile (Join-Path $Root "target\classes\server\WebServer.class") "编译后的服务类" | Out-Null
     $classpathFile = Resolve-RequiredFile (Join-Path $Root "target\classpath.txt") "运行时 classpath 文件"
     $classpath = (Resolve-Path (Join-Path $Root "target\classes")).Path + ";" + (Get-Content -LiteralPath $classpathFile -Raw).Trim()
     Write-Ok "Java 后端构建完成。"

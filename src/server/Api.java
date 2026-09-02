@@ -2799,6 +2799,7 @@ public class Api {
 
         // 所有智能问答都调用大模型；RAG 只作为参考资料，不再走本地固定回答分支。
         String kbContext = Rag.buildContext(question, RAG_TOP_K);
+        System.out.println(kbContext);
         String answer;
         try {
             answer = deepseekChat(valid, kbContext);
